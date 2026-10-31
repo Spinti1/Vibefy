@@ -11,7 +11,7 @@ window.vibefyEmbedded = (() => {
     get duration(){return player?.getDuration?.()||0;},
     pause(){player?.pauseVideo?.();},
     async play(){await ready;player?.playVideo?.();},
-    async load(id){
+    async load(id, paused=false, position=0){
       const ticket=++generation;api.active=true;
       if(!ready)ready=new Promise((resolve,reject)=>{
         const timeout=setTimeout(()=>reject(new Error('The official player could not load.')),15000);
@@ -24,7 +24,7 @@ window.vibefyEmbedded = (() => {
         };
         const script=document.createElement('script');script.src='https://www.youtube.com/iframe_api';script.onerror=()=>{clearTimeout(timeout);reject(new Error('The official player is unavailable.'));};document.head.append(script);
       });
-      await ready;if(ticket===generation)player.loadVideoById(id);
+      await ready;if(ticket===generation){const item={videoId:id,startSeconds:Math.max(0,position)};if(paused)player.cueVideoById(item);else player.loadVideoById(item);}
     }
   };
   // Do not emulate background YouTube playback when its visible player is closed.

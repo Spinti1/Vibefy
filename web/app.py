@@ -113,7 +113,7 @@ async def worker(work):
 def capabilities():
     return {"version": "0.4.15", "beta": True, "search": True, "playback": "official-embedded-player" if os.getenv("VERCEL") else "source-dependent",
             "nativeOnly": ["Spotify account library", "local Whisper Auto Sync", "LAN Listen Together", "native desktop mods", "classic mini window"],
-            "storage": "browser-local", "analytics": False}
+            "storage": "browser-local", "analytics": False, "jam": "browser WebRTC via PeerJS; separate from desktop LAN"}
 
 @app.get("/api/search")
 async def search(q: str = Query(min_length=1, max_length=160)):
