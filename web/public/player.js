@@ -85,7 +85,7 @@ $('restore-library').onchange=async e=>{const file=e.target.files[0];if(!file)re
 $('clear-library').onclick=()=>{if(!confirm('Clear saved songs and imported collections from this browser? Export a backup first.'))return;state.likes=[];state.collections=[];selectedCollection=null;persist();renderCollections();renderCollection();updateNow();toast('Library cleared');};$('clear-cache').onclick=async()=>{if('caches'in window){for(const key of await caches.keys())if(key.startsWith('vibefy-shell-'))await caches.delete(key);}toast('App cache cleared. Your library is preserved.');};
 renderCollections();renderCollection();if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
 
-embedded.onUpdate=()=>{if(embedded.active){$('duration').textContent=time(media.duration);$('seek').max=media.duration||100;if(!embedded.paused)$('playback-status').textContent='';updatePlay();updatePosition();}};
+embedded.onUpdate=()=>{if(embedded.active){$('duration').textContent=time(media.duration);$('seek').max=media.duration||100;if(media.duration>0)$('playback-status').textContent=embedded.paused?'Paused':'';updatePlay();updatePosition();}};
 embedded.onEnded=()=>advance();embedded.onError=playbackFailed;
 $('now-dialog').addEventListener('close',()=>{if(embedded.active)embedded.pause();});
 for(const name of ['lyrics','queue','equalizer','jam'])$(name+'-dialog').addEventListener('close',()=>{if(embedded.active)openDialog('now');});
