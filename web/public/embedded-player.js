@@ -24,7 +24,7 @@ window.vibefyEmbedded = (() => {
         };
         const script=document.createElement('script');script.src='https://www.youtube.com/iframe_api';script.onerror=()=>{clearTimeout(timeout);reject(new Error('The official player is unavailable.'));};document.head.append(script);
       });
-      await ready;if(ticket===generation){const item={videoId:id,startSeconds:Math.max(0,position)};if(paused)player.cueVideoById(item);else player.loadVideoById(item);}
+      await ready;if(ticket===generation){const item={videoId:id,startSeconds:Math.max(0,position)};if(paused||!document.getElementById('now-dialog').open||document.hidden)player.cueVideoById(item);else player.loadVideoById(item);}
     }
   };
   // Do not emulate background YouTube playback when its visible player is closed.
