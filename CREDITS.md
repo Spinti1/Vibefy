@@ -44,3 +44,7 @@ The website uses **DM Sans** (Colophon Foundry and contributors) and **Space Gro
 [THIRD_PARTY_LICENSES.txt](THIRD_PARTY_LICENSES.txt) collects the source checkout's dependency and bundled asset notices. It is not a claim that every dependency is used on every target. Dependency versions and source revisions are pinned in Cargo.lock and the web requirements lockfile. External service trademarks, cover art and lyrics belong to their respective owners.
 
 Vibefy is not affiliated with, endorsed by, or an official client of Spotify, YouTube, Google, SoundCloud or Spicetify. Only access content you are permitted to use; availability remains subject to each provider.
+
+## Browser Listen Together
+
+The web implementation uses [PeerJS 1.5.5](https://github.com/peers/peerjs) under MIT, with the original notice retained in web/public/vendor/peerjs-LICENSE.txt. PeerJS Cloud provides signalling and Google STUN assists direct encrypted WebRTC connections. This is a Vibefy web implementation, separate from the native LAN protocol. Audio is played independently by each participant.
