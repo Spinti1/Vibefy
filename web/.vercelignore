@@ -1,0 +1,7 @@
+.venv
+.deps
+__pycache__
+tests
+*.pyc
+.env*
+README.md

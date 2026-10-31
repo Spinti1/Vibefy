@@ -1,0 +1,53 @@
+name: Verify Vibefy release package
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag, for example v0.4.15'
+        required: true
+      setup_url:
+        description: 'HTTPS URL of an already built Vibefy Setup. No automatic unreviewed binary builds.'
+        required: true
+      sha256:
+        description: 'Expected SHA-256 from the validated build'
+        required: true
+      bytes:
+        description: 'Expected exact byte count'
+        required: true
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Validate package inputs
+        env:
+          TAG: ${{ inputs.tag }}
+          SETUP_URL: ${{ inputs.setup_url }}
+          SHA256: ${{ inputs.sha256 }}
+          BYTES: ${{ inputs.bytes }}
+        run: |
+          python3 - <<'PY'
+          import os,re,urllib.request,urllib.parse,hashlib
+          tag,url,digest,size=[os.environ[k] for k in ('TAG','SETUP_URL','SHA256','BYTES')]
+          assert re.fullmatch(r'v\d+\.\d+\.\d+',tag)
+          assert re.fullmatch(r'[0-9a-fA-F]{64}',digest)
+          assert size.isdigit() and 0<int(size)<=2*1024**3
+          u=urllib.parse.urlparse(url)
+          assert u.scheme=='https' and u.hostname=='github.com' and u.path.startswith('/Spinti1/Vibefy/releases/download/')
+          name=f'vibefy-{tag}-x86_64-pc-windows-msvc-setup.exe'
+          h=hashlib.sha256();received=0
+          with urllib.request.urlopen(url,timeout=60) as r,open(name,'wb') as out:
+            while chunk:=r.read(65536):
+              received+=len(chunk);assert received<=int(size);h.update(chunk);out.write(chunk)
+          assert received==int(size) and h.hexdigest()==digest.lower()
+          open('checksums.txt','w').write(f'{h.hexdigest()}  {name}\n')
+          PY
+      - uses: actions/upload-artifact@v6
+        with:
+          name: verified-package
+          path: |
+            vibefy-*-setup.exe
+            checksums.txt
+          retention-days: 3
