@@ -7,5 +7,5 @@ function append(label,file){try{const stat=fs.statSync(file);if(stat.isFile()&&s
 for(const pkg of metadata.packages.sort((a,b)=>a.name.localeCompare(b.name))){output+='\n\n--- '+pkg.name+' '+pkg.version+' ---\nLicense: '+(pkg.license||'See upstream notice')+'\nRepository: '+(pkg.repository||'https://crates.io/crates/'+pkg.name)+'\n';let dir=path.dirname(pkg.manifest_path),found=false;for(let depth=0;depth<4;depth++){for(const name of fs.readdirSync(dir)){if(/^(LICENSE|LICENCE|COPYING|NOTICE|UNLICENSE)([._-]|$)/i.test(name)){append(pkg.name+' / '+name,path.join(dir,name));found=true;}}if(found||!pkg.source?.startsWith('git+'))break;dir=path.dirname(dir);}}
 function walk(dir){for(const item of fs.readdirSync(dir,{withFileTypes:true})){const file=path.join(dir,item.name);if(item.isDirectory())walk(file);else if(/LICENSE|OFL|NOTICE/i.test(item.name))append(path.relative(process.cwd(),file).replaceAll('\\','/'),file);}}
 walk('assets');
-for(const name of ['license-whisper.txt','license-ggml.txt','license-model.txt'])append('Whisper / '+name,path.join('..','Vibefy-App','auto-sync',name));
+append('Official yt-dlp standalone notices','assets/licenses/yt-dlp-third-party.txt');
 fs.writeFileSync('THIRD_PARTY_LICENSES.txt',output);console.log('Collected notices for '+metadata.packages.length+' Rust packages; '+Buffer.byteLength(output)+' bytes.');

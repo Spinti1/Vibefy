@@ -108,9 +108,15 @@ fn existing_preferences_and_custom_connect_names_survive_a_save() {
             ..Settings::default()
         };
         saved.save(&path);
-        assert_eq!(Settings::load(&path), saved);
+        let mut expected = saved.clone();
+        // The fork deliberately migrates the old default, while preserving
+        // names the user chose for their own device.
+        if name == "Spotifast" {
+            expected.device_name = "Vibefy".into();
+        }
+        assert_eq!(Settings::load(&path), expected);
     }
-    assert_eq!(Settings::default().device_name, "Spotifast");
+    assert_eq!(Settings::default().device_name, "Vibefy");
 }
 
 #[cfg(target_os = "linux")]

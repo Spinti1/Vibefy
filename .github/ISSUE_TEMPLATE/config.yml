@@ -1,8 +1,8 @@
-blank_issues_enabled: false
+blank_issues_enabled: true
 contact_links:
-  - name: Contribution and project scope
-    url: https://github.com/crmne/spotifast/blob/main/CONTRIBUTING.md
-    about: Check product boundaries and contribution requirements before opening an issue or pull request.
-  - name: Documentation
-    url: https://spotifast.rocks
-    about: Install steps, settings, and where Spotifast keeps its files and logs.
+  - name: Documentation and credits
+    url: https://github.com/Spinti1/Vibefy#readme
+    about: Read the Vibefy installation instructions, capabilities and third-party credits.
+  - name: Website
+    url: https://usevibefy.online
+    about: Download the native app or open the mobile web beta.
