@@ -56,3 +56,7 @@ The mobile player reuses the original credited Nyan frames, Oneko sprite sheet a
 ## Classic mini player and website demo
 
 The classic mini player is inherited from Spotifast by Carmine Paolino and contributors. Vibefy changes its branding, colors and return control; it does not claim the original mini-player implementation as new work. The desktop website screenshot is rendered from the actual application in isolated demo mode, with sample account and playlist metadata. Demo artwork is served by [Lorem Picsum](https://picsum.photos/). No personal profile or private playlist is used.
+
+## HTTPS trust roots
+
+[webpki-roots](https://github.com/rustls/webpki-roots) supplies bundled Mozilla public CA roots under CDLA-Permissive-2.0, alongside the operating system trust store. Its original license is retained in THIRD_PARTY_LICENSES.txt. HTTPS certificate and hostname verification remain enabled.

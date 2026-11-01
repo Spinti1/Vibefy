@@ -4,6 +4,22 @@ description: Independent Spotify grants, what is stored, and how API traffic is 
 nav_order: 1
 ---
 
+## Vibefy HTTPS and sign-in transport
+
+The shared asynchronous and blocking reqwest clients trust the OS certificate
+store and bundled Mozilla public roots. This supports fresh Windows installs
+with incomplete OS roots while retaining configured enterprise/proxy trust.
+Certificate and hostname verification remain enabled. No Windows trust store
+settings are changed, and the configured proxy is never bypassed automatically.
+
+Spotify's token POST has a twenty-second request timeout. A connection setup
+failure may retry once after 250 ms, using the same client and proxy. Timeouts,
+HTTP responses and failures after sending are not explicitly retried: a one-use
+OAuth code must not be replayed after an uncertain response. Errors classify
+TLS certificate, DNS, proxy, timeout and connection failures without displaying
+raw source strings, credentials or response bodies. This does not change OAuth
+client identity, callback URI, scopes or Spotify application access rules.
+
 ## Vibefy's optional Spicy Lyrics view
 
 The separate Spicy Lyrics button uses the official

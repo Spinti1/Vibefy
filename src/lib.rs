@@ -46,6 +46,7 @@ pub mod motion;
 pub mod music;
 pub mod new_releases;
 pub mod notch;
+mod oauth_transport;
 pub mod opener;
 pub mod paths;
 pub mod peek;

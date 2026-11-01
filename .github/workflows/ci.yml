@@ -36,7 +36,7 @@ jobs:
           rustc --edition 2024 --test src/title_similarity.rs -o target/title-similarity-tests.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./target/title-similarity-tests.exe
-      - run: cargo test --release --locked -j 2 --features demo --test update_integrity --test update_launch --test branding --test spotify_match --test source_playlist --test window_restore --test recording_match --test native_addons --test mod_artwork --test visual_buffers --test audio_only_cache --test lyrics_providers
+      - run: cargo test --release --locked -j 2 --features demo --test update_integrity --test update_launch --test branding --test spotify_match --test source_playlist --test window_restore --test recording_match --test native_addons --test mod_artwork --test visual_buffers --test audio_only_cache --test lyrics_providers --test oauth_transport
       - run: cargo test --release --locked -j 2 --features demo --test fast_paths concurrent_play_and_prefetch_reuse_inspected_metadata_and_one_download
       - run: 'cargo test --release --locked -j 2 --features demo --test spicy_native tests::'
       - run: cargo test --release --locked -j 2 --features demo --test spicy_native ui::word_line_plain_and_error_views_render_in_both_themes

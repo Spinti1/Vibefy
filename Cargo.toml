@@ -1,7 +1,7 @@
 [package]
 name = "spotifast"
 default-run = "spotifast"
-version = "0.4.22"
+version = "0.4.23"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
@@ -128,7 +128,9 @@ rodio = { version = "0.21", default-features = false }
 # update checks. HTTP proxies work without it. `system-proxy` reads the OS
 # proxy on macOS and Windows when the mode is System; Linux uses environment
 # variables either way.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json", "gzip", "http2", "blocking", "socks", "system-proxy"] }
+# Combine native roots (including managed proxies) with bundled Mozilla roots
+# so fresh Windows installations need not populate the OS root store first.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "rustls-tls-webpki-roots", "json", "gzip", "http2", "blocking", "socks", "system-proxy"] }
 # Same System-proxy matcher reqwest uses, so local playback follows the same
 # HTTP proxy (environment, and the OS proxy on macOS and Windows).
 hyper-util = { version = "0.1", default-features = false, features = ["client-proxy", "client-proxy-system"] }

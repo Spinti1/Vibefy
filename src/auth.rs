@@ -351,12 +351,11 @@ async fn token_request(
     http: &reqwest::Client,
     form: &[(&str, &str)],
 ) -> std::result::Result<TokenResponse, TokenEndpointError> {
-    let response = http
-        .post(TOKEN_URL)
-        .form(form)
-        .send()
+    let response = crate::oauth_transport::post_form(http, TOKEN_URL, form)
         .await
-        .map_err(|error| TokenEndpointError::Unreachable(error.to_string()))?;
+        .map_err(|error| {
+            TokenEndpointError::Unreachable(crate::oauth_transport::describe(&error).into())
+        })?;
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
     decode_token_response(status, &text)

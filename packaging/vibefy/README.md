@@ -11,3 +11,21 @@ The new Vibefy AppId is distinct from Spotifast. Setup installs per user without
 Release builds use full LTO with speed optimizations retained. Setup uses solid LZMA2/max compression. This reduces the download where possible without removing runtime files; it does not shrink the installed speech model or audio cache. Compare final bytes with the previous release rather than assuming a fixed saving.
 
 Release assets must be named `vibefy-vVERSION-x86_64-pc-windows-msvc-setup.exe`. Generate checksums.txt over the exact final setup bytes; upload both as GitHub release assets. Before publication, confirm GitHub's asset size and digest match local SHA-256. Do not replace assets after a published release; publish a new version instead.
+
+SmartScreen checks both publisher and file reputation. The current package has
+no Authenticode signing identity configured. A self-signed certificate does not
+solve this warning. To prepare signed distribution, the publisher must obtain
+a trusted code-signing identity (for example Microsoft Artifact Signing or a
+CA-issued certificate), complete its identity validation, and configure secure
+signing access. Never commit a signing private key or password.
+
+Sign the final Vibefy application executable before compiling Setup, then sign
+the final Setup executable with a trusted timestamp. Validate both signatures
+with Authenticode before generating checksums or uploading release assets.
+Keep the same publisher identity across releases. Third-party runtime files
+retain their original provenance; do not change their upstream signatures.
+Signing may reduce warnings as reputation grows but cannot guarantee that a
+new installer will immediately avoid SmartScreen. Store distribution is a
+separate option. Do not disable SmartScreen or Defender to distribute Vibefy.
+
+Microsoft reference: https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation

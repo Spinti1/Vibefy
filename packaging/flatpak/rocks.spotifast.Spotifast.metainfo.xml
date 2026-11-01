@@ -50,6 +50,9 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.4.23" date="2026-11-01">
+      <description><p>Bundled public HTTPS trust roots and safer, clearer Spotify token connection handling.</p></description>
+    </release>
     <release version="0.4.22" date="2026-11-01">
       <description><p>Continue past plain lyrics to find available synchronized sources, while retaining text and attribution when timing is unavailable.</p></description>
     </release>
