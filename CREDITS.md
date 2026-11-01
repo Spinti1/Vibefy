@@ -52,3 +52,7 @@ The web implementation uses [PeerJS 1.5.5](https://github.com/peers/peerjs) unde
 ## Mobile mod adaptations
 
 The mobile player reuses the original credited Nyan frames, Oneko sprite sheet and Cat Jam animation atlas already included in the native distribution. Browser motion and controls are independently implemented. Track Peek adapts the next-track concept credited above. Cat Jam tempo is manually adjustable in the browser because official embedded playback does not expose an audio signal. Original asset terms remain unchanged.
+
+## Classic mini player and website demo
+
+The classic mini player is inherited from Spotifast by Carmine Paolino and contributors. Vibefy changes its branding, colors and return control; it does not claim the original mini-player implementation as new work. The desktop website screenshot is rendered from the actual application in isolated demo mode, with sample account and playlist metadata. Demo artwork is served by [Lorem Picsum](https://picsum.photos/). No personal profile or private playlist is used.
