@@ -389,5 +389,15 @@ async fn concurrent_play_and_prefetch_reuse_inspected_metadata_and_one_download(
     .expect("Play waited for an unrelated ten-second inspection")
     .unwrap();
     assert_eq!(bytes, b"cached-audio-fixture");
-    std::fs::remove_dir_all(root).unwrap();
+    // Aborted child processes release their executable asynchronously on Windows.
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if std::fs::remove_dir_all(&root).is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        }
+    })
+    .await
+    .expect("Cancelled helper process kept the fixture directory open");
 }
