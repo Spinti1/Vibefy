@@ -52,6 +52,7 @@ pub mod paths;
 pub mod peek;
 pub mod player;
 pub mod playlist_cover;
+pub mod playlist_outbox;
 pub mod power;
 pub mod prerelease;
 pub mod recording_match;

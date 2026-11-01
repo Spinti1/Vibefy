@@ -83,6 +83,21 @@ YouTube audio duration; it does not fetch Spotify audio.
 
 ## Source songs and Spotify playlist writes
 
+Vibefy 0.4.24 stores confirmed Spotify playlist additions in the app's state
+directory (`playlist-outbox`), separately from disposable caches. The interface
+remains usable while the requests run. Explicit HTTP 429 rejections retry in
+the background after at least 30 seconds and never before Spotify's Retry-After
+deadline, including after a restart. Requests resume only for their original
+verified account while Vibefy is running. Repeated pending clicks are suppressed.
+Loaded playlists retain duplicate confirmation; an unloaded playlist no longer
+requires a remote duplicate scan before accepting an edit.
+
+Success is reported only after Spotify confirms it. Authentication, permission
+and exhausted-quota errors stop with an error. A lost response or an interrupted
+in-flight write is not replayed automatically, because Spotify may already have
+committed it. Check the playlist before deliberately submitting it again.
+This queue does not remove Spotify account/application access requirements.
+
 A source song's context menu can open **Add to Spotify playlist…**. This sends
 only the displayed title and artist query to the existing signed-in Spotify
 Web API session. Search runs on the backend with the normal Spotify deadline
@@ -91,8 +106,8 @@ duration and version words. The user must select a returned Spotify recording
 and an editable playlist before a write is requested. Query changes start a
 new request generation; late answers cannot replace a newer or closed dialog.
 No audio is sent to Spotify and source URIs are not used as Spotify track IDs.
-The existing duplicate check and optimistic playlist reconciliation apply to
-the selected Spotify item. Missing recordings, rate limits and account
+Loaded-playlist duplicate checks and optimistic playlist reconciliation apply to
+the selected Spotify item. Missing recordings and account
 permissions can prevent the operation; the song remains available locally.
 
 ## Independent grants, once each

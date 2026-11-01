@@ -33,7 +33,7 @@ Version 0.4.19 accepts closely similar recording titles, with exact titles ranke
 
 Version 0.4.20 shares lyrics data between frames instead of copying timed words, reuses visualizer buffers, and records visual history only for Vivy. Release builds use full LTO and Setup uses stronger compression. The complete Auto Sync model and runtime remain included; network-dependent search and playback times still vary.
 
-Version 0.4.23 includes Mozilla public HTTPS roots alongside OS roots for fresh-system compatibility. Spotify token requests retry one connection-establishment failure and report actionable, redacted network errors. This does not resolve Spotify app access restrictions or establish Windows SmartScreen reputation. Installers remain unsigned until a verified signing identity is configured.
+Version 0.4.24 queues Spotify playlist additions in the background and saves pending requests per account. Temporary rate limits retry automatically, respecting Spotify's waiting period across restarts. Duplicate pending clicks are suppressed. Uncertain writes are not replayed automatically; permission, authentication and exhausted-quota errors remain visible. Spotify access requirements still apply. Windows installers remain unsigned.
 
 Version 0.4.22 prefers available synchronized lyrics over plain results from another provider, including timed LRCLIB entries on another album. Plain text remains available when no matching timing exists. Older plain caches are rechecked once after this update; new plain answers and misses are retried after six hours. This does not invent word timing for songs with text only.
 

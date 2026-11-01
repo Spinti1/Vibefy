@@ -33,6 +33,10 @@ pub enum ApiError {
     Status { status: u16, message: String },
     #[error("Spotify is rate limiting requests; try again in a moment")]
     RateLimited,
+    #[error("Spotify is temporarily limiting playlist additions")]
+    PlaylistRetryAfter(u64),
+    #[error("Waiting for a connection to Spotify")]
+    PlaylistNotSent,
     #[error("Spotify's Development Mode quota is exhausted; try again after the quota resets")]
     QuotaExhausted,
     #[error("your Spotify sign-in expired; please sign in again")]
@@ -604,6 +608,8 @@ impl ApiClient {
 
         let mut attempt = 0;
         let queue_write = method == Method::POST && path == "/me/player/queue";
+        let playlist_add =
+            method == Method::POST && path.starts_with("/playlists/") && path.ends_with("/items");
         loop {
             attempt = u32::saturating_add(attempt, 1);
             let _ordinary = if method == Method::GET
@@ -655,7 +661,13 @@ impl ApiClient {
                 method,
                 path
             );
-            let response = request.send().await?;
+            let response = request.send().await.map_err(|error| {
+                if playlist_add && error.is_connect() && !error.is_timeout() {
+                    ApiError::PlaylistNotSent
+                } else {
+                    ApiError::from(error)
+                }
+            })?;
             let status = response.status();
             log::info!(
                 "Spotify API: status={} source={} method={} path={}",
@@ -690,7 +702,7 @@ impl ApiClient {
                 // A rejected queue append is safe to retry. Keep its place
                 // in the write lock and honor the full server-requested wait.
                 // Other requests retain their existing bounded retry policy.
-                let wait = if queue_write || path == "/search" {
+                let wait = if queue_write || playlist_add || path == "/search" {
                     wait
                 } else {
                     wait.min(MAX_RETRY_AFTER)
@@ -704,6 +716,9 @@ impl ApiClient {
                 );
                 drop(permit);
                 self.extend_cooldown(wait).await;
+                if playlist_add {
+                    return Err(ApiError::PlaylistRetryAfter(wait.as_secs()));
+                }
                 if path == "/search" {
                     // Interactive searches must not spend up to four retry
                     // windows displaying Loading. Keep the server's cooldown;

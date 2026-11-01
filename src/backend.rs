@@ -518,6 +518,12 @@ pub enum ApiResponse {
         message: String,
         result: ApiResult<Option<String>>,
     },
+    PlaylistAddition {
+        id: String,
+        uris: Vec<String>,
+        message: String,
+        result: Option<ApiResult<Option<String>>>,
+    },
     PlaylistFollowChanged {
         id: String,
         followed: bool,
@@ -1927,6 +1933,7 @@ impl PlaylistHeaderLookup {
 }
 
 struct Worker {
+    playlist_outbox: crate::playlist_outbox::Outbox,
     peek: Option<Arc<crate::peek::Session>>,
     dirs: AppDirs,
     credentials: CredentialStore,
@@ -2060,6 +2067,7 @@ impl Worker {
         waker: Waker,
     ) -> Self {
         Self {
+            playlist_outbox: crate::playlist_outbox::Outbox::default(),
             #[cfg(not(test))]
             credentials: CredentialStore::new(dirs.clone()),
             #[cfg(test)]
@@ -2692,7 +2700,17 @@ impl Worker {
                     }
                 }
                 Command::Api(request) => {
-                    self.dispatch(request);
+                    if let ApiRequest::AddToPlaylist {
+                        playlist_id,
+                        playlist_name,
+                        uris,
+                        position,
+                    } = request
+                    {
+                        self.queue_playlist_addition(playlist_id, playlist_name, uris, position);
+                    } else {
+                        self.dispatch(request);
+                    }
                 }
                 Command::ApiFinished {
                     generation,
@@ -3102,6 +3120,12 @@ impl Worker {
                 Command::LoadAccountCaches { generation } => {
                     if let Some(account) = self.api.account() {
                         let account_id = account.as_str().to_string();
+                        match crate::playlist_outbox::pending(&self.dirs.state.join("playlist-outbox"), &account_id).await {
+                            Ok(additions) => for addition in additions {
+                                self.queue_playlist_addition(addition.playlist_id, addition.playlist_name, addition.uris, addition.position);
+                            },
+                            Err(_) => self.emit(Event::Error("Could not read pending playlist additions. They have not been resent.".into())),
+                        }
                         let library = self.dirs.library_cache_file(&account_id);
                         let home = self.dirs.home_cache_file(&account_id);
                         let events = self.events.clone();
@@ -5043,6 +5067,82 @@ impl Worker {
 
     // ---- api ----------------------------------------------------------------
 
+    fn queue_playlist_addition(
+        &self,
+        playlist_id: String,
+        playlist_name: String,
+        uris: Vec<String>,
+        position: Option<u32>,
+    ) {
+        let Some(account) = self.api.account() else {
+            self.emit(Event::Api(Box::new(ApiResponse::PlaylistAddition {
+                id: playlist_id,
+                uris,
+                message: String::new(),
+                result: Some(Err(ApiError::NotSignedIn)),
+            })));
+            return;
+        };
+        let addition = crate::playlist_outbox::Addition {
+            account: account.as_str().to_owned(),
+            playlist_id,
+            playlist_name,
+            uris,
+            position,
+        };
+        let outbox = self.playlist_outbox.clone();
+        let root = self.dirs.state.join("playlist-outbox");
+        let api = self.api.clone();
+        let commands = self.commands.clone();
+        let shared_lease = self.credentials.lease(CredentialSlot::Shared);
+        let personal_lease = self.credentials.lease(CredentialSlot::Personal);
+        let mut session = self.session.subscribe();
+        let generation = *session.borrow_and_update();
+        tokio::spawn(async move {
+            let notify = |result: Option<ApiResult<Option<String>>>| {
+                let expired = match &result {
+                    Some(Err(ApiError::SignInExpired { api_source })) => vec![*api_source],
+                    _ => Vec::new(),
+                };
+                let message = if result.is_some() {
+                    format!("Added to {}", addition.playlist_name)
+                } else {
+                    format!(
+                        "Pending addition to {}. You can keep listening.",
+                        addition.playlist_name
+                    )
+                };
+                let _ = commands.send(Command::ApiFinished {
+                    generation,
+                    home_account: None,
+                    response: Box::new(ApiResponse::PlaylistAddition {
+                        id: addition.playlist_id.clone(),
+                        uris: addition.uris.clone(),
+                        message,
+                        result,
+                    }),
+                    expired,
+                    shared_lease: shared_lease.clone(),
+                    personal_lease: personal_lease.clone(),
+                });
+            };
+            let result = tokio::select! {
+                biased;
+                _ = session.changed() => return,
+                result = outbox.run(root, addition.clone(), || async {
+                    if api.account().as_ref().map(|a| a.as_str()) != Some(addition.account.as_str()) {
+                        return Err(ApiError::NotSignedIn);
+                    }
+                    let client = api.client_for(Operation::PlaylistMutation(api.playlist_access(&addition.playlist_id))).await?;
+                    client.add_playlist_items(&addition.playlist_id, &addition.uris, addition.position).await
+                }, || notify(None)) => result,
+            };
+            if let Some(result) = result {
+                notify(Some(result));
+            }
+        });
+    }
+
     fn cancel_search(&mut self) {
         for task in self.search_tasks.drain(..) {
             task.abort();
@@ -5323,6 +5423,11 @@ fn observe_playlists(api: &ApiGateway, response: &ApiResponse) {
         | ApiResponse::PlaylistItemsChanged {
             id,
             result: Err(error),
+            ..
+        }
+        | ApiResponse::PlaylistAddition {
+            id,
+            result: Some(Err(error)),
             ..
         }
         | ApiResponse::PlaylistItems {

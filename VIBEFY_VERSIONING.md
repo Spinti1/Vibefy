@@ -1,8 +1,8 @@
 # Vibefy releases
 
-Current source version: **0.4.23**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
+Current source version: **0.4.24**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
 
-For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.24), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
+For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.25), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
 
 0.4.4: About and Mods credits, clearer buttons, cache management and 2 GB advisory, performance improvements.
 
@@ -43,3 +43,5 @@ For each future user-requested functional update, increment the Vibefy patch ver
 0.4.22: Plain lyrics no longer stop synchronized-provider lookup; plain Spotify lyrics can fall back to timed LRCLIB entries, and timed More Lyrics results replace plain text. Pre-fix plain caches are rechecked once; new plain caches and misses expire after six hours. Existing word timing, credits and plain-text fallback are retained.
 
 0.4.23: Bundle Mozilla HTTPS trust roots alongside native OS roots; retry OAuth connection-establishment failures once without replaying sent grants; provide redacted certificate/DNS/proxy/timeout diagnostics. Document unsigned installer/SmartScreen limits; no code-signing identity is configured.
+
+0.4.24: Account-scoped durable Spotify playlist additions retry explicit rate limits in the background, preserving Retry-After across restarts and suppressing duplicate pending clicks. Uncertain writes are not automatically replayed; authorization and quota errors remain visible.

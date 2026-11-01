@@ -704,6 +704,7 @@ pub struct App {
     /// Context loads keep it; explicit skips consume their rows immediately.
     queue_start_pending: Option<Target>,
     pub playlist_busy: bool,
+    pending_playlist_additions: std::collections::HashSet<(String, String)>,
     pub quit_requested: bool,
     /// Wheel step, Linux touchpad scale and glide, and the axis a gesture
     /// holds, for the window on screen.
@@ -1280,6 +1281,7 @@ impl App {
             last_now_playing_sequence: 0,
             queue_start_pending: None,
             playlist_busy: false,
+            pending_playlist_additions: Default::default(),
             quit_requested: false,
             scrolling: fastframe_scroll::Scrolling::default(),
             autoscroll: crate::autoscroll::Autoscroll::default(),
@@ -3467,6 +3469,7 @@ impl App {
 
     /// Clears account data while preserving request serials that reject late answers.
     fn reset_data(&mut self) {
+        self.pending_playlist_additions.clear();
         self.pending_remote_volume = None;
         self.local_transfer_sequence = None;
         self.queue_start_pending = None;
@@ -8221,6 +8224,29 @@ impl App {
                     self.add_to_playlist_now(playlist_id, playlist_name, items, position);
                 }
             },
+            ApiResponse::PlaylistAddition {
+                id,
+                uris,
+                message,
+                result,
+            } => {
+                self.playlist_busy = false;
+                if let Some(result) = result {
+                    for uri in uris {
+                        self.pending_playlist_additions.remove(&(id.clone(), uri));
+                    }
+                    self.handle_api(ApiResponse::PlaylistItemsChanged {
+                        id,
+                        message,
+                        result,
+                    });
+                } else {
+                    for uri in uris {
+                        self.pending_playlist_additions.insert((id.clone(), uri));
+                    }
+                    self.toast(message);
+                }
+            }
             ApiResponse::PlaylistItemsChanged {
                 id,
                 message,
@@ -11301,6 +11327,13 @@ impl App {
         items: Vec<PlayableItem>,
         position: Option<u32>,
     ) {
+        if items.iter().any(|item| {
+            self.pending_playlist_additions
+                .contains(&(playlist_id.clone(), item.uri().to_owned()))
+        }) {
+            self.toast("This song already has a pending addition to this playlist.");
+            return;
+        }
         if let Some(crate::api::models::PlayableItem::Track(source)) =
             items.iter().find(|item| item.uri().starts_with("vibefy:"))
         {
@@ -11328,13 +11361,10 @@ impl App {
                 });
             }
             None => {
-                self.playlist_busy = true;
-                self.backend.api(ApiRequest::CheckPlaylistDuplicates {
-                    playlist_id,
-                    playlist_name,
-                    items,
-                    position,
-                });
+                // A remote duplicate scan can itself wait on a rate limit.
+                // Queue the user's explicit edit immediately; loaded playlists
+                // retain the existing duplicate confirmation above.
+                self.add_to_playlist_now(playlist_id, playlist_name, items, position);
             }
         }
     }
@@ -11349,12 +11379,25 @@ impl App {
         if items.is_empty() {
             return;
         }
+        if items.iter().any(|item| {
+            self.pending_playlist_additions
+                .contains(&(playlist_id.clone(), item.uri().to_owned()))
+        }) {
+            self.playlist_busy = false;
+            self.dialog = None;
+            self.toast("This song already has a pending addition to this playlist.");
+            return;
+        }
         if items.iter().any(|item| !item.uri().starts_with("spotify:")) {
             self.toast_error("Choose a Spotify recording before adding this song.");
             return;
         }
         self.dialog = None;
-        self.playlist_busy = true;
+        self.playlist_busy = false;
+        for item in &items {
+            self.pending_playlist_additions
+                .insert((playlist_id.clone(), item.uri().to_owned()));
+        }
         for item in &items {
             if let PlayableItem::Track(track) = item {
                 self.remember_track_recording(track);
@@ -26666,12 +26709,7 @@ mod tests {
 
     #[test]
     fn positioned_playlist_additions_keep_partial_pages_and_ignore_old_reads() {
-        for (base, position, scan_fails) in [
-            (0, 1, false),
-            (100, 101, false),
-            (100, 102, true),
-            (100, 50, false),
-        ] {
+        for (base, position) in [(0, 1), (100, 101), (100, 102), (100, 50)] {
             let mut app = headless_app();
             app.backend.set_offline(true);
             app.playlist_pages.insert(
@@ -26698,29 +26736,6 @@ mod tests {
                 .unwrap()
                 .clone();
             app.request_playlist_add("target".into(), "Target".into(), vec![item], Some(position));
-            let mut sent = app.backend.take_playlist_add_requests();
-            assert_eq!(sent.len(), 1);
-            let ApiRequest::CheckPlaylistDuplicates {
-                playlist_id,
-                playlist_name,
-                items,
-                position: requested,
-            } = sent.pop().unwrap()
-            else {
-                panic!("expected duplicate check");
-            };
-            assert_eq!(requested, Some(position));
-            app.handle_api(ApiResponse::PlaylistDuplicatesChecked {
-                playlist_id,
-                playlist_name,
-                items,
-                position: requested,
-                result: if scan_fails {
-                    Err(crate::api::ApiError::Network("offline".into()))
-                } else {
-                    Ok(vec![])
-                },
-            });
             let page = &app.playlist_pages["target"];
             assert_eq!(page.items.total, Some(201));
             assert_eq!(page.items.next_offset, Some(base + 3));
@@ -27566,7 +27581,10 @@ mod tests {
         );
 
         assert!(app.dialog.is_none());
-        assert!(app.playlist_busy, "the confirmed write is in flight");
+        assert!(
+            !app.playlist_busy,
+            "the confirmed write runs in the background"
+        );
     }
 
     #[test]
