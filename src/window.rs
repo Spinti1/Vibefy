@@ -191,7 +191,44 @@ pub const MAIN_MIN_SIZE: [f32; 2] = [760.0, 520.0];
 /// the minimum is not a size anyone chose, since the window cannot be dragged
 /// that small, and opening at it leaves a window too small to find (#704).
 pub fn usable_size(size: Option<[f32; 2]>) -> Option<[f32; 2]> {
-    size.filter(|size| size[0] >= MAIN_MIN_SIZE[0] && size[1] >= MAIN_MIN_SIZE[1])
+    size.filter(|size| {
+        size.iter().all(|value| value.is_finite())
+            && size[0] >= MAIN_MIN_SIZE[0]
+            && size[1] >= MAIN_MIN_SIZE[1]
+    })
+}
+
+/// eframe restores its own window state after applying the startup builder.
+/// Repair an undersized restored main window once its real viewport is known.
+/// Mini players and fixed-size demos must not call this.
+pub fn recover_main_size(ctx: &egui::Context, remembered: Option<[f32; 2]>) {
+    let id = egui::Id::new("main-size-recovered");
+    if ctx.data(|data| data.get_temp::<bool>(id).unwrap_or(false)) {
+        return;
+    }
+    let viewport = ctx.input(|input| input.viewport().clone());
+    if viewport.minimized == Some(true) {
+        return;
+    }
+    let Some(rect) = viewport.inner_rect else {
+        return;
+    };
+    ctx.data_mut(|data| data.insert_temp(id, true));
+    if viewport.fullscreen == Some(true) || viewport.maximized == Some(true) {
+        return;
+    }
+    let zoom = ctx.zoom_factor();
+    if usable_size(Some([rect.width() * zoom, rect.height() * zoom])).is_none() {
+        let size = usable_size(remembered).unwrap_or([1240.0, 800.0]);
+        ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(egui::vec2(
+            MAIN_MIN_SIZE[0] / zoom,
+            MAIN_MIN_SIZE[1] / zoom,
+        )));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+            size[0] / zoom,
+            size[1] / zoom,
+        )));
+    }
 }
 
 static FIXED_SIZE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

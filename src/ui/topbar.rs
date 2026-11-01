@@ -448,6 +448,26 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                             });
                         });
                         super::widgets::menu_separator(ui, &palette);
+                        let update_label = if app.update_checking {
+                            gettext(locale, "Checking for updates…")
+                        } else if app.update.is_some() {
+                            gettext(locale, "View update")
+                        } else {
+                            gettext(locale, "Check for updates")
+                        };
+                        if super::widgets::menu_item_enabled(
+                            ui,
+                            &palette,
+                            Some(Icon::Refresh),
+                            &update_label,
+                            !app.update_checking,
+                        ) {
+                            app.actions.push(if app.update.is_some() {
+                                Action::ShowUpdate
+                            } else {
+                                Action::CheckForUpdates
+                            });
+                        }
                         if super::widgets::menu_item(
                             ui,
                             &palette,

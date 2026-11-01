@@ -23,7 +23,11 @@ Get the latest **Windows x64 Setup** from [Releases](https://github.com/Spinti1/
 
 Installers are **not code-signed**. Checks use GitHub HTTPS. Update downloads must match the release's published size and SHA-256 digest, as well as checksums.txt. Installation saves your layout, closes Vibefy safely, and starts Setup in the current installation folder. First install using Setup to register that folder for future updates. Never install a file from an unrelated mirror.
 
+Open the profile menu and choose **Check for updates**. A newer release opens the download and restart dialog; otherwise Vibefy reports that it is up to date. Spotify recording choices for adding source songs to playlists display square album covers. Main windows restored below the minimum usable size recover their saved size at startup.
+
 Spotify account features remain subject to Spotify authorization, account requirements and service limits. Public sources can be unavailable or change. Lyric timing cannot be guaranteed for every recording, edit or live version. Optional mods can increase CPU and memory usage.
+
+The native engine's title, artist, version, duration and source-ranking rules are documented in [Recording selection](docs/_reference/vibefy-recording-selection.md).
 
 ## Mobile web beta
 

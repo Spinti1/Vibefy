@@ -50,6 +50,9 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.4.18" date="2026-11-01">
+      <description><p>Profile-menu update checks, Spotify match artwork and recovery of undersized startup windows.</p></description>
+    </release>
     <release version="0.4.14" date="2026-10-31">
       <description><p>Built-in Listen Together, compact lyrics details, Cat Jam size controls and a branded Vibefy classic mini player.</p></description>
     </release>

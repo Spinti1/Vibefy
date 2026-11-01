@@ -3158,7 +3158,11 @@ impl App {
                                 );
                             }
                             self.update = Some(notice);
-                            if self.settings.download_updates_automatically
+                            if manual {
+                                self.actions.push(Action::ShowUpdate);
+                            }
+                            if !manual
+                                && self.settings.download_updates_automatically
                                 && matches!(
                                     self.update_download,
                                     crate::updates::DownloadState::Idle
@@ -13522,7 +13526,12 @@ impl App {
         if self.settings.winamp_window {
             self.winamp.geometry.remember(ctx);
         } else if self.lyrics_fullscreen.is_none() && self.lyrics_fullscreen_restoring.is_none() {
+            let previous_size = self.window_geometry.size;
             self.window_geometry.remember(ctx);
+            // Minimized/startup viewports can temporarily report tiny sizes.
+            // Never let those replace the last usable main-window layout.
+            self.window_geometry.size =
+                crate::window::usable_size(self.window_geometry.size).or(previous_size);
         }
     }
 
@@ -26134,7 +26143,7 @@ mod tests {
     }
 
     #[test]
-    fn update_checks_leave_the_popup_closed_until_requested() {
+    fn manual_update_checks_open_the_popup_and_automatic_checks_do_not() {
         for manual in [false, true] {
             let mut app = headless_app();
             app.handle_backend_events(vec![Event::UpdateChecked {
@@ -26147,7 +26156,7 @@ mod tests {
             let ctx = egui::Context::default();
             app.apply_actions(&ctx);
             assert!(app.update.is_some());
-            assert!(!app.show_update);
+            assert_eq!(app.show_update, manual);
             app.apply(Action::ShowUpdate, &ctx);
             assert!(app.show_update);
         }
@@ -26170,7 +26179,7 @@ mod tests {
         assert_eq!(app.update, None);
         assert_eq!(
             app.toasts.last().map(|toast| toast.message.as_str()),
-            Some("Spotifast is up to date")
+            Some("Vibefy is up to date")
         );
 
         app.toasts.clear();
@@ -32753,6 +32762,9 @@ impl App {
     }
     pub fn demo_api_response(&mut self, response: ApiResponse) {
         self.handle_api(response);
+    }
+    pub fn demo_backend_event(&mut self, event: Event) {
+        self.handle_backend_events(vec![event]);
     }
     pub fn demo_source_response(
         &mut self,

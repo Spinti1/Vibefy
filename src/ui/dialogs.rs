@@ -61,11 +61,21 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                             crate::model::Loadable::Failed(error) => { ui.label(error); }
                             crate::model::Loadable::Loaded(tracks) => {
                                 if tracks.is_empty() { ui.label("No Spotify recording found. Try a shorter title or another artist spelling. Nothing was added."); }
-                                egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                                let results_height = (ctx.content_rect().height() - ui.min_rect().height() - 120.0).clamp(80.0, 260.0);
+                                egui::ScrollArea::vertical().max_height(results_height).show(ui, |ui| {
                                     for track in tracks {
                                         let album = track.album.as_ref().map(|a| a.name.as_str()).unwrap_or("");
                                         let label = format!("{} · {}\n{} · {}:{:02}", track.name, track.artist_names(), album, track.duration_ms / 60000, track.duration_ms / 1000 % 60);
-                                        if ui.add_sized([ui.available_width(), 54.0], egui::Button::new(label)).clicked() { app.actions.push(Action::SelectSpotifyTrack { serial, track }); }
+                                        let response = ui.add_sized([ui.available_width(), 62.0], egui::Button::new(""));
+                                        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+                                        let cover = egui::Rect::from_min_size(response.rect.min + egui::vec2(8.0, 7.0), egui::Vec2::splat(48.0));
+                                        super::widgets::paint_cover(ui, &palette, track.image(96), cover, 3.0, theme::Icon::Disc, Some(app.backend.art()));
+                                        let text_rect = egui::Rect::from_min_max(cover.right_top() + egui::vec2(10.0, 0.0), response.rect.right_bottom() - egui::vec2(8.0, 7.0));
+                                        let mut text_ui = ui.new_child(egui::UiBuilder::new().max_rect(text_rect));
+                                        text_ui.set_clip_rect(text_rect.intersect(ui.clip_rect()));
+                                        text_ui.add(egui::Label::new(egui::RichText::new(&track.name).font(theme::semibold(14.0)).color(palette.text)).truncate());
+                                        text_ui.add(egui::Label::new(egui::RichText::new(format!("{} · {} · {}:{:02}", track.artist_names(), album, track.duration_ms / 60000, track.duration_ms / 1000 % 60)).font(theme::regular(12.0)).color(palette.secondary)).truncate());
+                                        if response.on_hover_text(&label).clicked() { app.actions.push(Action::SelectSpotifyTrack { serial, track }); }
                                     }
                                 });
                             }

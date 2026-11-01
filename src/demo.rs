@@ -1060,6 +1060,17 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
     }
     for surface in show.unwrap_or("").split(',').map(str::trim) {
         match surface {
+            "spotify-match" => {
+                let mut source = track(0);
+                source.uri = "vibefy:youtube:abcdefghijk".into();
+                app.dialog = Some(crate::model::Dialog::SpotifyTrackMatch {
+                    query: format!("{} {}", source.name, source.artist_names()),
+                    source,
+                    serial: 0,
+                    results: Loadable::Loaded((0..4).map(track).collect()),
+                    selected: None,
+                });
+            }
             "presaved" => {
                 for page in app.album_pages.values_mut() {
                     if let Some(data) = &mut page.prerelease {

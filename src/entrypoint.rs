@@ -1334,6 +1334,9 @@ impl Shell {
 
     /// One pass of the window's logic, run under the stall watch.
     fn run_logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if !self.app.settings.winamp_window && !spotifast::window::fixed_size() {
+            spotifast::window::recover_main_size(ctx, self.app.window_geometry.size);
+        }
         // A window restored where no monitor shows it any more (a display
         // unplugged since) comes back onto one.
         if !std::mem::replace(&mut self.recovery_checked, true) {
