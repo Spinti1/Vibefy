@@ -439,3 +439,12 @@ async fn juice_login(http: &Http) -> Result<Tokens> {
     }
     bail!("JuiceVault sign-in timed out. Try again.")
 }
+
+/// The session never leaves the native backend or the protected local store.
+pub(crate) async fn youtube_session(config: &Path) -> Result<crate::music_session::Session> {
+    let bytes = credential(Provider::YouTubeMusic, config, None)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Connect YouTube Music first"))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|_| anyhow::anyhow!("Reconnect the YouTube Music browser session"))
+}

@@ -4855,12 +4855,7 @@ pub fn source_playlist(app: &mut App, ui: &mut egui::Ui, source: &str) {
     if !app.offline && !app.addons.artwork_checked.contains(source) {
         app.actions.push(Action::SourceArtwork(source.into()));
     }
-    let Some(saved) = app
-        .addons
-        .collections
-        .iter()
-        .find(|saved| saved.source == source)
-    else {
+    let Some(saved) = app.source_collection(source) else {
         ui.heading("Playlist removed");
         ui.label("This local playlist is no longer saved.");
         if theme::soft_button(ui, &app.palette, Some(Icon::House), "Open Home", false).clicked() {
@@ -4922,6 +4917,26 @@ pub fn source_playlist(app: &mut App, ui: &mut egui::Ui, source: &str) {
             round: false,
         },
     );
+    if let Some(linked) = app
+        .mirror
+        .lists
+        .iter()
+        .find(|list| list.collection.source == source)
+    {
+        let message = if let Some(issue) = &linked.issue {
+            Some(format!("Playlist sync: {issue}"))
+        } else if linked.missing > 0 {
+            Some(format!(
+                "{} songs need a recording match. Review them in Settings → Connected music accounts.",
+                linked.missing
+            ))
+        } else {
+            None
+        };
+        if let Some(message) = message {
+            ui.label(message);
+        }
+    }
     let filter_id = egui::Id::new(("source-playlist-filter", &page));
     let mut filter = ui
         .data(|data| data.get_temp::<String>(filter_id))

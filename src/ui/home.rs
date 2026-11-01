@@ -91,21 +91,41 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
         owned_playlist: None,
         song: None,
     };
-    let playlist_tile = |playlist: &Playlist| Tile {
-        image: pick_image(&playlist.images, tile_art).map(str::to_string),
-        name: playlist.name.clone(),
-        page: Page::Playlist(playlist.id.clone()),
-        uri: Some(playlist.uri.clone()),
-        liked: false,
-        owned_playlist: app
-            .user_id()
-            .is_some_and(|id| playlist.owned_by(id))
-            .then(|| playlist.clone()),
-        song: None,
+    let playlist_tile = |playlist: &Playlist| {
+        let linked = app
+            .mirror
+            .lists
+            .iter()
+            .find(|list| list.spotify_id == playlist.id && !list.youtube_id.is_empty());
+        Tile {
+            image: pick_image(&playlist.images, tile_art).map(str::to_string),
+            name: playlist.name.clone(),
+            page: linked
+                .map(|list| Page::LocalCollection(list.collection.source.clone()))
+                .unwrap_or_else(|| Page::Playlist(playlist.id.clone())),
+            uri: Some(
+                linked
+                    .map(|list| list.collection.source.clone())
+                    .unwrap_or_else(|| playlist.uri.clone()),
+            ),
+            liked: false,
+            owned_playlist: app
+                .user_id()
+                .is_some_and(|id| playlist.owned_by(id))
+                .then(|| playlist.clone()),
+            song: None,
+        }
     };
     let mut tiles: Vec<Tile> = vec![liked_tile()];
     let mut seen = std::collections::HashSet::from([Page::LikedSongs]);
-    for saved in app.addons.collections.iter().rev() {
+    for saved in app
+        .mirror
+        .lists
+        .iter()
+        .filter(|list| !list.youtube_id.is_empty())
+        .map(|list| &list.collection)
+        .chain(app.addons.collections.iter().rev())
+    {
         let page = Page::LocalCollection(saved.source.clone());
         if seen.insert(page.clone()) {
             tiles.push(Tile {
@@ -287,12 +307,7 @@ fn quick_access(app: &mut App, ui: &mut egui::Ui) {
                             if context_here {
                                 app.actions.push(Action::TogglePlay);
                             } else if let Page::LocalCollection(source) = page {
-                                if let Some(saved) = app
-                                    .addons
-                                    .collections
-                                    .iter()
-                                    .find(|saved| &saved.source == source)
-                                {
+                                if let Some(saved) = app.source_collection(source).cloned() {
                                     app.actions
                                         .push(Action::Addon(crate::addons::Command::Play {
                                             tracks: saved.tracks.clone(),

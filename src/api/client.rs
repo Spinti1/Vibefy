@@ -555,6 +555,13 @@ impl ApiClient {
         *self.cooldown_until.lock().await > Instant::now()
     }
 
+    pub(crate) async fn cooldown_remaining(&self) -> Duration {
+        self.cooldown_until
+            .lock()
+            .await
+            .saturating_duration_since(Instant::now())
+    }
+
     async fn wait_for_cooldown(&self) {
         loop {
             let until = *self.cooldown_until.lock().await;

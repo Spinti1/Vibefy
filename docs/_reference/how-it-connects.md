@@ -6,6 +6,62 @@ nav_order: 1
 
 ## Vibefy HTTPS and sign-in transport
 
+## Private playlist copies (0.4.26)
+
+Playlist sync is disabled by default for every Spotify/YouTube Music account pair.
+Settings shows the exact pair before the user enables private copies. The native
+service reads YouTube's account menu to identify the active channel and scopes
+its journal/inbox to SHA-256 of the two identities. It is cancelled on sign-out,
+session replacement, account changes and shutdown. Proxy changes restart it with
+the new transport. No shared server, application OAuth client, passwords, cookies
+or cross-user data is placed in the synchronization journal.
+
+Spotify library pages and complete song pages are read through the existing API
+gateway, with the same access requirements and cooldowns. A second snapshot read
+rejects a playlist changed during traversal. Unchanged snapshots skip song-page
+reads. While enabled, a completed scan runs again after 15 minutes; Sync now can
+request a scan but cannot skip a server rate-limit deadline. Cooldown deadlines
+are persisted. Users can keep listening during initial imports and matching.
+
+Only high-confidence catalogue audio matches are automatic: title, artist credits,
+recording version and duration must agree. Alternate releases with similar scores
+remain reviewable. User choices persist. A private append-only recording cache
+avoids rewriting the library for each match and recovers complete records after a
+torn final append. Cache data and playlist journals remain local; credentials stay
+in the separate protected session store.
+
+Private Music copies retain a deterministic recovery marker in their descriptions.
+Before creation or append, a durable intent is saved atomically. Interrupted
+creation searches for the private marked copy instead of blindly creating again.
+Append reconciliation compares occurrence counts, preserving intentional repeats
+without replaying an acknowledged batch. The service checks private editable
+headers before adding songs. Complete per-video acknowledgements settle a batch;
+otherwise the resulting playlist is read back. Unconfirmed writes stop for review.
+Allow retry requires the user's explicit confirmation that they checked the remote
+playlist. No automatic deletions, privacy changes or overwriting of unrelated
+playlists are implemented. If a user deletes a linked remote copy or changes its
+marker/privacy, that playlist stops syncing and reports the error.
+
+New additions to an already linked Spotify playlist are stored in an independent,
+account-paired YouTube inbox before the actor is notified. Spotify's existing
+outbox remains independent. Thus a Spotify rate limit does not prevent a YouTube
+addition whose recording metadata is known. Unmatched songs need review. Remote
+writes have no transactional guarantee across the two providers: one can finish
+before the other, and each has its own status. Original source order is retained
+locally; later source deletions/reorders and remote manual extras are not replayed
+as destructive changes. Source episodes and local files are not transferred.
+
+Home deduplicates linked copies against Spotify entries and local Music imports.
+Opening or playing an associated Spotify playlist uses its local linked view and
+resolved YouTube IDs. Rows without a chosen recording retain the previous native
+resolver. Creating a remote playlist alone does not eliminate network/extraction
+latency, and no instant playback or universal catalogue match is promised.
+
+This service is local to an installation. Run one syncing installation per account
+pair at a time: the unofficial API supplies no cross-device idempotency key. The
+LEOPARD recovery folder is outside source/release assets; restoring 0.4.25 restores
+code and the installed app without deleting remote private copies or user data.
+
 ## Optional YouTube Music and JuiceVault connections (0.4.25)
 
 Settings and the sign-in screen offer independent music-account connections.

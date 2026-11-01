@@ -257,19 +257,14 @@ impl App {
     }
 
     /// Native source rows retain their sorted/filtered order and repeated videos.
-    pub(super) fn play_source_view(
+    pub(crate) fn play_source_view(
         &mut self,
         source: &str,
         uris: &[String],
         index: u32,
         header: bool,
     ) {
-        let Some(saved) = self
-            .addons
-            .collections
-            .iter()
-            .find(|saved| saved.source == source)
-        else {
+        let Some(saved) = self.source_collection(source) else {
             return;
         };
         if uris.is_empty() || uris.len() > 20_000 {

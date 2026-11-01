@@ -313,6 +313,11 @@ pub struct App {
     pub addons: crate::addons::Runtime,
     pub music_accounts: [crate::music_accounts::State; 2],
     pub music_accounts_serial: [u64; 2],
+    pub mirror: crate::playlist_mirror::View,
+    pub mirror_serial: u64,
+    pub mirror_observed: Option<(String, u64)>,
+    pub mirror_retry_confirm: bool,
+    pub mirror_review_query: String,
     pub dirs: AppDirs,
     pub settings: Settings,
     /// Proxy policy actually handed to network workers. Manual form edits are
@@ -1232,6 +1237,11 @@ impl App {
             cache_usage: None,
             music_accounts: Default::default(),
             music_accounts_serial: [0; 2],
+            mirror: Default::default(),
+            mirror_serial: 0,
+            mirror_observed: None,
+            mirror_retry_confirm: false,
+            mirror_review_query: String::new(),
             addons: crate::addons::Runtime {
                 collections: addon_collections,
                 ..Default::default()
@@ -2176,6 +2186,7 @@ impl App {
             .addons
             .collections
             .iter()
+            .chain(self.mirror.lists.iter().map(|list| &list.collection))
             .flat_map(|c| &c.tracks)
             .find(|t| t.uri == uri)
         {
@@ -2846,6 +2857,23 @@ impl App {
                             self.addons.tempo_cache.clear();
                         }
                         self.addons.tempo_cache.insert(recording, bpm);
+                    }
+                }
+                Event::Mirror { serial, view } => {
+                    if serial == self.mirror_serial
+                        && self.music_accounts[0].connected
+                        && self
+                            .user_id()
+                            .is_some_and(|id| view.account.is_empty() || id == view.account)
+                    {
+                        self.mirror = view;
+                        self.addons.collections_revision =
+                            self.addons.collections_revision.wrapping_add(1);
+                    }
+                }
+                Event::MirrorProgress { serial, message } => {
+                    if serial == self.mirror_serial {
+                        self.mirror.message = message;
                     }
                 }
                 Event::MusicAccount {
@@ -4327,7 +4355,16 @@ impl App {
         }
         self.spicy.result = Loadable::Loading;
         let local_file = self.local_file(&now.uri).map(std::path::Path::to_path_buf);
+        let lookup_uri = self.mirror.lists.iter().find_map(|list| {
+            list.collection
+                .tracks
+                .iter()
+                .position(|track| track.uri == now.uri)
+                .and_then(|index| list.source_uris.get(index))
+                .cloned()
+        });
         self.backend.send(Command::SpicyLyrics {
+            lookup_uri,
             request: Box::new(LyricsRequest {
                 uri: now.uri,
                 query: crate::lyrics::Query {
@@ -4393,6 +4430,7 @@ impl App {
     }
 
     fn tick(&mut self, ctx: &egui::Context) {
+        self.tick_playlist_mirror();
         self.tick_peek(ctx);
         if !self.cache_busy
             && self
@@ -9158,6 +9196,16 @@ impl App {
     // ---- navigation ------------------------------------------------------------
 
     pub fn open(&mut self, page: Page) {
+        let page = if let Page::Playlist(id) = &page {
+            self.mirror
+                .lists
+                .iter()
+                .find(|list| &list.spotify_id == id && !list.youtube_id.is_empty())
+                .map(|list| Page::LocalCollection(list.collection.source.clone()))
+                .unwrap_or(page)
+        } else {
+            page
+        };
         if let Page::LocalCollection(source) = &page {
             self.start_source_artwork(source);
         }
@@ -11438,6 +11486,33 @@ impl App {
             }
         }
 
+        if self.mirror.enabled
+            && self.mirror.ready
+            && self
+                .mirror
+                .lists
+                .iter()
+                .any(|list| list.spotify_id == playlist_id)
+        {
+            let tracks = items
+                .iter()
+                .filter_map(|item| {
+                    if let PlayableItem::Track(track) = item {
+                        Some(track.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            if !tracks.is_empty() {
+                self.backend.send(Command::MirrorAddition {
+                    serial: self.mirror_serial,
+                    pair: self.mirror.pair.clone(),
+                    playlist: playlist_id.clone(),
+                    tracks,
+                });
+            }
+        }
         self.prepare_playlist_mutation(&playlist_id);
         let added = items.len().try_into().unwrap_or(u32::MAX);
         let added_by = self.user_id().map(|id| UserRef {
@@ -11815,10 +11890,12 @@ impl App {
                 offset_uri,
                 offset_index,
             } => {
-                let mut request = PlayRequest::context(uri);
-                request.offset_uri = offset_uri;
-                request.offset_position = offset_index;
-                self.play_request(request, false);
+                if !self.play_mirror_context(&uri, offset_uri.as_deref(), offset_index) {
+                    let mut request = PlayRequest::context(uri);
+                    request.offset_uri = offset_uri;
+                    request.offset_position = offset_index;
+                    self.play_request(request, false);
+                }
             }
             // Answered by the search's response, which plays the match.
             // Taking the serial here, not when the command arrives, keeps

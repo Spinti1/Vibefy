@@ -723,6 +723,17 @@ pub fn autostart() -> fastframe_autostart::Autostart {
 }
 
 pub enum Command {
+    Mirror {
+        serial: u64,
+        action: crate::playlist_mirror::Action,
+    },
+    MirrorAddition {
+        serial: u64,
+        pair: String,
+        playlist: String,
+        tracks: Vec<Track>,
+    },
+    StopMirror,
     RestoreMusicAccounts,
     MusicAccountReady {
         provider: crate::music_accounts::Provider,
@@ -920,6 +931,7 @@ pub enum Command {
             std::pin::Pin<Box<dyn std::future::Future<Output = Option<rfd::FileHandle>> + Send>>,
     },
     SpicyLyrics {
+        lookup_uri: Option<String>,
         request: Box<LyricsRequest>,
         key: String,
         generation: u64,
@@ -1049,6 +1061,14 @@ pub struct LyricsRequest {
 }
 
 pub enum Event {
+    Mirror {
+        serial: u64,
+        view: crate::playlist_mirror::View,
+    },
+    MirrorProgress {
+        serial: u64,
+        message: String,
+    },
     MusicAccount {
         provider: crate::music_accounts::Provider,
         serial: u64,
@@ -1973,6 +1993,7 @@ struct Worker {
     music_account_serial: [u64; 2],
     music_account_tasks: [Option<tokio::task::JoinHandle<()>>; 2],
     playlist_outbox: crate::playlist_outbox::Outbox,
+    mirror: Option<crate::playlist_mirror::Handle>,
     peek: Option<Arc<crate::peek::Session>>,
     dirs: AppDirs,
     credentials: CredentialStore,
@@ -2107,6 +2128,7 @@ impl Worker {
     ) -> Self {
         Self {
             playlist_outbox: crate::playlist_outbox::Outbox::default(),
+            mirror: None,
             music_account_tasks: [None, None],
             connected_music: [false; 2],
             music_account_serial: [0; 2],
@@ -2190,6 +2212,11 @@ impl Worker {
         let restart = self.engine_proxy != proxy.librespot_url();
         self.http.replace(client);
         self.engine_config.proxy = proxy;
+        if let Some(handle) = self.mirror.take() {
+            let serial = handle.serial;
+            handle.task.abort();
+            self.mirror_action(serial, crate::playlist_mirror::Action::Observe);
+        }
         Ok(restart)
     }
 
@@ -2480,6 +2507,30 @@ impl Worker {
                         }
                     });
                 }
+                Command::StopMirror => {
+                    if let Some(handle) = self.mirror.take() {
+                        handle.task.abort();
+                    }
+                }
+                Command::Mirror { serial, action } => self.mirror_action(serial, action),
+                Command::MirrorAddition {
+                    serial,
+                    pair,
+                    playlist,
+                    tracks,
+                } => {
+                    if let Some(handle) = &self.mirror {
+                        if handle.serial == serial
+                            && self.api.account().is_some()
+                            && self.connected_music[0]
+                        {
+                            match crate::playlist_mirror::enqueue(&self.dirs.state.join("playlist-mirror"),&pair,playlist,tracks).await {
+                                Ok(())=> {let _=handle.sender.send(crate::playlist_mirror::Action::Wake);},
+                                Err(error)=> self.emit(Event::MirrorProgress {serial,message:format!("YouTube addition was not queued: {error}. Spotify addition is independent.")}),
+                            }
+                        }
+                    }
+                }
                 Command::RestoreMusicAccounts => {
                     for provider in [
                         crate::music_accounts::Provider::YouTubeMusic,
@@ -2516,6 +2567,17 @@ impl Worker {
                 } => {
                     if serial < self.music_account_serial[provider as usize] {
                         continue;
+                    }
+                    if provider == crate::music_accounts::Provider::YouTubeMusic
+                        && !matches!(
+                            action,
+                            crate::music_accounts::Action::Refresh
+                                | crate::music_accounts::Action::Import(_)
+                        )
+                    {
+                        if let Some(handle) = self.mirror.take() {
+                            handle.task.abort();
+                        }
                     }
                     self.music_account_serial[provider as usize] = serial;
                     if let Some(task) = self.music_account_tasks[provider as usize].take() {
@@ -2740,6 +2802,9 @@ impl Worker {
                     });
                 }
                 Command::Shutdown => {
+                    if let Some(handle) = self.mirror.take() {
+                        handle.task.abort();
+                    }
                     for task in &mut self.music_account_tasks {
                         if let Some(task) = task.take() {
                             task.abort();
@@ -3168,11 +3233,12 @@ impl Worker {
                     });
                 }
                 Command::SpicyLyrics {
+                    lookup_uri,
                     request,
                     key,
                     generation,
                     refresh,
-                } => self.fetch_spicy_lyrics(*request, key, generation, refresh),
+                } => self.fetch_spicy_lyrics(*request, key, generation, refresh, lookup_uri),
                 Command::Rootlist => self.fetch_rootlist(),
                 Command::RootlistFinished { generation, result } => {
                     self.on_rootlist_finished(generation, result);
@@ -3947,6 +4013,9 @@ impl Worker {
 
     /// Cancels in-flight account work and drops cached Home data on sign-out.
     fn sign_out(&mut self) {
+        if let Some(handle) = self.mirror.take() {
+            handle.task.abort();
+        }
         if let Some(peek) = self.peek.take() {
             peek.cancel();
         }
@@ -4991,7 +5060,15 @@ impl Worker {
         key: String,
         generation: u64,
         refresh: bool,
+        lookup_uri: Option<String>,
     ) {
+        let lookup_uri = lookup_uri
+            .filter(|uri| {
+                uri.strip_prefix("spotify:track:").is_some_and(|id| {
+                    id.len() == 22 && id.bytes().all(|b| b.is_ascii_alphanumeric())
+                })
+            })
+            .unwrap_or_else(|| request.uri.clone());
         let http = self.http.client();
         let events = self.events.clone();
         let waker = self.waker.clone();
@@ -5016,11 +5093,11 @@ impl Worker {
             } else {
                 match http {
                     Ok(http) => {
-                        let exact = spotify_lyrics(engine, &request.uri, &cache).await;
+                        let exact = spotify_lyrics(engine, &lookup_uri, &cache).await;
                         crate::spicy_lyrics::fetch_with_fallback(
                             &http,
                             &cache,
-                            &request.uri,
+                            &lookup_uri,
                             &request.query,
                             &key,
                             refresh,
@@ -5216,6 +5293,53 @@ impl Worker {
     }
 
     // ---- api ----------------------------------------------------------------
+
+    fn mirror_action(&mut self, serial: u64, action: crate::playlist_mirror::Action) {
+        if self.music_account_tasks[0]
+            .as_ref()
+            .is_some_and(|task| !task.is_finished())
+        {
+            self.emit(Event::MirrorProgress {
+                serial,
+                message: "Waiting for the YouTube Music account operation to finish".into(),
+            });
+            return;
+        }
+        if !self.connected_music[0] || self.api.account().is_none() {
+            self.emit(Event::Mirror {
+                serial,
+                view: crate::playlist_mirror::View {
+                    message: "Connect Spotify and YouTube Music first".into(),
+                    ..Default::default()
+                },
+            });
+            return;
+        }
+        let start = self
+            .mirror
+            .as_ref()
+            .is_none_or(|h| h.serial != serial || h.task.is_finished());
+        if start {
+            if let Some(handle) = self.mirror.take() {
+                handle.task.abort();
+            }
+            self.mirror = Some(crate::playlist_mirror::start(
+                serial,
+                crate::playlist_mirror::Context {
+                    root: self.dirs.state.join("playlist-mirror"),
+                    config: self.dirs.config.clone(),
+                    proxy: self.engine_config.proxy.clone(),
+                    http: self.http.clone(),
+                    api: self.api.clone(),
+                    events: self.events.clone(),
+                    waker: self.waker.clone(),
+                },
+            ));
+        }
+        if let Some(handle) = &self.mirror {
+            let _ = handle.sender.send(action);
+        }
+    }
 
     fn queue_playlist_addition(
         &self,

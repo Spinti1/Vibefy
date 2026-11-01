@@ -18,6 +18,7 @@ pub mod music_accounts;
 pub mod music_search;
 pub mod new_releases;
 pub mod player_bar;
+mod playlist_mirror;
 mod prerelease;
 pub mod queue;
 pub mod radio;
@@ -240,10 +241,7 @@ fn page_tint(app: &mut App) -> Option<Color32> {
     let page = app.page().clone();
     let image = match &page {
         Page::LocalCollection(source) => app
-            .addons
-            .collections
-            .iter()
-            .find(|saved| &saved.source == source)
+            .source_collection(source)
             .and_then(|saved| saved.cover())
             .map(str::to_owned),
         Page::Playlist(id) => app
