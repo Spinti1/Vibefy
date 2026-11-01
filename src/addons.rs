@@ -582,6 +582,24 @@ pub struct Runtime {
     pub last_play_attempt: Option<std::time::Instant>,
 }
 
+impl Runtime {
+    /// Keep current bands and the last 24 Vivy frames without allocating each frame.
+    pub fn update_visual_levels(&mut self, levels: &[f32], keep_history: bool) {
+        self.bands.clear();
+        self.bands.extend_from_slice(levels);
+        if keep_history {
+            let mut ridge = if self.ridges.len() >= 24 {
+                self.ridges.pop_back().unwrap_or_default()
+            } else {
+                Vec::with_capacity(levels.len())
+            };
+            ridge.clear();
+            ridge.extend_from_slice(levels);
+            self.ridges.push_front(ridge);
+        }
+    }
+}
+
 pub fn load_collections(path: &std::path::Path) -> Vec<Collection> {
     let Ok(bytes) = std::fs::read(path) else {
         return Vec::new();

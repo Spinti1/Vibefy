@@ -1082,11 +1082,8 @@ fn sync_settings(app: &mut App, ui: &mut egui::Ui, global_offset: &mut i32) {
     ui.separator();
     ui.label("Sync points");
     ui.small("Shift+click a timed lyric as you hear its first word. One point fixes an intro offset; two or more also correct drift between points. Points and offsets are saved for this recording and lyrics version.");
-    if let Some(doc) = app
-        .spicy
-        .result
-        .get()
-        .and_then(|found| found.document.clone())
+    if let Some(found) = app.spicy.result.get().cloned()
+        && let Some(doc) = &found.document
     {
         let audio_ms = app.spicy_audio_position(&now);
         let active = doc

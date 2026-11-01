@@ -2,6 +2,7 @@
 //! no Spicetify runtime or extension code is embedded in the application.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -343,7 +344,8 @@ pub struct State {
     pub open: bool,
     pub uri: Option<String>,
     pub generation: u64,
-    pub result: Loadable<Fetch>,
+    /// Shared with rendering so timed words are not deep-copied every frame.
+    pub result: Loadable<Arc<Fetch>>,
     pub following: bool,
     pub shown_line: Option<Option<usize>>,
 }
@@ -358,7 +360,7 @@ impl State {
     pub fn receive(&mut self, uri: &str, generation: u64, result: Result<Fetch, String>) {
         if self.uri.as_deref() == Some(uri) && self.generation == generation {
             self.result = match result {
-                Ok(found) => Loadable::Loaded(found),
+                Ok(found) => Loadable::Loaded(Arc::new(found)),
                 Err(error) => Loadable::Failed(error),
             };
         }

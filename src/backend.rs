@@ -50,7 +50,7 @@ const RADIO_TIMEOUT: Duration = Duration::from_secs(20);
 /// playlist lists that will play are the ones shown as playable, and each
 /// one's file can be read for its cover and lyrics.
 fn local_file_uris(
-    folder: &std::path::Path,
+    _folder: &std::path::Path,
 ) -> std::collections::HashMap<String, std::path::PathBuf> {
     std::collections::HashMap::new()
 }
@@ -59,9 +59,6 @@ const HOME_EPISODES_PER_SHOW: u32 = 5;
 pub const PLAYLIST_PAGE_SIZE: u32 = 50;
 const RECONNECT_WINDOW: Duration = Duration::from_secs(600);
 const RECONNECT_LIMIT: usize = 6;
-/// Each followed artist's newest albums and singles the New releases
-/// fallback asks for.
-const NEW_RELEASES_PER_ARTIST: u32 = 10;
 /// Seconds between background attempts to bring the engine back with the
 /// saved playback grant after a connection failure that was not a rejected
 /// grant (#818). The last delay repeats, so a session lost overnight comes

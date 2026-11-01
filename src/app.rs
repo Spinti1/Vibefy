@@ -100,7 +100,6 @@ const QUEUE_STALE_RETRIES: u8 = 6;
 const QUEUE_ADD_DEBOUNCE: Duration = Duration::from_millis(1500);
 /// How many played contexts the sidebar's Recently played order keeps.
 const RECENT_CONTEXTS_KEPT: usize = 60;
-const CONTAINS_BATCH: usize = 40;
 
 pub struct RemoteSnapshot {
     pub state: PlaybackState,

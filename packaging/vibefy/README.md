@@ -8,4 +8,6 @@ ISCC.exe /DVersion=0.4.17 /DAppDir="C:\path\to\distribution" /DOutputDir="C:\pat
 
 The new Vibefy AppId is distinct from Spotifast. Setup installs per user without administrator rights. Silent updates honor /DIR from the existing updater helper. The marker must contain exactly `vibefy-installer-v1`. No uninstall rule removes per-user data, cache, credentials or libraries. The installer is not code-signed.
 
+Release builds use full LTO with speed optimizations retained. Setup uses solid LZMA2/max compression. This reduces the download where possible without removing runtime files; it does not shrink the installed speech model or audio cache. Compare final bytes with the previous release rather than assuming a fixed saving.
+
 Release assets must be named `vibefy-vVERSION-x86_64-pc-windows-msvc-setup.exe`. Generate checksums.txt over the exact final setup bytes; upload both as GitHub release assets. Before publication, confirm GitHub's asset size and digest match local SHA-256. Do not replace assets after a published release; publish a new version instead.

@@ -5,6 +5,45 @@ mod tests {
     const ID: &str = "1QV6tiMFM6fSOKOGLMHYYg";
 
     #[test]
+    fn rendered_lyrics_share_storage_and_survive_track_changes() {
+        use std::sync::Arc;
+        let mut state = State {
+            uri: Some("track".into()),
+            generation: 1,
+            ..Default::default()
+        };
+        let mut document = Document::default();
+        document.lines.push(Line {
+            text: "kept lyrics".into(),
+            ..Default::default()
+        });
+        state.receive(
+            "track",
+            1,
+            Ok(Fetch {
+                document: Some(document),
+                notice: None,
+            }),
+        );
+        let Loadable::Loaded(original) = &state.result else {
+            panic!("missing lyrics")
+        };
+        let rendered = Arc::clone(original);
+        assert!(Arc::ptr_eq(original, &rendered));
+        state.uri = Some("next".into());
+        state.generation = 2;
+        state.receive("next", 2, Ok(Fetch::default()));
+        assert_eq!(
+            rendered.document.as_ref().unwrap().lines[0].text,
+            "kept lyrics"
+        );
+        let Loadable::Loaded(next) = &state.result else {
+            panic!("missing next result")
+        };
+        assert!(!Arc::ptr_eq(&rendered, next));
+    }
+
+    #[test]
     fn syllables_keep_unicode_joining_duets_and_credits() {
         let json = json!({"Body": {
             "id": ID, "Type": "Syllable", "source": "spicy_lyrics",

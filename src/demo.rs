@@ -1757,10 +1757,10 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 app.spicy.result = if surface == "spicy-error" {
                     Loadable::Failed("Connection interrupted".into())
                 } else {
-                    Loadable::Loaded(crate::spicy_lyrics::Fetch {
+                    Loadable::Loaded(std::sync::Arc::new(crate::spicy_lyrics::Fetch {
                         document: (surface != "spicy-empty").then_some(doc),
                         notice: None,
-                    })
+                    }))
                 };
                 if surface == "spicy-dynamic" {
                     app.settings.spicy_lyrics_appearance.background =

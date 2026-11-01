@@ -32,11 +32,9 @@ fn audio(app: &mut App, ctx: &egui::Context) {
     app.addons
         .beat
         .step(if sounding { bass } else { 0.0 }, time, elapsed);
-    app.addons.bands = levels.to_vec();
-    if sounding {
-        app.addons.ridges.push_front(levels.to_vec());
-        app.addons.ridges.truncate(24);
-    }
+    // Only Vivy draws history; Backmusic needs current bands alone.
+    let keep_history = sounding && app.settings.addons.visualizer.unwrap_or(Id::Vivy) == Id::Vivy;
+    app.addons.update_visual_levels(&levels, keep_history);
 }
 
 pub fn fullscreen(app: &mut App, ui: &mut egui::Ui) {

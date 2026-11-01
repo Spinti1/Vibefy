@@ -27,7 +27,7 @@ jobs:
       - run: node --test web/tests/*.test.cjs
   native:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - run: cargo fmt --all --check
@@ -36,4 +36,6 @@ jobs:
           rustc --edition 2024 --test src/title_similarity.rs -o target/title-similarity-tests.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./target/title-similarity-tests.exe
-      - run: cargo test --release --locked -j 2 --features demo --test update_integrity --test update_launch --test branding --test spotify_match --test source_playlist --test window_restore --test recording_match
+      - run: cargo test --release --locked -j 2 --features demo --test update_integrity --test update_launch --test branding --test spotify_match --test source_playlist --test window_restore --test recording_match --test native_addons --test mod_artwork --test visual_buffers
+      - run: cargo test --release --locked -j 2 --features demo --test spicy_native tests::
+      - run: cargo test --release --locked -j 2 --features demo --test spicy_native ui::word_line_plain_and_error_views_render_in_both_themes
