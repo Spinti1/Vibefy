@@ -31,4 +31,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: cargo fmt --all --check
-      - run: cargo test --release --locked -j 2 --features demo --test update_integrity --test update_launch --test branding --test spotify_match --test source_playlist --test window_restore
+      - run: |
+          New-Item -ItemType Directory -Force target | Out-Null
+          rustc --edition 2024 --test src/title_similarity.rs -o target/title-similarity-tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./target/title-similarity-tests.exe
+      - run: cargo test --release --locked -j 2 --features demo --test update_integrity --test update_launch --test branding --test spotify_match --test source_playlist --test window_restore --test recording_match

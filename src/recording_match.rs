@@ -227,7 +227,7 @@ fn artist_in_title(recording: &Recording, artist: &str) -> bool {
 
 fn candidate_title_key(recording: &Recording, reference: &Reference) -> String {
     let bare = title_key(recording.title.as_deref().unwrap_or(""), &[]);
-    if bare == title_key(&reference.title, &[]) {
+    if crate::title_similarity::score(&title_key(&reference.title, &[]), &bare).is_some() {
         return bare;
     }
     let mut prefixes = reference.artists.clone();
@@ -243,7 +243,9 @@ fn candidate_title_key(recording: &Recording, reference: &Reference) -> String {
         for (index, c) in title.char_indices() {
             if matches!(c, '-' | '–' | '—' | ':') {
                 let tail = title_key(&title[index + c.len_utf8()..], &prefixes);
-                if tail == title_key(&reference.title, &[]) {
+                if crate::title_similarity::score(&title_key(&reference.title, &[]), &tail)
+                    .is_some()
+                {
                     return tail;
                 }
             }
@@ -349,13 +351,12 @@ fn base_score(reference: &Reference, recording: &Recording, full_metadata: bool)
     {
         return None;
     }
-    if candidate_title_key(recording, reference) != key {
-        return None;
-    }
+    let title_score =
+        crate::title_similarity::score(&key, &candidate_title_key(recording, reference))?;
     // Conflicting music credits override an attractive video title.
     if let Some(track) = recording.track.as_deref()
         && !track.is_empty()
-        && title_key(track, &[]) != key
+        && crate::title_similarity::score(&key, &title_key(track, &[])).is_none()
     {
         return None;
     }
@@ -411,6 +412,7 @@ fn base_score(reference: &Reference, recording: &Recording, full_metadata: bool)
         return None;
     }
     let mut score = 200
+        + title_score
         + match difference as u32 {
             0..=2 => 100,
             3..=5 => 70,

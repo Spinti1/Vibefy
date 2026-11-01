@@ -29,6 +29,8 @@ Spotify account features remain subject to Spotify authorization, account requir
 
 The native engine's title, artist, version, duration and source-ranking rules are documented in [Recording selection](docs/_reference/vibefy-recording-selection.md).
 
+Version 0.4.19 accepts closely similar recording titles, with exact titles ranked higher. The audio format row shows automatic AAC/M4A playback and its MP4 fallback. File size depends mainly on bitrate and duration; MP3 conversion is not used.
+
 ## Mobile web beta
 
 On desktop and laptop, the [website](https://usevibefy.online) presents the native app and downloads. On phones it opens the mobile player with search, queue, local collections, public playlist import, LRCLIB lyrics and official YouTube playback. Optional browser adaptations include Nyan Cat, Oneko, Cat Jam (manual tempo) and Track Peek. Browser Jam connects phone users through WebRTC; it is separate from native LAN sessions.

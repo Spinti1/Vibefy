@@ -57,13 +57,9 @@ fn flexez_official_recording_still_beats_an_acceptable_independent_upload() {
 }
 
 #[test]
-fn exact_song_title_beats_word_overlap_and_preserves_numbered_sequels() {
+fn similar_titles_are_allowed_but_shared_words_and_numbered_sequels_are_distinct() {
     let reference = reference("Never Recover", &["Ian", "Azteca"], 116);
-    for title in [
-        "Ian - Never Recover Again",
-        "Ian - Recover Never",
-        "Ian - Never Recover 2",
-    ] {
+    for title in ["Ian - Never Recover Again", "Ian - Never Recover 2"] {
         assert!(
             verified_match(&reference, &upload(title, "Ian", 116.0, true)).is_none(),
             "{title}"
@@ -78,6 +74,35 @@ fn exact_song_title_beats_word_overlap_and_preserves_numbered_sequels() {
         .is_none()
     );
     assert!(verified_match(&reference, &distributed("Never Recover", "Ian", 116.0)).is_some());
+    assert!(
+        verified_match(
+            &reference,
+            &upload("Ian - Recover Never", "Ian", 116.0, true)
+        )
+        .is_some()
+    );
+    let typo = verified_match(&reference, &distributed("Never Recove", "Ian", 116.0)).unwrap();
+    let exact = verified_match(&reference, &distributed("Never Recover", "Ian", 116.0)).unwrap();
+    assert!(exact.score > typo.score);
+}
+
+#[test]
+fn approximate_title_still_requires_the_right_artist_version_and_duration() {
+    let reference = reference("I Am Machine", &["Three Days Grace"], 201);
+    assert!(
+        verified_match(
+            &reference,
+            &distributed("I Am Machne", "Three Days Grace", 201.0)
+        )
+        .is_some()
+    );
+    for recording in [
+        distributed("I Am Machne", "Other Artist", 201.0),
+        distributed("I Am Machne", "Three Days Grace", 270.0),
+        distributed("I Am Machne (Karaoke)", "Three Days Grace", 201.0),
+    ] {
+        assert!(verified_match(&reference, &recording).is_none());
+    }
 }
 
 #[test]

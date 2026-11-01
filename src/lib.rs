@@ -67,6 +67,7 @@ pub mod storage;
 pub mod system_fonts;
 pub mod theme;
 pub mod thumbbar;
+mod title_similarity;
 pub mod ui;
 pub mod updates;
 pub mod util;

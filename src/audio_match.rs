@@ -1,6 +1,6 @@
 //! Recording selection and an audio clock that retains fractional milliseconds.
 
-pub const MATCHER_VERSION: u8 = 4;
+pub const MATCHER_VERSION: u8 = 5;
 
 pub fn audible_position(decoded_ms: u32, queued_ms: u32) -> u32 {
     decoded_ms.saturating_sub(queued_ms)

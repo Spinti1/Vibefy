@@ -525,8 +525,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             gettext(locale, "Local playback device name."),
         ),
         RowText::new(
-            gettext(locale, "Audio quality"),
-            gettext(locale, "Higher bitrates use more data and cache space."),
+            gettext(locale, "Audio format"),
+            gettext(locale, "Best available AAC audio (.m4a, with .mp4 fallback). File size depends on bitrate and duration."),
         ),
         RowText::new(
             normalize_volume.clone(),
@@ -654,62 +654,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     playback_dirty = true;
                 }
             });
-            // Normal to Very high, left to right when side by side and top
-            // to bottom in a column.
-            let choices = [
-                (96u16, gettext(locale, "Normal · 96 kbps")),
-                (160, gettext(locale, "High · 160 kbps")),
-                (320, gettext(locale, "Very high · 320 kbps")),
-            ];
-            let choice_gap = 6.0;
-            let choices_width = choices
-                .iter()
-                .map(|(_, label)| theme::soft_button_width(ui, label))
-                .sum::<f32>()
-                + choice_gap * (choices.len() - 1) as f32;
-            filtered_row_sized(
-                ui,
-                &palette,
-                &needle,
-                &playback,
-                &playback_rows[2],
-                choices_width,
-                |ui| {
-                    let mut choose = |ui: &mut egui::Ui, kbps: u16, label: &str| {
-                        if theme::soft_button(
-                            ui,
-                            &palette,
-                            None,
-                            label,
-                            app.settings.bitrate == kbps,
-                        )
-                        .clicked()
-                            && app.settings.bitrate != kbps
-                        {
-                            app.settings.bitrate = kbps;
-                            changed = true;
-                            playback_dirty = true;
-                        }
-                    };
-                    if ui.available_width() >= choices_width {
-                        // Laid right to left, so the last choice goes first.
-                        ui.horizontal(|ui| {
-                            ui.spacing_mut().item_spacing.x = choice_gap;
-                            for (kbps, label) in choices.iter().rev() {
-                                choose(ui, *kbps, label);
-                            }
-                        });
-                    } else {
-                        // Too narrow even for a line of their own: a column.
-                        ui.with_layout(Layout::top_down(Align::Max), |ui| {
-                            ui.spacing_mut().item_spacing.y = choice_gap;
-                            for (kbps, label) in &choices {
-                                choose(ui, *kbps, label);
-                            }
-                        });
-                    }
-                },
-            );
+            filtered_row(ui, &palette, &needle, &playback, &playback_rows[2], |ui| {
+                ui.label(gettext(locale, "Automatic · AAC"));
+            });
             filtered_row(ui, &palette, &needle, &playback, &playback_rows[3], |ui| {
                 if widgets::switch(
                     ui,
