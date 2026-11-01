@@ -50,6 +50,7 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.4.27" date="2026-11-02"><description><p>Create unlisted YouTube Music playlist copies while preserving existing private copies.</p></description></release>
     <release version="0.4.26" date="2026-11-02"><description><p>Private YouTube Music playlist copies from Spotify, independent queued additions, recording review and unified Home playlists.</p></description></release>
     <release version="0.4.25" date="2026-11-01">
       <description><p>YouTube Music browser-session and JuiceVault connections, provider playlist imports on Home, and native archive playback.</p></description>

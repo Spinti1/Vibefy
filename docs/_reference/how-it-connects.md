@@ -6,10 +6,12 @@ nav_order: 1
 
 ## Vibefy HTTPS and sign-in transport
 
-## Private playlist copies (0.4.26)
+## Unlisted playlist copies (0.4.27)
 
 Playlist sync is disabled by default for every Spotify/YouTube Music account pair.
-Settings shows the exact pair before the user enables private copies. The native
+Settings shows the exact pair before the user enables unlisted copies. Anyone
+with the link can access a new copy; existing private copies retain their
+visibility. The native
 service reads YouTube's account menu to identify the active channel and scopes
 its journal/inbox to SHA-256 of the two identities. It is cancelled on sign-out,
 session replacement, account changes and shutdown. Proxy changes restart it with
@@ -30,17 +32,17 @@ avoids rewriting the library for each match and recovers complete records after 
 torn final append. Cache data and playlist journals remain local; credentials stay
 in the separate protected session store.
 
-Private Music copies retain a deterministic recovery marker in their descriptions.
+Music copies retain a deterministic recovery marker in their descriptions.
 Before creation or append, a durable intent is saved atomically. Interrupted
-creation searches for the private marked copy instead of blindly creating again.
+creation searches for the marked copy instead of blindly creating again.
 Append reconciliation compares occurrence counts, preserving intentional repeats
-without replaying an acknowledged batch. The service checks private editable
+without replaying an acknowledged batch. The service checks unlisted/private editable
 headers before adding songs. Complete per-video acknowledgements settle a batch;
 otherwise the resulting playlist is read back. Unconfirmed writes stop for review.
 Allow retry requires the user's explicit confirmation that they checked the remote
 playlist. No automatic deletions, privacy changes or overwriting of unrelated
 playlists are implemented. If a user deletes a linked remote copy or changes its
-marker/privacy, that playlist stops syncing and reports the error.
+marker or makes it public, that playlist stops syncing and reports the error.
 
 New additions to an already linked Spotify playlist are stored in an independent,
 account-paired YouTube inbox before the actor is notified. Spotify's existing

@@ -96,7 +96,11 @@ pub fn playlist_details(value: &Value) -> (bool, String) {
         return (false, String::new());
     };
     let editor = find_section(header, "musicPlaylistEditHeaderRenderer", 0);
-    let private = editor.and_then(|v| v["privacy"].as_str()) == Some("PRIVATE");
+    // Existing private copies stay private; newly created copies are unlisted.
+    let allowed_visibility = matches!(
+        editor.and_then(|v| v["privacy"].as_str()),
+        Some("PRIVATE" | "UNLISTED")
+    );
     let description = editor
         .and_then(|v| v.pointer("/description/runs"))
         .and_then(Value::as_array)
@@ -116,7 +120,7 @@ pub fn playlist_details(value: &Value) -> (bool, String) {
                 })
         })
         .unwrap_or_default();
-    (private, description)
+    (allowed_visibility, description)
 }
 pub fn retry_after(value: Option<&str>, now: u64) -> u64 {
     value
@@ -131,7 +135,7 @@ pub fn retry_after(value: Option<&str>, now: u64) -> u64 {
         .unwrap_or(60)
         .max(1)
 }
-pub fn private_playlist_body(title: &str, marker: &str) -> Result<Value> {
+pub fn unlisted_playlist_body(title: &str, marker: &str) -> Result<Value> {
     let title: String = title
         .chars()
         .filter(|c| !matches!(c, '<' | '>'))
@@ -141,7 +145,7 @@ pub fn private_playlist_body(title: &str, marker: &str) -> Result<Value> {
         !title.trim().is_empty() && marker.len() <= 1000,
         "The playlist needs a valid title and marker"
     );
-    Ok(json!({"title":title,"description":marker,"privacyStatus":"PRIVATE"}))
+    Ok(json!({"title":title,"description":marker,"privacyStatus":"UNLISTED"}))
 }
 pub fn append_confirmed(value: &Value, expected: &[String]) -> bool {
     if value["status"].as_str() != Some("STATUS_SUCCEEDED") {
@@ -441,7 +445,7 @@ impl Session {
             .await?;
         Ok(playlist_details(&value))
     }
-    pub async fn create_private(
+    pub async fn create_unlisted(
         &self,
         proxy: &ProxyConfig,
         title: &str,
@@ -451,7 +455,7 @@ impl Session {
             .post(
                 &Self::client(proxy)?,
                 "playlist/create",
-                private_playlist_body(title, marker)?,
+                unlisted_playlist_body(title, marker)?,
                 None,
             )
             .await?;

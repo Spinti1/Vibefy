@@ -1,4 +1,4 @@
-//! Per-account, opt-in Spotify -> private YouTube Music playlist copies.
+//! Per-account, opt-in Spotify -> unlisted YouTube Music playlist copies.
 //! Durable intents make interrupted remote writes recoverable without blind replay.
 use crate::{
     addons::Collection,
@@ -741,10 +741,7 @@ impl Service {
         Ok(())
     }
     fn marker(&self, id: &str) -> String {
-        format!(
-            "Private playlist copy managed by Vibefy.\nVibefy mirror: {}:{id}",
-            self.pair
-        )
+        format!("Vibefy mirror: {}:{id}", self.pair)
     }
     async fn discover(&self, id: &str, title: &str) -> Result<Option<String>> {
         let marker = self.marker(id);
@@ -767,11 +764,11 @@ impl Service {
         );
         for candidate in candidates {
             let raw = candidate.id.strip_prefix("VL").unwrap_or(&candidate.id);
-            let (private, description) = self.session.details(&self.proxy, raw).await?;
-            if private && description.contains(&marker) {
+            let (allowed_visibility, description) = self.session.details(&self.proxy, raw).await?;
+            if allowed_visibility && description.contains(&marker) {
                 ensure!(
                     found.is_none(),
-                    "Multiple private copies found; check them before retrying"
+                    "Multiple linked copies found; check them before retrying"
                 );
                 found = Some(raw.to_owned());
             }
@@ -800,7 +797,14 @@ impl Service {
                 self.save().await?;
                 let result = self
                     .session
-                    .create_private(&self.proxy, &list.title, &self.marker(id))
+                    .create_unlisted(
+                        &self.proxy,
+                        &list.title,
+                        &format!(
+                            "Unlisted playlist copy managed by Vibefy.\n{}",
+                            self.marker(id)
+                        ),
+                    )
                     .await;
                 match result {
                     Ok(youtube_id) => {
@@ -817,10 +821,11 @@ impl Service {
             }
         }
         let list = self.journal.lists[id].clone();
-        let (private, description) = self.session.details(&self.proxy, &list.youtube_id).await?;
+        let (allowed_visibility, description) =
+            self.session.details(&self.proxy, &list.youtube_id).await?;
         ensure!(
-            private && description.contains(&self.marker(id)),
-            "The linked copy is no longer private or its Vibefy marker changed. No songs were added."
+            allowed_visibility && description.contains(&self.marker(id)),
+            "The linked copy must be unlisted or private and keep its Vibefy marker. No songs were added."
         );
         let mut current = self
             .session
@@ -998,7 +1003,7 @@ impl Service {
             self.update_view(&id);
         }
         self.publish(
-            "Ready. Enable sync to create private YouTube Music copies.",
+            "Ready. Enable sync to create unlisted YouTube Music copies.",
             false,
         );
         let mut due = 0;

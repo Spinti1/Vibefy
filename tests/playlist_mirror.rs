@@ -33,14 +33,14 @@ fn account_pairs_are_isolated_and_stable() {
     assert!(a.len() == 64 && a.bytes().all(|b| b.is_ascii_hexdigit()));
 }
 #[test]
-fn copies_are_always_created_private_and_keep_the_recovery_marker() {
+fn copies_are_always_created_unlisted_and_keep_the_recovery_marker() {
     let body =
-        music_session::private_playlist_body("Rock <example>", "Vibefy mirror: pair:playlist")
+        music_session::unlisted_playlist_body("Rock <example>", "Vibefy mirror: pair:playlist")
             .unwrap();
-    assert_eq!(body["privacyStatus"], "PRIVATE");
+    assert_eq!(body["privacyStatus"], "UNLISTED");
     assert_eq!(body["description"], "Vibefy mirror: pair:playlist");
     assert_eq!(body["title"], "Rock example");
-    assert!(music_session::private_playlist_body(" <> ", "marker").is_err());
+    assert!(music_session::unlisted_playlist_body(" <> ", "marker").is_err());
 }
 #[test]
 fn privacy_and_marker_come_only_from_the_editable_playlist_header() {
@@ -60,6 +60,12 @@ fn privacy_and_marker_come_only_from_the_editable_playlist_header() {
     );
     let public = json!({"header":{"musicEditablePlaylistDetailHeaderRenderer":{"editHeader":{"musicPlaylistEditHeaderRenderer":{"privacy":"PUBLIC","description":{"runs":[{"text":"Vibefy mirror: x"}]}}}}}});
     assert!(!music_session::playlist_details(&public).0);
+    for visibility in ["UNLISTED", "PRIVATE", "PUBLIC", "UNKNOWN", ""] {
+        let page = json!({"header":{"musicEditablePlaylistDetailHeaderRenderer":{"editHeader":{"musicPlaylistEditHeaderRenderer":{"privacy":visibility,"description":{"runs":[{"text":"Vibefy mirror: x"}]}}}}}});
+        let (allowed, description) = music_session::playlist_details(&page);
+        assert_eq!(allowed, matches!(visibility, "UNLISTED" | "PRIVATE"));
+        assert_eq!(description, "Vibefy mirror: x");
+    }
 }
 #[test]
 fn repeated_songs_preserve_multiplicity_without_replaying_existing_entries() {

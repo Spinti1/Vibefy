@@ -3,7 +3,7 @@ use crate::{app::App, backend::Command, playlist_mirror::Action, theme};
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     ui.separator();
     ui.heading("Spotify → YouTube Music");
-    ui.label("Create private copies of your Spotify playlists in YouTube Music and show each linked playlist once in Vibefy. Songs added in Vibefy are queued separately for both services. Deletions stay separate.");
+    ui.label("Create unlisted copies of your Spotify playlists in YouTube Music. Anyone with a copy’s link can access it. Existing private copies stay private. Each linked playlist appears once in Vibefy. Songs added in Vibefy are queued separately for both services. Deletions stay separate.");
     if !app.music_accounts[0].connected || app.user_id().is_none() {
         ui.small("Connect Spotify and YouTube Music above to set up this account pair.");
         return;
@@ -22,7 +22,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         if ui
             .checkbox(
                 &mut enabled,
-                "Sync my playlists to private YouTube Music copies",
+                "Sync my playlists to unlisted YouTube Music copies",
             )
             .changed()
         {
@@ -71,7 +71,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                                 list.missing
                             ))
                             .on_hover_text(
-                                list.issue.as_deref().unwrap_or("Private linked playlist"),
+                                list.issue
+                                    .as_deref()
+                                    .unwrap_or("Linked YouTube Music playlist"),
                             );
                             if list.uncertain
                                 && ui
