@@ -40,4 +40,4 @@ For each future user-requested functional update, increment the Vibefy patch ver
 
 0.4.21: Native lossless background AAC/MP4 cache compaction; process search/inspection responses as they arrive for fully verified catalogue playback; skip identical recording-index writes. No new runtime executable, bitrate reduction or changed artist/version/duration rules.
 
-0.4.22: Plain lyrics no longer stop synchronized-provider lookup; plain Spotify lyrics can fall back to timed LRCLIB entries, and timed More Lyrics results replace plain text. Plain LRCLIB caches and misses are retried after six hours. Existing word timing, credits and plain-text fallback are retained.
+0.4.22: Plain lyrics no longer stop synchronized-provider lookup; plain Spotify lyrics can fall back to timed LRCLIB entries, and timed More Lyrics results replace plain text. Pre-fix plain caches are rechecked once; new plain caches and misses expire after six hours. Existing word timing, credits and plain-text fallback are retained.

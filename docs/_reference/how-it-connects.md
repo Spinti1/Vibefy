@@ -20,8 +20,10 @@ Plain Spotify lyrics trigger LRCLIB lookup, including search for a compatible
 timed entry when its exact album entry has text only. More Lyrics
 (https://lyrics.kamiloo13.me/api/get) is tried when the previous sources
 still have no timed result. Timed lyrics replace plain text; failures retain
-usable plain text. Plain LRCLIB answers and misses expire after six hours;
-timed LRCLIB answers retain their thirty-day cache. A usable timed fallback
+usable plain text. The LRCLIB search deadline leaves time to return an exact
+plain result before the panel timeout. Pre-fix plain caches are rechecked once
+on first use; new plain answers and misses expire after six hours. Timed
+answers retain their thirty-day cache. A usable timed fallback
 waits at most 700 ms for Spicy before returning. No timing is fabricated:
 line synchronization and word synchronization require their respective timestamps.
 More Lyrics receives artist, title, album and duration only. All providers use

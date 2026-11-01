@@ -149,6 +149,9 @@ async fn lookup(http: &reqwest::Client, query: &Query) -> Result<Option<Lyrics>>
 }
 
 async fn lookup_at(http: &reqwest::Client, query: &Query, api: &str) -> Result<Option<Lyrics>> {
+    // Leave room to return an exact plain result before the panel's outer
+    // twelve-second deadline cancels this lookup.
+    let search_deadline = tokio::time::Instant::now() + Duration::from_secs(11);
     let title = clean_title(&query.title);
     let artist = clean_artist(&query.artist);
     if title.is_empty() || artist.is_empty() {
@@ -174,20 +177,24 @@ async fn lookup_at(http: &reqwest::Client, query: &Query, api: &str) -> Result<O
     {
         return Ok(exact);
     }
-    let candidates = get_from::<Vec<Record>>(
-        http,
-        api,
-        "/search",
-        &[
-            ("artist_name", artist.as_str()),
-            ("track_name", title.as_str()),
-        ],
+    let candidates = tokio::time::timeout_at(
+        search_deadline,
+        get_from::<Vec<Record>>(
+            http,
+            api,
+            "/search",
+            &[
+                ("artist_name", artist.as_str()),
+                ("track_name", title.as_str()),
+            ],
+        ),
     )
     .await;
     let candidates = match candidates {
-        Ok(candidates) => candidates.unwrap_or_default(),
-        Err(_) if exact.is_some() => return Ok(exact),
-        Err(error) => return Err(error),
+        Ok(Ok(candidates)) => candidates.unwrap_or_default(),
+        Ok(Err(_)) | Err(_) if exact.is_some() => return Ok(exact),
+        Ok(Err(error)) => return Err(error),
+        Err(_) => anyhow::bail!("LRCLIB search timed out"),
     };
     // A plain exact entry must not hide a timed entry on another album.
     // Keep the existing title/artist/duration ranking among timed candidates.
@@ -656,6 +663,9 @@ fn leading_stamp(text: &str) -> Option<(u32, usize)> {
 #[derive(Serialize, Deserialize)]
 struct Cached {
     found: Option<Lyrics>,
+    /// Older plain entries may have skipped the synchronized search entirely.
+    #[serde(default)]
+    timing_checked: bool,
 }
 
 fn cache_key(query: &Query) -> String {
@@ -673,11 +683,14 @@ fn read_cache(path: &PathBuf) -> Option<Option<Lyrics>> {
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
     let text = std::fs::read_to_string(path).ok()?;
     let cached = serde_json::from_str::<Cached>(&text).ok()?;
-    let lifetime = if cached
+    let timed = cached
         .found
         .as_ref()
-        .is_some_and(|lyrics| lyrics.synced || lyrics.instrumental)
-    {
+        .is_some_and(|lyrics| lyrics.synced || lyrics.instrumental);
+    if !timed && !cached.timing_checked {
+        return None;
+    }
+    let lifetime = if timed {
         CACHE_LIFETIME
     } else {
         PLAIN_CACHE_LIFETIME
@@ -691,6 +704,7 @@ fn write_cache(path: &Path, found: &Option<Lyrics>) {
     }
     if let Ok(text) = serde_json::to_string(&Cached {
         found: found.clone(),
+        timing_checked: true,
     }) {
         let _ = std::fs::write(path, text);
     }
@@ -819,6 +833,30 @@ mod tests {
                 read_cache(&path).is_some(),
                 found.as_ref().is_some_and(|lyrics| lyrics.synced)
             );
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn pre_fix_plain_caches_retry_once_but_old_timed_caches_remain_usable() {
+        let path = std::env::temp_dir().join(format!(
+            "vibefy-lyrics-upgrade-{}.json",
+            rand::random::<u64>()
+        ));
+        for found in [
+            None,
+            from_text("Plain words"),
+            from_text("[00:01]Timed words"),
+        ] {
+            std::fs::write(
+                &path,
+                serde_json::to_vec(&serde_json::json!({"found": found})).unwrap(),
+            )
+            .unwrap();
+            let timed = found.as_ref().is_some_and(|lyrics| lyrics.synced);
+            assert_eq!(read_cache(&path).is_some(), timed);
+            write_cache(&path, &found);
+            assert_eq!(read_cache(&path), Some(found));
         }
         std::fs::remove_file(path).unwrap();
     }
