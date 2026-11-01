@@ -37,5 +37,5 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./target/title-similarity-tests.exe
       - run: cargo test --release --locked -j 2 --features demo --test update_integrity --test update_launch --test branding --test spotify_match --test source_playlist --test window_restore --test recording_match --test native_addons --test mod_artwork --test visual_buffers
-      - run: cargo test --release --locked -j 2 --features demo --test spicy_native tests::
+      - run: 'cargo test --release --locked -j 2 --features demo --test spicy_native tests::'
       - run: cargo test --release --locked -j 2 --features demo --test spicy_native ui::word_line_plain_and_error_views_render_in_both_themes
