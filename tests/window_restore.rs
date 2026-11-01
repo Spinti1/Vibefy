@@ -13,9 +13,14 @@ fn frame(
     viewport.minimized = Some(minimized);
     viewport.fullscreen = Some(fullscreen);
     let output = ctx.run_ui(input, |_| recover_main_size(ctx, Some([1100.0, 700.0])));
+    // egui initializes the native theme on a context's first frame. That
+    // command is unrelated to whether geometry recovery resized the window.
     output.viewport_output[&egui::ViewportId::ROOT]
         .commands
-        .clone()
+        .iter()
+        .filter(|command| !matches!(command, egui::ViewportCommand::SetTheme(_)))
+        .cloned()
+        .collect()
 }
 
 #[test]
