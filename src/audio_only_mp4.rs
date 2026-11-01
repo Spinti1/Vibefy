@@ -252,10 +252,13 @@ pub fn extract(input: &[u8]) -> Parse<Option<Vec<u8>>> {
             u32_at(offset_data, at)?
         };
         let end = start.checked_add(length).ok_or("chunk overflow")?;
+        // Top-level media ranges are ordered and disjoint. Avoid a linear
+        // scan per chunk in files with many mdat atoms.
+        let media_index = media_ranges.partition_point(|range| range.end <= start);
         if length == 0
             || !media_ranges
-                .iter()
-                .any(|r| start >= r.start && end <= r.end)
+                .get(media_index)
+                .is_some_and(|r| start >= r.start && end <= r.end)
         {
             return Err("chunk outside media");
         }

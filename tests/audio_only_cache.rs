@@ -162,6 +162,22 @@ fn damaged_container_headers_do_not_panic() {
 }
 
 #[test]
+fn many_media_atoms_do_not_change_the_audio_chunk_mapping() {
+    let mut original = fixture(false, false);
+    let ftyp_end = u32::from_be_bytes(original[..4].try_into().unwrap()) as usize;
+    let padding = atom(b"mdat", &[]).repeat(4000);
+    let offsets = original.windows(4).position(|b| b == b"stco").unwrap() + 12;
+    for at in [offsets, offsets + 4] {
+        let offset = u32::from_be_bytes(original[at..at + 4].try_into().unwrap());
+        original[at..at + 4].copy_from_slice(&(offset + padding.len() as u32).to_be_bytes());
+    }
+    original.splice(ftyp_end..ftyp_end, padding);
+    let output = extract(&original).unwrap().unwrap();
+    assert_eq!(&output[output.len() - 12..], b"AAC1AAC2AAC3");
+    assert!(!contains_video(&output));
+}
+
+#[test]
 fn compaction_preserves_the_buffer_in_use_and_does_not_escape_the_cache() {
     let root = std::env::temp_dir().join(format!("vibefy-audio-only-{}", rand::random::<u64>()));
     let cache = spotifast::player::MatchCache::new(&root);
