@@ -2887,6 +2887,10 @@ impl App {
                         continue;
                     }
                     self.music_accounts[index].busy = false;
+                    let auth_pending = std::mem::take(&mut self.music_accounts[index].auth_pending);
+                    if auth_pending && result.is_ok() && !disconnected {
+                        self.actions.push(Action::ShowWindow);
+                    }
                     match result {
                         Ok(update) => {
                             let state = &mut self.music_accounts[index];
@@ -2898,7 +2902,10 @@ impl App {
                                 self.save_source_collection(collection);
                             }
                         }
-                        Err(error) => self.music_accounts[index].message = Some(error),
+                        Err(error) => {
+                            self.music_accounts[index].enable_sync_after_connect = false;
+                            self.music_accounts[index].message = Some(error);
+                        }
                     }
                 }
                 Event::AddonFetched { request, result } => {

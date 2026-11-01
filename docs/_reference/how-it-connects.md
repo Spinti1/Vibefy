@@ -6,6 +6,43 @@ nav_order: 1
 
 ## Vibefy HTTPS and sign-in transport
 
+## Official YouTube connection (0.4.28)
+
+The welcome screen and Home after Spotify sign-in offer Connect YouTube directly.
+It opens Google's official account chooser in the default browser. The desktop
+flow binds an ephemeral 127.0.0.1 port, uses random state and PKCE S256, validates
+its exact callback route, and closes on cancellation or a ten-minute timeout.
+Authorization codes are exchanged once. Responses and credentials are never logged.
+
+YouTube playlist access uses youtube.force-ssl and the official YouTube Data API.
+The channel identity is read before saving a connection. Only the refresh token
+and its application identity are persisted in protected music-account storage;
+access tokens are refreshed under a task-local mutex and retained in memory.
+Tokens are sent only to fixed Google HTTPS endpoints with redirects disabled.
+
+Connecting from the Spotify-connected Home card explicitly explains unlisted
+copies and enables sync for that account pair. Startup restoration never enables
+sync for a new pair on its own. Existing browser-session connections are retained
+for compatibility; the file-import/DevTools path is removed from the UI. Google
+OAuth channel identities form their own account pairs; old browser-session copies
+are not deleted or automatically adopted into a different identity.
+
+Official API mutations use one video per durable intent, because the Data API
+inserts one playlist item per request. A later quota failure cannot cause a
+successful earlier insert in that batch to be retried. Explicit rate/quota errors
+are deferred; ambiguous writes retain the existing reconciliation requirements.
+Google verification, daily project quota and authorization restrictions remain.
+The Data API lists the connected channel's owned playlists; it does not expose
+all personalized YouTube Music recommendations or every saved third-party list.
+
+Maintainer builds read the Desktop OAuth JSON from the ignored
+.cache/google-oauth.json, or VIBEFY_GOOGLE_OAUTH_CONFIG. It is copied only into
+Cargo's output directory for embedding in the native application, never into
+source or release attachments. Desktop clients are public clients; a bundled
+client secret is not a confidential server credential. Ordinary users never
+create a project or enter a Client ID. Development/CI builds without this file
+compile, but cannot connect Google and must not be published as a working login.
+
 ## Unlisted playlist copies (0.4.27)
 
 Playlist sync is disabled by default for every Spotify/YouTube Music account pair.
@@ -15,8 +52,8 @@ visibility. The native
 service reads YouTube's account menu to identify the active channel and scopes
 its journal/inbox to SHA-256 of the two identities. It is cancelled on sign-out,
 session replacement, account changes and shutdown. Proxy changes restart it with
-the new transport. No shared server, application OAuth client, passwords, cookies
-or cross-user data is placed in the synchronization journal.
+the new transport. No passwords, cookies, refresh tokens or cross-user data are placed in the
+synchronization journal.
 
 Spotify library pages and complete song pages are read through the existing API
 gateway, with the same access requirements and cooldowns. A second snapshot read
@@ -66,7 +103,8 @@ code and the installed app without deleting remote private copies or user data.
 
 ## Optional YouTube Music and JuiceVault connections (0.4.25)
 
-Settings and the sign-in screen offer independent music-account connections.
+Settings offers independent music-account connections. This section describes
+the legacy browser-session connection retained for existing saved sessions.
 A connected Music or JuiceVault account opens the source player without Spotify.
 Spotify operations still require their own Spotify sign-in and permissions.
 
@@ -74,7 +112,7 @@ YouTube Music uses the user's existing browser session, following the documented
 [ytmusicapi browser setup](https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html).
 The user explicitly selects a UTF-8 request-header file or browser.json; Vibefy
 never scans browser profiles, exports all browser cookies or reads passwords.
-Settings includes the DevTools setup steps and a Music browser link. The import
+Older versions included DevTools setup steps and a Music browser link. The import
 file grants session access: keep it private and delete it after connecting.
 Only Cookie, the Music account selector and optional channel selector are used.
 Origin is fixed to music.youtube.com; imported destinations and Authorization
@@ -89,8 +127,8 @@ retaining order and duplicate entries. This is read-only, not two-way sync.
 Search remains catalogue-only; explicit personal playlist imports retain their
 original recordings. Browser sessions expire or can be rejected by YouTube.
 This unofficial interface can change; it is not a guarantee of unlimited access.
-No Google Cloud project, Client ID, bundled client secret or OAuth tester list is
-used. The earlier OAuth prototype was not published.
+That legacy path does not use Google Cloud or an OAuth client. New connections
+use the official OAuth implementation described above.
 
 Windows stores music-account data in user-bound DPAPI-encrypted files under
 config/music-accounts, using the existing atomic private-file store. This avoids

@@ -6,7 +6,8 @@ Vibefy is developed by **Spinti** as an independent fork of [Spotifast](https://
 
 | Project | Contribution / attribution |
 | --- | --- |
-| [sigma67 / ytmusicapi](https://github.com/sigma67/ytmusicapi) | Reference for browser-session signing and YouTube Music library browse/continuation requests; independent native Rust implementation. MIT notice retained under assets/licenses. No Python runtime or Google OAuth client is bundled. |
+| [Google Identity / OAuth](https://developers.google.com/identity/protocols/oauth2/native-app) and [YouTube Data API](https://developers.google.com/youtube/v3) | Official browser account authorization and playlist metadata/writes, implemented with native Rust requests. Google and YouTube services remain subject to their own terms, verification and quotas. |
+| [sigma67 / ytmusicapi](https://github.com/sigma67/ytmusicapi) | Reference for browser-session signing and YouTube Music library browse/continuation requests; independent native Rust implementation. MIT notice retained under assets/licenses. No Python runtime is bundled. New connections use the official Google desktop OAuth flow and YouTube Data API; the browser-session implementation remains for existing connections. |
 | [JuiceVault](https://juicevault.xyz/) and its [documented API](https://api.juicevault.xyz/) | Browser login handoff, public playlist metadata, artwork and archive audio endpoints; service content remains with its respective rights holders. No JuiceVault application source code is bundled. |
 | [Rust](https://www.rust-lang.org/), [egui / eframe](https://github.com/emilk/egui) | Native application and immediate-mode interface; includes the pinned crmne app forks |
 | [fastframe](https://github.com/crmne/fastframe) | Native platform, storage, UI and safe update installation foundation |

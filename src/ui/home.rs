@@ -43,6 +43,17 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let greeting = crate::util::greeting(app.locale);
     theme::text(ui, greeting.as_ref(), theme::bold(30.0), palette.text);
     ui.add_space(12.0);
+    if app.user_id().is_some() && (!app.music_accounts[0].connected || app.music_accounts[0].busy) {
+        egui::Frame::new()
+            .fill(palette.panel)
+            .corner_radius(10)
+            .inner_margin(16.0)
+            .show(ui, |ui| {
+                ui.label("Spotify connected");
+                super::music_accounts::youtube_connect(app, ui);
+            });
+        ui.add_space(16.0);
+    }
     quick_access(app, ui);
     ui.add_space(16.0);
 

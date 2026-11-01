@@ -34,6 +34,8 @@ impl Provider {
 }
 #[derive(Clone, Debug, Default)]
 pub struct State {
+    pub auth_pending: bool,
+    pub enable_sync_after_connect: bool,
     pub busy: bool,
     pub connected: bool,
     pub name: String,
@@ -316,8 +318,11 @@ pub async fn execute(
     }
     if provider == Provider::YouTubeMusic {
         let session = if matches!(action, Action::Connect) {
-            let file = session_file.ok_or_else(|| anyhow::anyhow!("Session import cancelled"))?;
-            crate::music_session::Session::read(&file).await?
+            if let Some(file) = session_file {
+                crate::music_session::Session::read(&file).await?
+            } else {
+                crate::music_session::Session::connect_google(proxy).await?
+            }
         } else {
             let bytes = credential(provider, config, None)
                 .await?
@@ -337,7 +342,7 @@ pub async fn execute(
             credential(provider, config, Some(Some(serde_json::to_vec(&session)?))).await?;
         }
         return Ok(Update {
-            name: "YouTube Music".into(),
+            name: session.display_name(proxy).await?,
             playlists,
             collection,
         });
@@ -445,6 +450,5 @@ pub(crate) async fn youtube_session(config: &Path) -> Result<crate::music_sessio
     let bytes = credential(Provider::YouTubeMusic, config, None)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Connect YouTube Music first"))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|_| anyhow::anyhow!("Reconnect the YouTube Music browser session"))
+    serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("Reconnect YouTube"))
 }

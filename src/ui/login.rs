@@ -287,9 +287,7 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
                 app.actions.push(Action::SignIn);
             }
             ui.add_space(8.0);
-            egui::CollapsingHeader::new("YouTube Music and JuiceVault").show(ui, |ui| {
-                super::music_accounts::show(app, ui);
-            });
+            super::music_accounts::youtube_connect(app, ui);
             ui.add_space(10.0);
             wrapped(
                 ui,

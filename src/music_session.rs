@@ -187,11 +187,32 @@ pub fn parse_saved_playlists_page(value: &Value) -> Result<crate::music::Results
 // Deliberately no Debug: these fields authorize a browser session.
 #[derive(Serialize, Deserialize)]
 pub struct Session {
+    #[serde(default)]
     cookie: String,
+    #[serde(default)]
     account: String,
     page: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    google: Option<crate::google_youtube::Session>,
 }
 impl Session {
+    pub async fn connect_google(proxy: &ProxyConfig) -> Result<Self> {
+        Ok(Self {
+            cookie: String::new(),
+            account: String::new(),
+            page: None,
+            google: Some(crate::google_youtube::Session::connect(proxy).await?),
+        })
+    }
+    pub fn append_batch_size(&self) -> usize {
+        if self.google.is_some() { 1 } else { 50 }
+    }
+    pub async fn display_name(&self, proxy: &ProxyConfig) -> Result<String> {
+        if let Some(google) = &self.google {
+            return Ok(google.identity(proxy).await?.1);
+        }
+        Ok("YouTube Music".into())
+    }
     /// Accept ytmusicapi browser.json or request headers copied from DevTools.
     /// Ignore Authorization, Host, URL and other caller-controlled destinations.
     pub fn parse(input: &str) -> Result<Self> {
@@ -260,6 +281,7 @@ impl Session {
             cookie,
             account,
             page,
+            google: None,
         };
         session.sapisid()?;
         Ok(session)
@@ -411,6 +433,9 @@ impl Session {
         crate::http::build_collection_client(proxy).map_err(anyhow::Error::msg)
     }
     pub async fn identity(&self, proxy: &ProxyConfig) -> Result<(String, String)> {
+        if let Some(google) = &self.google {
+            return google.identity(proxy).await;
+        }
         let value = self
             .post(
                 &Self::client(proxy)?,
@@ -439,6 +464,9 @@ impl Session {
         ))
     }
     pub async fn details(&self, proxy: &ProxyConfig, id: &str) -> Result<(bool, String)> {
+        if let Some(google) = &self.google {
+            return google.details(proxy, id).await;
+        }
         ensure!(valid_playlist_id(id), "Invalid Music playlist identity");
         let value = self
             .request(&Self::client(proxy)?, None, &format!("VL{id}"))
@@ -451,6 +479,9 @@ impl Session {
         title: &str,
         marker: &str,
     ) -> Result<String> {
+        if let Some(google) = &self.google {
+            return google.create_unlisted(proxy, title, marker).await;
+        }
         let value = self
             .post(
                 &Self::client(proxy)?,
@@ -466,6 +497,9 @@ impl Session {
             .ok_or_else(|| Failure::Unconfirmed.into())
     }
     pub async fn append(&self, proxy: &ProxyConfig, id: &str, videos: &[String]) -> Result<bool> {
+        if let Some(google) = &self.google {
+            return google.append(proxy, id, videos).await;
+        }
         ensure!(
             valid_playlist_id(id)
                 && !videos.is_empty()
@@ -489,6 +523,9 @@ impl Session {
         Ok(append_confirmed(&value, videos))
     }
     pub async fn playlists(&self, proxy: &ProxyConfig) -> Result<Vec<LibraryPlaylist>> {
+        if let Some(google) = &self.google {
+            return google.playlists(proxy).await;
+        }
         let client = Self::client(proxy)?;
         let mut playlists = Vec::new();
         let mut next = None;
@@ -531,6 +568,9 @@ impl Session {
         proxy: &ProxyConfig,
         id: &str,
     ) -> Result<std::collections::BTreeMap<String, usize>> {
+        if let Some(google) = &self.google {
+            return google.membership(proxy, id).await;
+        }
         ensure!(valid_playlist_id(id), "Invalid Music playlist identity");
         let client = Self::client(proxy)?;
         let mut next = None;
@@ -563,6 +603,9 @@ impl Session {
         proxy: &ProxyConfig,
         playlist: &LibraryPlaylist,
     ) -> Result<Collection> {
+        if let Some(google) = &self.google {
+            return google.import(proxy, playlist).await;
+        }
         ensure!(
             playlist.id.starts_with("VL")
                 && playlist.id.len() <= 130

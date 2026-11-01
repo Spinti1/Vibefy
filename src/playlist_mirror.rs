@@ -851,7 +851,7 @@ impl Service {
             })
             .filter_map(|t| t.uri.strip_prefix("vibefy:youtube:").map(str::to_owned))
             .collect();
-        for batch in missing_ids(&desired, &current).chunks(50) {
+        for batch in missing_ids(&desired, &current).chunks(self.session.append_batch_size()) {
             self.checkpoint().await?;
             let mut expected = current.clone();
             for video in batch {

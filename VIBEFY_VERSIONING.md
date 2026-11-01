@@ -1,8 +1,8 @@
 # Vibefy releases
 
-Current source version: **0.4.27**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
+Current source version: **0.4.28**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
 
-For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.28), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
+For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.29), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
 
 0.4.4: About and Mods credits, clearer buttons, cache management and 2 GB advisory, performance improvements.
 
@@ -51,3 +51,5 @@ For each future user-requested functional update, increment the Vibefy patch ver
 0.4.26: Opt-in account-paired Spotify → private YouTube Music playlist copies, cached recording matches and manual review, durable dual-destination song additions, source snapshot checks, interrupted-write reconciliation and one linked playlist on Home. LEOPARD rollback backup preserves the complete 0.4.25 source and installer outside the repository.
 
 0.4.27: New YouTube Music playlist copies are unlisted, with clear link-access wording. Existing private copies retain their visibility and recovery markers.
+
+0.4.28: Direct Connect YouTube button below Spotify and on Home; official Google browser sign-in with PKCE and protected refresh tokens; YouTube Data API playlist reading and unlisted copying with single-write recovery. Browser-header import removed from the connection UI; existing stored sessions remain readable.
