@@ -26,7 +26,9 @@ Spotify account features remain subject to Spotify authorization, account requir
 
 ## Mobile web beta
 
-Open the [web player](https://usevibefy.online/app) and optionally add it to your Home Screen. The browser implementation provides music search, queue, local saved collections, public playlist import, LRCLIB lyrics and official YouTube playback controls. It is a **beta with a separate browser-local library**, not full native feature parity. Web Listen Together supports direct encrypted sessions between browser users on PC and phone. These sessions are separate from the native desktop LAN protocol. Native Spotify sign-in, local Whisper Auto Sync and desktop mods still require further browser/server adaptation. Vercel playback uses the official visible YouTube player; EQ and background playback are unavailable in this mode. See [web/README.md](web/README.md) for capabilities and deployment limits.
+On desktop and laptop, the [website](https://usevibefy.online) presents the native app and downloads. On phones it opens the mobile player with search, queue, local collections, public playlist import, LRCLIB lyrics and official YouTube playback. Optional browser adaptations include Nyan Cat, Oneko, Cat Jam (manual tempo) and Track Peek. Browser Jam connects phone users through WebRTC; it is separate from native LAN sessions.
+
+Spotify PKCE sign-in and paginated account-library views are implemented but **not activated on the public deployment**. They require Vibefy's registered Spotify Client ID and Spotify access approval. A development app permits only allowlisted users; a single Client ID does not grant public access. No end-user Client ID is requested. Selecting a Spotify song searches for a separate playable recording. The official YouTube player does not expose audio for EQ, automatic BPM detection or reactive visualizers, and cannot guarantee background playback. See [web/README.md](web/README.md).
 
 ## Build
 

@@ -23,7 +23,8 @@ jobs:
           node-version: '24'
       - run: pip install -r web/requirements.lock
       - run: python -m unittest discover -s web/tests -v
-      - run: node --check web/public/player.js && node --check web/public/embedded-player.js
+      - run: node --check web/public/player.js && node --check web/public/embedded-player.js && node --check web/public/spotify.js && node --check web/public/mobile-mods.js
+      - run: node --test web/tests/*.test.cjs
   native:
     runs-on: windows-latest
     timeout-minutes: 45

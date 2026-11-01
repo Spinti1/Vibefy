@@ -109,11 +109,20 @@ async def worker(work):
     except Exception:
         raise HTTPException(502, "The music source could not answer. Please try again shortly.") from None
 
+@app.get("/api/spotify-config")
+def spotify_config():
+    # Public OAuth identifier only. Never expose a secret or an account token.
+    identity = os.getenv("VIBEFY_SPOTIFY_CLIENT_ID", "")
+    if not re.fullmatch(r"[a-fA-F0-9]{32}", identity):
+        identity = ""
+    return JSONResponse({"clientId": identity, "redirectUri": "https://usevibefy.online/app"},
+                        headers={"Cache-Control": "no-store"})
+
 @app.get("/api/capabilities")
 def capabilities():
-    return {"version": "0.4.15", "beta": True, "search": True, "playback": "official-embedded-player" if os.getenv("VERCEL") else "source-dependent",
-            "nativeOnly": ["Spotify account library", "local Whisper Auto Sync", "LAN Listen Together", "native desktop mods", "classic mini window"],
-            "storage": "browser-local", "analytics": False, "jam": "browser WebRTC via PeerJS; separate from desktop LAN"}
+    return {"version": "0.4.16", "beta": True, "search": True, "playback": "official-embedded-player" if os.getenv("VERCEL") else "source-dependent",
+            "nativeOnly": ["local Whisper Auto Sync", "LAN Listen Together", "audio-reactive desktop visualizers", "classic mini window"],
+            "storage": "browser-local", "analytics": False, "spotifyConfigured": bool(re.fullmatch(r"[a-fA-F0-9]{32}", os.getenv("VIBEFY_SPOTIFY_CLIENT_ID", ""))), "jam": "browser WebRTC via PeerJS; separate from desktop LAN"}
 
 @app.get("/api/search")
 async def search(q: str = Query(min_length=1, max_length=160)):

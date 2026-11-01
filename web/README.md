@@ -1,33 +1,37 @@
 # Vibefy web
 
-Desktop landing page and mobile web beta, deployed to Vercel in the `use-vibefy` team. The project root on Vercel must be **web**. No Spotify credentials are deployed.
+Desktop presentation and phone-only player hosted on Vercel (team use-vibefy, project root web). Web update 0.4.16; latest Windows installer remains 0.4.15.
 
-```sh
-python -m venv .venv
-# Activate the environment, then:
-pip install -r requirements.lock
-uvicorn app:app --host 127.0.0.1 --port 4173
-python -m unittest discover -s tests -v
-```
+## Run and check
 
-`/` introduces the desktop app. `/app` opens the responsive web player, also on desktop when requested. `/privacy` documents data handling. Public API endpoints: `/api/search`, `/api/playlist`, `/api/audio/{videoId}`, `/api/lyrics`, `/api/capabilities`.
+Create a virtual environment, install requirements.lock, then run uvicorn app:app --host 127.0.0.1 --port 4173. Run python -m unittest discover -s tests -v and node --test tests/*.test.cjs.
 
-## Implemented browser features
+## Device behavior
 
-Audio-only music search with cancellation and short session caches; exact-ID playback through the official visible YouTube player on Vercel (bounded HTTP audio ranges in local development); queue, previous/next, shuffle/repeat, local liked songs and imported public audio playlists; local backup/restore; LRCLIB lyrics with timed lines and offset; five-band Web Audio EQ for direct audio only; Media Session integration; installable app shell. Music needs a connection. Saved data is specific to this browser and is not synced to Spotify or the native app.
+The root shows the desktop download site. Phones automatically enter /app; desktop/laptop browsers visiting /app return to the presentation. Detection uses the mobile user-agent, not viewport width, so resizing a desktop window does not unlock the player. Device detection is a presentation choice, not a security boundary; a spoofed user-agent can change it. Phone users can view desktop information with /?site=1. Tablets receive the presentation. /download and /privacy remain available.
 
-## Remaining parity work
+## Mobile capabilities
 
-The native executable is not compiled to a browser. Native Spotify authorization / account library, local Whisper recording alignment, direct LAN TCP Listen Together, classic mini window and native desktop mods are not exposed as working web features. Browser / OS background playback policy also varies. Full parity requires explicit web implementations and, for shared sessions / account data, durable backend storage and an authorized Spotify application. A Vercel deployment alone does not supply these.
+Audio-only search with cancellation and short caches; official visible YouTube playback; queue, previous/next, shuffle/repeat; local likes and public playlist imports; local backup/restore; LRCLIB lyrics with offset; installable app shell. Optional Nyan Cat, Oneko, Cat Jam and Track Peek use original credited assets and locally stored preferences. Cat Jam has size (90% default) and manual BPM controls. Disabled mods do not run animation loops; hidden pages stop rendering. Import is built in.
 
-Public YouTube extraction may be refused from cloud IPs or by provider changes. Verify `/api/audio` and actual playback from the deployed environment before advertising reliable mobile playback. Never bypass provider challenges or upload a user's cookies. Configure deployment-wide rate limits before broad promotion; the in-process limits are only a local safeguard. No paid backend has been provisioned.
+Vivy/Backmusic reactive visuals and automatic BPM detection need an audio signal unavailable from the official iframe. WaveLink needs a separate authorized provider integration; it is not included in the mobile build. Native classic mini window and local Whisper Auto Sync remain desktop-only. Direct Web Audio EQ is available only for local direct-audio development, not the public iframe. The iframe pauses when covered or the page is hidden; background audio is not guaranteed.
 
-## Hosting
+## Spotify setup and limits
 
-`vercel.json` configures FastAPI, static rewrites and security headers. `requirements.txt` mirrors the complete pinned `requirements.lock`. `public/` is served by Vercel's CDN; only local preview mounts it through FastAPI. Never include `.env.local`, `.vercel`, native profiles or model files in source uploads. The Vercel CLI can create an ignored local OAuth environment file when linking; do not commit it.
+The publisher sets the public VIBEFY_SPOTIFY_CLIENT_ID environment variable in Vercel and registers exactly https://usevibefy.online/app as a redirect URI in the Spotify Developer Dashboard. No Client Secret is needed or accepted. /api/spotify-config exposes only the validated public identifier. No identifier is configured in production at this update, so the connection button is disabled with an explanation; music search remains usable.
 
-Deployed verification: public search answered successfully from Vercel. YouTube refused server-side extraction with a bot-verification challenge. The public deployment therefore uses the official visible YouTube iframe player without cookies or challenge bypass. It pauses when Now Playing closes or the page becomes hidden. The official player cannot feed the Web Audio equalizer; those controls are disabled for this mode. The browser beta is not feature-equivalent to the native app.
+Authorization Code with PKCE uses S256, a random one-use state and a ten-minute callback deadline. Tokens stay in sessionStorage for this tab, never in library backups, our API or logs. Spotify requests are read-only and restricted to the exact API origin and approved library paths. Both playlists and saved songs support explicit pagination. Account content stays in memory and clears on disconnect. Selecting a Spotify song starts a search for its public recording, rather than silently pretending Spotify metadata is audio.
 
-## Native-style browser interface and Jam
+Spotify Development Mode currently permits at most five allowlisted users and requires the app owner to have Premium. Public use needs Spotify Extended Quota approval. See https://developer.spotify.com/documentation/web-api/concepts/quota-modes. A Client ID alone does not remove these restrictions. Some playlist contents may be withheld by Spotify. OAuth was unit-tested; live sign-in cannot be verified until the publisher configures an eligible application.
 
-The default website opens the player, styled around the native Vibefy sidebar, search toolbar, collection grid and bottom player. The download / credits page remains at /download. Browser Listen Together uses pinned local PeerJS 1.5.5 with public signalling and STUN; no paid relay is provisioned. Host shares a random invitation; up to eight listeners follow recording identity, play/pause and timing. Channels use WebRTC encryption, validate message sizes and types, and open only after Host / Join. Leave closes connections and timers. Some NAT/firewall combinations need the same Wi-Fi or VPN. Desktop LAN sessions and browser sessions are currently separate protocols. Official YouTube playback still requires a visible player and may need a participant to press Play once.
+## Browser Jam and Cloudflare research
+
+Current Jam uses pinned PeerJS 1.5.5, public signalling and Google STUN, with up to eight listeners. It sends recording identity, position and play/pause over encrypted WebRTC data channels. Some NAT/firewall combinations prevent direct connections. Native desktop LAN and browser sessions are separate protocols.
+
+Recommended next implementation: Cloudflare Worker plus one SQLite-backed Durable Object per room, with authenticated host/listener roles and WebSocket Hibernation. Each client connects outbound using WSS; only commands and timestamps pass through Cloudflare. A host capability must be distinct from the shareable invitation, inputs and rate limits bounded, room lifetime limited, and reconnection/clock drift handled. This can serve both mobile and native clients after adapting the Rust Jam transport. It does not solve ads, autoplay or recording availability. Cloudflare TURN is another option if retaining WebRTC. No Cloudflare service was provisioned or billed by this update.
+
+## Hosting and privacy
+
+Vercel serves public/ from its CDN and FastAPI handles the bounded public music API. requirements.txt mirrors requirements.lock. CSP restricts external script, image, frame and connection hosts. Spotify API URLs are validated before attaching authorization. Service worker caches only the public app shell, never API responses or OAuth tokens. API burst limits are per-instance, not a distributed abuse defence.
+
+Never deploy .env files, .vercel credentials, desktop profiles, cookies or model files. Public YouTube extraction was refused from Vercel, so production uses the official embedded player. Do not bypass challenges or upload user cookies. Privacy details are in public/privacy.html; asset credits and notices are in the repository root.

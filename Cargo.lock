@@ -5379,7 +5379,7 @@ dependencies = [
 
 [[package]]
 name = "spotifast"
-version = "0.4.15"
+version = "0.4.16"
 dependencies = [
  "aes 0.8.4",
  "anyhow",

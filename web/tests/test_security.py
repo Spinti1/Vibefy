@@ -19,6 +19,15 @@ class SecurityTests(unittest.TestCase):
                 self.assertEqual(self.client.get("/api/audio/" + path).status_code, 400)
             extract.assert_not_called()
 
+    def test_spotify_config_exposes_only_valid_public_id(self):
+        with patch.dict(module.os.environ, {"VIBEFY_SPOTIFY_CLIENT_ID": "a" * 32, "SPOTIFY_CLIENT_SECRET": "never-public"}):
+            r = self.client.get("/api/spotify-config")
+            self.assertEqual(r.json(), {"clientId": "a" * 32, "redirectUri": "https://usevibefy.online/app"})
+            self.assertNotIn("never-public", r.text)
+            self.assertEqual(r.headers["cache-control"], "no-store")
+        with patch.dict(module.os.environ, {"VIBEFY_SPOTIFY_CLIENT_ID": "invalid"}):
+            self.assertEqual(self.client.get("/api/spotify-config").json()["clientId"], "")
+
     def test_ranges_are_validated_before_network(self):
         with patch.object(module, "audio_url") as extract:
             for value in ["bytes=-100", "bytes=0-1,2-3", "bytes=100-1", "bytes=1234567890123-"]:
