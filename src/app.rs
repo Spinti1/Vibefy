@@ -8629,6 +8629,38 @@ impl App {
                 }
                 self.cache_search_results();
             }
+            ApiResponse::SpotifyTrackMatch { serial, result } => {
+                if let Some(Dialog::SpotifyTrackMatch {
+                    source,
+                    serial: expected,
+                    results,
+                    ..
+                }) = &mut self.dialog
+                    && *expected == serial
+                {
+                    *results = match result {
+                        Ok(found) => {
+                            let mut tracks =
+                                found.tracks.map(|page| page.items).unwrap_or_default();
+                            tracks.retain(|track| {
+                                crate::spotify_match::valid_uri(&track.uri) && !track.is_local
+                            });
+                            tracks.sort_by_cached_key(|track| {
+                                std::cmp::Reverse(crate::spotify_match::score(
+                                    &source.name,
+                                    &source.artist_names(),
+                                    source.duration_ms,
+                                    &track.name,
+                                    &track.artist_names(),
+                                    track.duration_ms,
+                                ))
+                            });
+                            Loadable::Loaded(tracks)
+                        }
+                        Err(error) => Loadable::Failed(error.to_string()),
+                    };
+                }
+            }
             ApiResponse::SearchMusic {
                 query,
                 serial,
@@ -11266,6 +11298,19 @@ impl App {
         items: Vec<PlayableItem>,
         position: Option<u32>,
     ) {
+        if let Some(crate::api::models::PlayableItem::Track(source)) =
+            items.iter().find(|item| item.uri().starts_with("vibefy:"))
+        {
+            if items.len() == 1 {
+                self.actions.push(Action::FindSpotifyTrack {
+                    source: source.clone(),
+                    query: format!("{} {}", source.name, source.artist_names()),
+                });
+            } else {
+                self.toast_error("Match source songs individually before adding them to Spotify.");
+            }
+            return;
+        }
         match self.local_playlist_duplicates(&playlist_id, &items) {
             Some(duplicate_uris) if duplicate_uris.is_empty() => {
                 self.add_to_playlist_now(playlist_id, playlist_name, items, position);
@@ -11299,6 +11344,10 @@ impl App {
         position: Option<u32>,
     ) {
         if items.is_empty() {
+            return;
+        }
+        if items.iter().any(|item| !item.uri().starts_with("spotify:")) {
+            self.toast_error("Choose a Spotify recording before adding this song.");
             return;
         }
         self.dialog = None;
@@ -12007,6 +12056,40 @@ impl App {
                 };
                 for target in targets {
                     self.set_saved(target, !saved);
+                }
+            }
+            Action::FindSpotifyTrack { source, query } => {
+                let query = query.trim().chars().take(200).collect::<String>();
+                if query.is_empty() {
+                    self.toast_error("Enter a song title and artist.");
+                } else {
+                    self.load_generation = self.load_generation.wrapping_add(1);
+                    let serial = self.load_generation;
+                    self.dialog = Some(Dialog::SpotifyTrackMatch {
+                        source,
+                        query: query.clone(),
+                        serial,
+                        results: Loadable::Loading,
+                        selected: None,
+                    });
+                    self.backend
+                        .api(ApiRequest::SpotifyTrackMatch { query, serial });
+                }
+            }
+            Action::SelectSpotifyTrack { serial, track } => {
+                if let Some(Dialog::SpotifyTrackMatch {
+                    serial: expected,
+                    selected,
+                    results: Loadable::Loaded(candidates),
+                    ..
+                }) = &mut self.dialog
+                    && *expected == serial
+                    && crate::spotify_match::valid_uri(&track.uri)
+                    && candidates
+                        .iter()
+                        .any(|candidate| candidate.uri == track.uri)
+                {
+                    *selected = Some(track);
                 }
             }
             Action::AddToPlaylist {

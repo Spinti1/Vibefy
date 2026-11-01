@@ -1896,7 +1896,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 });
             });
             ui.add_space(8.0);
-            ui.label("Vibefy is a modified version of Spotifast by Carmine Paolino and its contributors. Its original interface, layout, accessibility, library views, settings and desktop foundation come from their work.");
+            ui.label("Vibefy is a modified version of Spotifast by Carmine Paolino and its contributors. Its original interface, layout, accessibility, library views, settings and desktop foundation come from their work. The classic mini player is inherited from Spotifast, with Vibefy branding, colors and return-button redesign.");
             ui.label("Copyright (c) 2026 Carmine Paolino. MIT License. The complete original notice is included in LICENSE_SPOTIFAST.txt.");
             ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {

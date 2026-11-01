@@ -14,6 +14,7 @@ Vibefy is an independent native music player built on [Spotifast](https://github
 - Working native EQ, fullscreen audio visuals and a Vibefy classic mini player.
 - Optional Nyan Cat, Oneko, Cat Jam, Vivy, Backmusic and Track Peek adaptations.
 - Built-in Listen Together for trusted LANs or VPNs. This is an independent protocol, not Spotify Jam.
+- Source songs can be matched to a Spotify recording and added to an editable Spotify playlist after confirmation.
 - Cache controls, per-user Vibefy storage, and GitHub release updates.
 
 ## Install

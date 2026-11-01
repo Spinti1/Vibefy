@@ -800,6 +800,25 @@ pub fn picked_menu(
 }
 
 fn add_to_playlist_menu(ui: &mut Ui, app: &mut App, items: &[PlayableItem]) {
+    if items.iter().any(|item| item.uri().starts_with("vibefy:")) {
+        if let [PlayableItem::Track(source)] = items {
+            if menu_item(
+                ui,
+                &app.palette,
+                Some(Icon::ListPlus),
+                "Match on Spotify and add…",
+            ) {
+                app.actions.push(Action::FindSpotifyTrack {
+                    source: source.clone(),
+                    query: format!("{} {}", source.name, source.artist_names()),
+                });
+                ui.close();
+            }
+        } else {
+            ui.label("Match source songs individually before adding to Spotify.");
+        }
+        return;
+    }
     let query_id = ui.make_persistent_id("add-to-playlist-query");
     let palette = app.palette;
     let opened = menu_submenu_with_field(
@@ -1006,6 +1025,20 @@ fn item_menu_at(
         ui.close();
     }
     if uri.starts_with("vibefy:") {
+        if let PlayableItem::Track(track) = item
+            && menu_item(
+                ui,
+                &palette,
+                Some(Icon::ListPlus),
+                "Add to Spotify playlist…",
+            )
+        {
+            app.actions.push(Action::FindSpotifyTrack {
+                source: track.clone(),
+                query: format!("{} {}", track.name, track.artist_names()),
+            });
+            ui.close();
+        }
         if let Some(url) = crate::addons::direct_url(&uri) {
             if menu_item(ui, &palette, Some(Icon::ExternalLink), "Open source") {
                 app.actions.push(Action::OpenUrl(url.clone()));

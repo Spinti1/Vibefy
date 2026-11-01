@@ -1120,6 +1120,13 @@ pub struct DragEntry {
 
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    SpotifyTrackMatch {
+        source: Track,
+        query: String,
+        serial: u64,
+        results: Loadable<Vec<Track>>,
+        selected: Option<Track>,
+    },
     /// A page's header cover, enlarged. Clicking anywhere or Esc closes it.
     CoverArt {
         /// The largest artwork Spotify has.
@@ -1177,6 +1184,14 @@ pub struct Toast {
 /// Actions emitted while drawing and applied afterward to avoid borrow conflicts.
 #[derive(Clone, Debug)]
 pub enum Action {
+    FindSpotifyTrack {
+        source: Track,
+        query: String,
+    },
+    SelectSpotifyTrack {
+        serial: u64,
+        track: Track,
+    },
     PreviewTrack(crate::player::LocalTrack),
     StopPreview,
     Addon(crate::addons::Command),

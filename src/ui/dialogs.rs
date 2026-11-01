@@ -40,6 +40,41 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             match dialog {
                 // Drawn by cover_art above.
                 Dialog::CoverArt { .. } => {}
+                Dialog::SpotifyTrackMatch { source, mut query, serial, results, selected } => {
+                    theme::text(ui, "Add to a Spotify playlist", theme::bold(20.0), palette.text);
+                    ui.add_space(8.0);
+                    ui.label(format!("Source: {} · {} · {}:{:02}", source.name, source.artist_names(), source.duration_ms / 60000, source.duration_ms / 1000 % 60));
+                    ui.label("Choose the Spotify recording, then an editable playlist. Check the artist, version and duration.");
+                    ui.add_space(10.0);
+                    let changed = ui.text_edit_singleline(&mut query).changed();
+                    if changed { app.actions.push(Action::ShowDialog(Dialog::SpotifyTrackMatch { source: source.clone(), query: query.clone(), serial, results: results.clone(), selected: selected.clone() })); }
+                    if theme::pill_button(ui, &palette, "Search Spotify", false).clicked() { app.actions.push(Action::FindSpotifyTrack { source: source.clone(), query }); }
+                    ui.add_space(12.0);
+                    if let Some(track) = selected {
+                        ui.label(format!("Selected: {} · {}", track.name, track.artist_names()));
+                        let mut filter = ui.data_mut(|data| data.get_temp::<String>(egui::Id::new("spotify-match-playlist-filter"))).unwrap_or_default();
+                        super::widgets::playlist_picker(ui, app, &[crate::api::models::PlayableItem::Track(track)], &mut filter);
+                        ui.data_mut(|data| data.insert_temp(egui::Id::new("spotify-match-playlist-filter"), filter));
+                    } else {
+                        match results {
+                            crate::model::Loadable::Loading => { ui.spinner(); ui.label("Searching Spotify…"); }
+                            crate::model::Loadable::Failed(error) => { ui.label(error); }
+                            crate::model::Loadable::Loaded(tracks) => {
+                                if tracks.is_empty() { ui.label("No Spotify recording found. Try a shorter title or another artist spelling. Nothing was added."); }
+                                egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+                                    for track in tracks {
+                                        let album = track.album.as_ref().map(|a| a.name.as_str()).unwrap_or("");
+                                        let label = format!("{} · {}\n{} · {}:{:02}", track.name, track.artist_names(), album, track.duration_ms / 60000, track.duration_ms / 1000 % 60);
+                                        if ui.add_sized([ui.available_width(), 54.0], egui::Button::new(label)).clicked() { app.actions.push(Action::SelectSpotifyTrack { serial, track }); }
+                                    }
+                                });
+                            }
+                            _ => {}
+                        }
+                    }
+                    ui.add_space(12.0);
+                    if theme::pill_button(ui, &palette, "Cancel", false).clicked() { app.actions.push(Action::CloseDialog); }
+                }
                 Dialog::PersonalAppIntro => {
                     theme::text(ui, gettext(locale, "Move to your own Spotify app"), theme::bold(20.0), palette.text);
                     ui.add_space(12.0);

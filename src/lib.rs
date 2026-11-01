@@ -62,6 +62,7 @@ pub mod sink;
 pub mod skin;
 pub mod sonos;
 pub mod spicy_lyrics;
+pub mod spotify_match;
 pub mod storage;
 pub mod system_fonts;
 pub mod theme;

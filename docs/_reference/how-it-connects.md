@@ -55,6 +55,20 @@ are cached locally by recording file identity and reused across lyric sources
 and retries. Duration comparison uses existing Spotify metadata and decoded
 YouTube audio duration; it does not fetch Spotify audio.
 
+## Source songs and Spotify playlist writes
+
+A source song's context menu can open **Add to Spotify playlist…**. This sends
+only the displayed title and artist query to the existing signed-in Spotify
+Web API session. Search runs on the backend with the normal Spotify deadline
+and rate-limit handling. Suggestions are ranked locally by title, artist,
+duration and version words. The user must select a returned Spotify recording
+and an editable playlist before a write is requested. Query changes start a
+new request generation; late answers cannot replace a newer or closed dialog.
+No audio is sent to Spotify and source URIs are not used as Spotify track IDs.
+The existing duplicate check and optimistic playlist reconciliation apply to
+the selected Spotify item. Missing recordings, rate limits and account
+permissions can prevent the operation; the song remains available locally.
+
 ## Independent grants, once each
 
 Spotifast uses separate credentials for Web API access and local playback:

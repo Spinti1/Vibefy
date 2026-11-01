@@ -1,8 +1,8 @@
 # Vibefy releases
 
-Current source/web version: **0.4.16**. Latest Windows installer: **0.4.15** (this update changes the website only). The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
+Current source version: **0.4.17**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
 
-For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.17), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
+For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.18), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
 
 0.4.4: About and Mods credits, clearer buttons, cache management and 2 GB advisory, performance improvements.
 
@@ -29,3 +29,5 @@ For each future user-requested functional update, increment the Vibefy patch ver
 0.4.15: Public Vibefy project and website preparation, dedicated Windows installer, and GitHub HTTPS updates bound to release asset size and SHA-256 digests. Mobile web capabilities are documented separately from native desktop features.
 
 0.4.16: Desktop presentation-only website, phone-specific player, optional read-only Spotify PKCE integration awaiting publisher configuration/approval, browser adaptations of Nyan Cat, Oneko, Cat Jam and Track Peek. No new Windows installer for this web-only update.
+
+0.4.17: Website uses an isolated desktop demo screenshot, factual copy and visible project/mod credits, including the Spotifast mini-player origin. Native source-track menus offer Spotify recording search, ranked suggestions and user-confirmed playlist insertion.

@@ -255,6 +255,7 @@ fn top_result(app: &App, ui: &mut egui::Ui, e: &Entry, actions: &mut Vec<Action>
             format!("Open top result {}", e.title),
         )
     });
+    source_menu(app, &response, e, actions);
     if response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
@@ -402,21 +403,31 @@ fn song_row(app: &App, ui: &mut egui::Ui, e: &Entry, actions: &mut Vec<Action>) 
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Play {}", e.title))
     });
-    if app.settings.addons.active(Id::TrackPeek) {
-        response.context_menu(|ui| {
-            if ui.button("Preview audio").clicked() {
-                if let Some(t) = &e.track {
-                    actions.push(Action::PreviewTrack(t.clone()));
-                }
-                ui.close();
-            }
-        });
-    }
+    source_menu(app, &response, e, actions);
     if response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
         .clicked()
     {
         activate(app, e, actions);
+    }
+}
+fn source_menu(app: &App, response: &egui::Response, e: &Entry, actions: &mut Vec<Action>) {
+    if let Some(t) = &e.track {
+        response.context_menu(|ui| {
+            if ui.button("Add to Spotify playlist…").clicked() {
+                if let crate::api::models::PlayableItem::Track(source) = t.to_playable_item() {
+                    actions.push(Action::FindSpotifyTrack {
+                        query: format!("{} {}", source.name, source.artist_names()),
+                        source,
+                    });
+                }
+                ui.close();
+            }
+            if app.settings.addons.active(Id::TrackPeek) && ui.button("Preview audio").clicked() {
+                actions.push(Action::PreviewTrack(t.clone()));
+                ui.close();
+            }
+        });
     }
 }
 fn recent(app: &mut App, ui: &mut egui::Ui) {

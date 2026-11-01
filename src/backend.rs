@@ -295,6 +295,10 @@ pub enum ApiRequest {
         query: String,
         serial: u64,
     },
+    SpotifyTrackMatch {
+        query: String,
+        serial: u64,
+    },
     SearchCatalogue {
         query: String,
         serial: u64,
@@ -570,6 +574,10 @@ pub enum ApiResponse {
     },
     SearchExtras {
         query: String,
+        serial: u64,
+        result: ApiResult<SearchResults>,
+    },
+    SpotifyTrackMatch {
         serial: u64,
         result: ApiResult<SearchResults>,
     },
@@ -5139,6 +5147,10 @@ fn search_timeout_response(request: &ApiRequest) -> Option<ApiResponse> {
             serial: *serial,
             result: Err(error),
         },
+        ApiRequest::SpotifyTrackMatch { query: _, serial } => ApiResponse::SpotifyTrackMatch {
+            serial: *serial,
+            result: Err(error),
+        },
         ApiRequest::SearchCatalogue { query, serial } => ApiResponse::SearchMusic {
             query: query.clone(),
             serial: *serial,
@@ -5232,7 +5244,9 @@ fn operation_for(api: &ApiGateway, request: &ApiRequest) -> Operation {
         ApiRequest::HiddenSongs { .. } | ApiRequest::SetHiddenInPlaylist { .. } => {
             Operation::UserData
         }
-        ApiRequest::SearchCatalogue { .. } => Operation::CatalogSearch,
+        ApiRequest::SearchCatalogue { .. } | ApiRequest::SpotifyTrackMatch { .. } => {
+            Operation::CatalogSearch
+        }
         ApiRequest::Search { .. } => Operation::PlaylistSearch,
         ApiRequest::PlaySearch { kind, .. } if kind == "playlist" => Operation::PlaylistSearch,
         ApiRequest::PlaySearch { .. } => Operation::CatalogSearch,
@@ -5896,6 +5910,10 @@ async fn handle(
                 &["track", "artist", "album", "playlist", "show", "episode"]
             )),
             query,
+            serial,
+        },
+        ApiRequest::SpotifyTrackMatch { query, serial } => ApiResponse::SpotifyTrackMatch {
+            result: routed!(search(&query, &["track"])),
             serial,
         },
         ApiRequest::SearchCatalogue { query, serial } => ApiResponse::SearchMusic {
