@@ -682,31 +682,70 @@ pub async fn fetch_with_fallback(
         }
     };
     let fallback_request = async {
-        match exact {
-            Some(lyrics) => Ok(Ok(Some(Document::from_lyrics(lyrics, "Spotify")))),
-            None => tokio::time::timeout(
-                TIMEOUT,
-                crate::lyrics::fetch_with_refresh(http, cache, query, refresh),
-            )
-            .await
-            .map(|result| {
-                result.map(|lyrics| lyrics.map(|lyrics| Document::from_lyrics(lyrics, "LRCLIB")))
-            }),
+        let exact = exact.map(|lyrics| Document::from_lyrics(lyrics, "Spotify"));
+        if exact.as_ref().is_some_and(timed_or_instrumental) {
+            return Ok(exact);
+        }
+        match tokio::time::timeout(
+            TIMEOUT,
+            crate::lyrics::fetch_with_refresh(http, cache, query, refresh),
+        )
+        .await
+        {
+            Ok(Ok(found)) => Ok(prefer_timing(
+                exact,
+                found.map(|lyrics| Document::from_lyrics(lyrics, "LRCLIB")),
+            )),
+            _ if exact.is_some() => Ok(exact),
+            Ok(Err(error)) => Err(error),
+            Err(_) => Err(anyhow::anyhow!("LRCLIB timed out")),
         }
     };
+    select_sources(provider, fallback_request, more(http, query)).await
+}
+
+fn timed_or_instrumental(doc: &Document) -> bool {
+    doc.synced() || doc.instrumental
+}
+
+fn prefer_timing(held: Option<Document>, candidate: Option<Document>) -> Option<Document> {
+    let quality = |doc: &Document| {
+        if doc.word_synced() {
+            3
+        } else if timed_or_instrumental(doc) {
+            2
+        } else {
+            1
+        }
+    };
+    match (held, candidate) {
+        (Some(held), Some(candidate)) if quality(&candidate) > quality(&held) => Some(candidate),
+        (Some(held), _) => Some(held),
+        (None, candidate) => candidate,
+    }
+}
+
+async fn select_sources(
+    provider: impl std::future::Future<Output = Result<Option<Document>>>,
+    fallback_request: impl std::future::Future<Output = Result<Option<Document>>>,
+    more_request: impl std::future::Future<Output = Result<Option<Document>>>,
+) -> Result<Fetch> {
     // Independent requests start together. A slow provider cannot hide lyrics
     // that are already available; cached Spicy word timing still wins.
     tokio::pin!(provider);
     tokio::pin!(fallback_request);
     let (primary, lrclib) = tokio::select! {
         primary = &mut provider => {
-            if let Ok(Some(doc)) = primary {
-                return Ok(Fetch { document: Some(doc), notice: None });
+            if let Ok(Some(doc)) = &primary
+                && timed_or_instrumental(doc)
+            {
+                return Ok(Fetch { document: primary?, notice: None });
             }
             (primary, fallback_request.await)
         }
         fallback = &mut fallback_request => {
-            let primary = if matches!(&fallback, Ok(Ok(Some(_)))) {
+            let primary = if fallback.as_ref().ok().and_then(Option::as_ref)
+                .is_some_and(timed_or_instrumental) {
                 tokio::time::timeout(Duration::from_millis(700), &mut provider).await
                     .unwrap_or(Ok(None))
             } else { provider.await };
@@ -714,41 +753,31 @@ pub async fn fetch_with_fallback(
         }
     };
     let mut notice = None;
-    match primary {
-        Ok(Some(doc)) => {
-            return Ok(Fetch {
-                document: Some(doc),
-                notice: None,
-            });
-        }
-        Err(error) => notice = Some(format!("{error:#}")),
-        Ok(None) => {}
-    }
-    let mut failures = Vec::new();
-    let fallback = match lrclib {
-        Ok(Ok(Some(document))) => Some(document),
-        Ok(Ok(None)) => None,
-        Ok(Err(_)) => {
-            failures.push("LRCLIB is unavailable");
-            None
-        }
-        Err(_) => {
-            failures.push("LRCLIB timed out");
+    let primary = match primary {
+        Ok(document) => document,
+        Err(error) => {
+            notice = Some(format!("{error:#}"));
             None
         }
     };
-    if fallback
-        .as_ref()
-        .is_some_and(|doc| doc.synced() || doc.instrumental)
-    {
+    let mut failures = Vec::new();
+    let fallback = match lrclib {
+        Ok(document) => document,
+        Err(_) => {
+            failures.push("LRCLIB is unavailable");
+            None
+        }
+    };
+    let fallback = prefer_timing(primary, fallback);
+    if fallback.as_ref().is_some_and(timed_or_instrumental) {
         return Ok(Fetch {
             document: fallback,
             notice,
         });
     }
-    match more(http, query).await {
+    match more_request.await {
         Ok(Some(doc)) => Ok(Fetch {
-            document: Some(doc),
+            document: prefer_timing(fallback, Some(doc)),
             notice,
         }),
         result => {
@@ -763,5 +792,131 @@ pub async fn fetch_with_fallback(
                 notice,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+
+    fn doc(provider: &str, timed: bool) -> Document {
+        Document {
+            provider: provider.into(),
+            lines: vec![Line {
+                text: "The words".into(),
+                start_ms: timed.then_some(1000),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn plain_primary_never_hides_a_timed_fallback_in_either_response_order() {
+        for primary_first in [false, true] {
+            let primary = async {
+                if !primary_first {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Ok(Some(doc("Spicy", false)))
+            };
+            let fallback = async {
+                if primary_first {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Ok(Some(doc("LRCLIB", true)))
+            };
+            let found = select_sources(primary, fallback, std::future::pending())
+                .await
+                .unwrap();
+            assert_eq!(found.document.unwrap().provider, "LRCLIB");
+        }
+    }
+
+    #[tokio::test]
+    async fn plain_sources_continue_to_more_lyrics_and_keep_credits() {
+        let mut timed = doc("More Lyrics", true);
+        timed.credits.push(Credit {
+            name: "Contributor".into(),
+            url: None,
+        });
+        let found = select_sources(
+            async { Ok(Some(doc("Spicy", false))) },
+            async { Ok(Some(doc("Spotify", false))) },
+            async { Ok(Some(timed)) },
+        )
+        .await
+        .unwrap()
+        .document
+        .unwrap();
+        assert!(found.synced());
+        assert_eq!(found.credits[0].name, "Contributor");
+    }
+
+    #[tokio::test]
+    async fn plain_text_survives_failed_or_plain_alternatives() {
+        for fails in [false, true] {
+            let found = select_sources(
+                async { Ok(Some(doc("Spicy", false))) },
+                async { anyhow::bail!("offline") },
+                async {
+                    if fails {
+                        anyhow::bail!("offline")
+                    } else {
+                        Ok(Some(doc("More", false)))
+                    }
+                },
+            )
+            .await
+            .unwrap()
+            .document
+            .unwrap();
+            assert_eq!(found.provider, "Spicy");
+            assert!(!found.synced());
+            assert!(!found.word_synced());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_slow_primary_does_not_block_a_timed_fallback() {
+        let found = tokio::time::timeout(
+            Duration::from_secs(2),
+            select_sources(
+                std::future::pending(),
+                async { Ok(Some(doc("Spotify", true))) },
+                std::future::pending(),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .document
+        .unwrap();
+        assert_eq!(found.provider, "Spotify");
+    }
+
+    #[tokio::test]
+    async fn cached_word_timing_still_wins_without_waiting_for_other_sources() {
+        let mut words = doc("Spicy", true);
+        words.lines[0].words.push(Word {
+            text: "The".into(),
+            start_ms: 1000,
+            end_ms: 1500,
+            joined: false,
+        });
+        let found = tokio::time::timeout(
+            Duration::from_secs(1),
+            select_sources(
+                async { Ok(Some(words)) },
+                std::future::pending(),
+                std::future::pending(),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .document
+        .unwrap();
+        assert!(found.word_synced());
     }
 }

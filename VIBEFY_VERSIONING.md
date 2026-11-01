@@ -1,8 +1,8 @@
 # Vibefy releases
 
-Current source version: **0.4.21**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
+Current source version: **0.4.22**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
 
-For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.22), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
+For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.23), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
 
 0.4.4: About and Mods credits, clearer buttons, cache management and 2 GB advisory, performance improvements.
 
@@ -39,3 +39,5 @@ For each future user-requested functional update, increment the Vibefy patch ver
 0.4.20: Shared immutable lyrics for rendering and sync settings; recycled visualizer buffers and history only for Vivy; removed unused constants; full release LTO and stronger installer compression, with all source helpers and sync models retained.
 
 0.4.21: Native lossless background AAC/MP4 cache compaction; process search/inspection responses as they arrive for fully verified catalogue playback; skip identical recording-index writes. No new runtime executable, bitrate reduction or changed artist/version/duration rules.
+
+0.4.22: Plain lyrics no longer stop synchronized-provider lookup; plain Spotify lyrics can fall back to timed LRCLIB entries, and timed More Lyrics results replace plain text. Plain LRCLIB caches and misses are retried after six hours. Existing word timing, credits and plain-text fallback are retained.

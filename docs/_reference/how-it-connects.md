@@ -14,12 +14,20 @@ are rejected. Provider attribution and community uploader/maker links are
 displayed with the lyrics. Successful responses, including credits, are cached
 for seven days. Refresh bypasses this cache.
 
-Without a result from Spicy Lyrics, the native view tries LRCLIB and then
-`https://lyrics.kamiloo13.me/api/get` (More Lyrics) if LRCLIB has no timed result.
+The native view also uses the existing Spotify transcription. A synchronized
+Spicy result takes priority; a plain result does not stop fallback lookup.
+Plain Spotify lyrics trigger LRCLIB lookup, including search for a compatible
+timed entry when its exact album entry has text only. More Lyrics
+(https://lyrics.kamiloo13.me/api/get) is tried when the previous sources
+still have no timed result. Timed lyrics replace plain text; failures retain
+usable plain text. Plain LRCLIB answers and misses expire after six hours;
+timed LRCLIB answers retain their thirty-day cache. A usable timed fallback
+waits at most 700 ms for Spicy before returning. No timing is fabricated:
+line synchronization and word synchronization require their respective timestamps.
 More Lyrics receives artist, title, album and duration only. All providers use
 the shared HTTP client and proxy configuration. Requests run on the backend;
 track changes and key changes invalidate older results. Local files' embedded
-lyrics take precedence. The original Lyrics panel is unchanged.
+lyrics take precedence.
 
 Custom lyrics backgrounds use a local file picker and backend file reads;
 no image is sent to a service. Recording diagnostics use metadata already
