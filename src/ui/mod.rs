@@ -14,6 +14,7 @@ pub(crate) mod listen_together;
 pub mod login;
 mod lyrics;
 mod mods;
+pub mod music_accounts;
 pub mod music_search;
 pub mod new_releases;
 pub mod player_bar;
@@ -43,7 +44,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let ctx = &ctx;
     keys::handle(app, ctx);
-    let signed_in = app.is_connected() && app.user.is_some();
+    let signed_in = (app.is_connected() && app.user.is_some())
+        || app.music_accounts.iter().any(|state| state.connected);
     let connecting = matches!(app.auth, AuthStatus::Connecting | AuthStatus::Starting)
         || (app.is_connected() && app.user.is_none());
     if !signed_in {

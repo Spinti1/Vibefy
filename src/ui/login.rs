@@ -286,6 +286,10 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
             if big_button(ui, app, &gettext(locale, "Sign in with Spotify")) {
                 app.actions.push(Action::SignIn);
             }
+            ui.add_space(8.0);
+            egui::CollapsingHeader::new("YouTube Music and JuiceVault").show(ui, |ui| {
+                super::music_accounts::show(app, ui);
+            });
             ui.add_space(10.0);
             wrapped(
                 ui,

@@ -6,6 +6,8 @@ Vibefy is developed by **Spinti** as an independent fork of [Spotifast](https://
 
 | Project | Contribution / attribution |
 | --- | --- |
+| [sigma67 / ytmusicapi](https://github.com/sigma67/ytmusicapi) | Reference for browser-session signing and YouTube Music library browse/continuation requests; independent native Rust implementation. MIT notice retained under assets/licenses. No Python runtime or Google OAuth client is bundled. |
+| [JuiceVault](https://juicevault.xyz/) and its [documented API](https://api.juicevault.xyz/) | Browser login handoff, public playlist metadata, artwork and archive audio endpoints; service content remains with its respective rights holders. No JuiceVault application source code is bundled. |
 | [Rust](https://www.rust-lang.org/), [egui / eframe](https://github.com/emilk/egui) | Native application and immediate-mode interface; includes the pinned crmne app forks |
 | [fastframe](https://github.com/crmne/fastframe) | Native platform, storage, UI and safe update installation foundation |
 | [librespot](https://github.com/librespot-org/librespot) | Spotify session and playback integration |

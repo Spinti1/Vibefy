@@ -311,6 +311,8 @@ const PLAY_COUNT_RETRY: Duration = Duration::from_secs(60);
 
 pub struct App {
     pub addons: crate::addons::Runtime,
+    pub music_accounts: [crate::music_accounts::State; 2],
+    pub music_accounts_serial: [u64; 2],
     pub dirs: AppDirs,
     pub settings: Settings,
     /// Proxy policy actually handed to network workers. Manual form edits are
@@ -1228,6 +1230,8 @@ impl App {
             show_devices: false,
             toasts: Vec::new(),
             cache_usage: None,
+            music_accounts: Default::default(),
+            music_accounts_serial: [0; 2],
             addons: crate::addons::Runtime {
                 collections: addon_collections,
                 ..Default::default()
@@ -1337,6 +1341,9 @@ impl App {
             pixels_per_point: 1.0,
         };
         app.local.volume = app.settings.volume;
+        if options.restore_sign_in {
+            app.backend.send(Command::RestoreMusicAccounts);
+        }
         if let Some(folder) = app.settings.local_files_folder() {
             app.backend.send(Command::ScanLocalFiles(folder));
         }
@@ -2841,6 +2848,31 @@ impl App {
                         self.addons.tempo_cache.insert(recording, bpm);
                     }
                 }
+                Event::MusicAccount {
+                    provider,
+                    serial,
+                    disconnected,
+                    result,
+                } => {
+                    let index = provider as usize;
+                    if serial != self.music_accounts_serial[index] {
+                        continue;
+                    }
+                    self.music_accounts[index].busy = false;
+                    match result {
+                        Ok(update) => {
+                            let state = &mut self.music_accounts[index];
+                            state.connected = !disconnected;
+                            state.name = update.name;
+                            state.playlists = update.playlists;
+                            state.message = None;
+                            if let Some(collection) = update.collection {
+                                self.save_source_collection(collection);
+                            }
+                        }
+                        Err(error) => self.music_accounts[index].message = Some(error),
+                    }
+                }
                 Event::AddonFetched { request, result } => {
                     self.receive_addon_result(request, result)
                 }
@@ -3222,10 +3254,12 @@ impl App {
                 self.shared_grant = false;
                 self.user = None;
                 self.premium_notice_shown = false;
-                self.local = LocalState::default();
-                self.local_ready = false;
-                self.local_device_id = None;
-                self.local_playback = LocalPlayback::Unavailable;
+                if !self.music_accounts.iter().any(|state| state.connected) {
+                    self.local = LocalState::default();
+                    self.local_ready = false;
+                    self.local_device_id = None;
+                    self.local_playback = LocalPlayback::Unavailable;
+                }
                 self.remote = None;
                 self.rootlist.clear();
                 self.rootlist_cache = None;
@@ -12574,6 +12608,22 @@ impl App {
                 });
             }
             Action::SignOut => {
+                for provider in [
+                    crate::music_accounts::Provider::YouTubeMusic,
+                    crate::music_accounts::Provider::JuiceVault,
+                ] {
+                    let index = provider as usize;
+                    self.music_accounts_serial[index] =
+                        self.music_accounts_serial[index].wrapping_add(1);
+                    self.music_accounts[index] = Default::default();
+                    self.backend.send(Command::MusicAccount {
+                        selected: None,
+                        provider,
+                        action: crate::music_accounts::Action::Disconnect,
+                        username: String::new(),
+                        serial: self.music_accounts_serial[index],
+                    });
+                }
                 self.backend.send(Command::SignOut);
                 self.show_listen_together = false;
                 self.history = vec![Page::Home];
@@ -13877,7 +13927,8 @@ impl App {
             }
         }
         // Switch to the main window when sign-in is required.
-        let needs_sign_in = !(self.is_connected() && self.user.is_some())
+        let needs_sign_in = !self.music_accounts.iter().any(|state| state.connected)
+            && !(self.is_connected() && self.user.is_some())
             && !matches!(self.auth, AuthStatus::Connecting | AuthStatus::Starting)
             && !(self.is_connected() && self.user.is_none());
         if self.settings.winamp_window && needs_sign_in && !self.switch_intent {

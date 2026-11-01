@@ -723,6 +723,22 @@ pub fn autostart() -> fastframe_autostart::Autostart {
 }
 
 pub enum Command {
+    RestoreMusicAccounts,
+    MusicAccountReady {
+        provider: crate::music_accounts::Provider,
+        connected: bool,
+        serial: u64,
+    },
+    MusicAccount {
+        selected: Option<
+            std::pin::Pin<Box<dyn std::future::Future<Output = Option<rfd::FileHandle>> + Send>>,
+        >,
+        provider: crate::music_accounts::Provider,
+        action: crate::music_accounts::Action,
+        username: String,
+        serial: u64,
+    },
+    CancelMusicAccount(crate::music_accounts::Provider),
     TrackPeek(Arc<crate::peek::Session>),
     MusicSearch {
         serial: u64,
@@ -1033,6 +1049,12 @@ pub struct LyricsRequest {
 }
 
 pub enum Event {
+    MusicAccount {
+        provider: crate::music_accounts::Provider,
+        serial: u64,
+        disconnected: bool,
+        result: Result<crate::music_accounts::Update, String>,
+    },
     MusicSearched {
         serial: u64,
         query: String,
@@ -1472,6 +1494,20 @@ impl Backend {
             id,
             request,
             selected: Box::pin(selected),
+        });
+    }
+
+    pub fn choose_music_session(&self, serial: u64) {
+        let selected = rfd::AsyncFileDialog::new()
+            .set_title("Import YouTube Music browser session")
+            .add_filter("Browser headers", &["json", "txt"])
+            .pick_file();
+        self.send(Command::MusicAccount {
+            selected: Some(Box::pin(selected)),
+            provider: crate::music_accounts::Provider::YouTubeMusic,
+            action: crate::music_accounts::Action::Connect,
+            username: String::new(),
+            serial,
         });
     }
 
@@ -1933,6 +1969,9 @@ impl PlaylistHeaderLookup {
 }
 
 struct Worker {
+    connected_music: [bool; 2],
+    music_account_serial: [u64; 2],
+    music_account_tasks: [Option<tokio::task::JoinHandle<()>>; 2],
     playlist_outbox: crate::playlist_outbox::Outbox,
     peek: Option<Arc<crate::peek::Session>>,
     dirs: AppDirs,
@@ -2068,6 +2107,9 @@ impl Worker {
     ) -> Self {
         Self {
             playlist_outbox: crate::playlist_outbox::Outbox::default(),
+            music_account_tasks: [None, None],
+            connected_music: [false; 2],
+            music_account_serial: [0; 2],
             #[cfg(not(test))]
             credentials: CredentialStore::new(dirs.clone()),
             #[cfg(test)]
@@ -2438,6 +2480,104 @@ impl Worker {
                         }
                     });
                 }
+                Command::RestoreMusicAccounts => {
+                    for provider in [
+                        crate::music_accounts::Provider::YouTubeMusic,
+                        crate::music_accounts::Provider::JuiceVault,
+                    ] {
+                        let commands = self.commands.clone();
+                        let config = self.dirs.config.clone();
+                        tokio::spawn(async move {
+                            if crate::music_accounts::has_saved(provider, &config).await {
+                                let _ = commands.send(Command::MusicAccount {
+                                    selected: None,
+                                    provider,
+                                    action: crate::music_accounts::Action::Refresh,
+                                    username: String::new(),
+                                    serial: 0,
+                                });
+                            }
+                        });
+                    }
+                }
+                Command::CancelMusicAccount(provider) => {
+                    self.music_account_serial[provider as usize] =
+                        self.music_account_serial[provider as usize].wrapping_add(1);
+                    if let Some(task) = self.music_account_tasks[provider as usize].take() {
+                        task.abort();
+                    }
+                }
+                Command::MusicAccount {
+                    selected,
+                    provider,
+                    action,
+                    username,
+                    serial,
+                } => {
+                    if serial < self.music_account_serial[provider as usize] {
+                        continue;
+                    }
+                    self.music_account_serial[provider as usize] = serial;
+                    if let Some(task) = self.music_account_tasks[provider as usize].take() {
+                        task.abort();
+                    }
+                    let disconnected = matches!(action, crate::music_accounts::Action::Disconnect);
+                    let http = self.http.clone();
+                    let config = self.dirs.config.clone();
+                    let proxy = self.engine_config.proxy.clone();
+                    let events = self.events.clone();
+                    let commands = self.commands.clone();
+                    let waker = self.waker.clone();
+                    self.music_account_tasks[provider as usize] = Some(tokio::spawn(async move {
+                        let session_file = match selected {
+                            Some(pick) => pick.await.map(|file| file.path().to_owned()),
+                            None => None,
+                        };
+                        let result = crate::music_accounts::execute(
+                            provider,
+                            action,
+                            &http,
+                            &config,
+                            &username,
+                            &proxy,
+                            session_file,
+                        )
+                        .await
+                        .map_err(|error| error.to_string());
+                        if result.is_ok() {
+                            let _ = commands.send(Command::MusicAccountReady {
+                                provider,
+                                connected: !disconnected,
+                                serial,
+                            });
+                        }
+                        let _ = events.send(Event::MusicAccount {
+                            provider,
+                            serial,
+                            disconnected,
+                            result,
+                        });
+                        waker.wake();
+                    }));
+                }
+                Command::MusicAccountReady {
+                    provider,
+                    connected,
+                    serial,
+                } => {
+                    if self.music_account_serial[provider as usize] != serial {
+                        continue;
+                    }
+                    self.connected_music[provider as usize] = connected;
+                    if connected {
+                        self.resume_engine();
+                    } else if !self.signed_in && !self.connected_music.iter().any(|v| *v) {
+                        if let Some(engine) = self.engine.take() {
+                            engine.shutdown();
+                        }
+                        self.emit(Event::Playback(LocalPlayback::Unavailable));
+                    }
+                }
                 Command::AddonCancel => {
                     if let Some(task) = self.addon_task.take() {
                         task.abort();
@@ -2600,6 +2740,11 @@ impl Worker {
                     });
                 }
                 Command::Shutdown => {
+                    for task in &mut self.music_account_tasks {
+                        if let Some(task) = task.take() {
+                            task.abort();
+                        }
+                    }
                     if let Some(peek) = self.peek.take() {
                         peek.cancel();
                     }
@@ -3894,7 +4039,10 @@ impl Worker {
     /// Bring the engine up from a credential stored by a previous playback
     /// authorization, if there is one. Silent when there is nothing to resume.
     fn resume_engine(&mut self) {
-        if !self.signed_in || self.engine.is_some() || self.engine_busy {
+        if (!self.signed_in && !self.connected_music.iter().any(|v| *v))
+            || self.engine.is_some()
+            || self.engine_busy
+        {
             return;
         }
         if !self.network_reachable {
@@ -3913,7 +4061,7 @@ impl Worker {
     /// an HTTP proxy). Does not count toward the drop limiter: flipping a
     /// setting is not the session falling over.
     fn replace_engine(&mut self) {
-        if !self.signed_in {
+        if !self.signed_in && !self.connected_music.iter().any(|v| *v) {
             return;
         }
         // New audio settings take effect now, even when the replacement
@@ -3932,7 +4080,7 @@ impl Worker {
     /// Six drops in ten minutes stop the loop so a flapping session cannot
     /// sit there reconnecting forever.
     fn reconnect_engine(&mut self) {
-        if !self.signed_in {
+        if !self.signed_in && !self.connected_music.iter().any(|v| *v) {
             return;
         }
         if self.engine_busy {
@@ -4154,7 +4302,9 @@ impl Worker {
         error: Option<String>,
         attempt: u64,
     ) {
-        if !self.signed_in || session_generation != self.album_type_lookup.session_generation {
+        if (!self.signed_in && !self.connected_music.iter().any(|v| *v))
+            || session_generation != self.album_type_lookup.session_generation
+        {
             if let Some(engine) = engine {
                 engine.shutdown();
             }

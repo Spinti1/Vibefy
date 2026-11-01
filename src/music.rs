@@ -350,7 +350,7 @@ pub fn duration_ms(value: &str) -> u32 {
         0
     }
 }
-fn row(value: &Value, _filter: Filter) -> Option<Entry> {
+fn row(value: &Value, _filter: Filter, library: bool) -> Option<Entry> {
     if value["musicItemRendererDisplayPolicy"].as_str()
         == Some("MUSIC_ITEM_RENDERER_DISPLAY_POLICY_GREY_OUT")
     {
@@ -399,7 +399,7 @@ fn row(value: &Value, _filter: Filter) -> Option<Entry> {
         } else {
             return None;
         }
-    } else if video_id.is_some() && video_type == "MUSIC_VIDEO_TYPE_ATV" {
+    } else if video_id.is_some() && (video_type == "MUSIC_VIDEO_TYPE_ATV" || library) {
         Kind::Song
     } else {
         return None;
@@ -495,12 +495,17 @@ fn row(value: &Value, _filter: Filter) -> Option<Entry> {
     })
 }
 pub fn parse(value: &Value, filter: Filter) -> Result<Results> {
-    parse_rows(value, filter, true)
+    parse_rows(value, filter, true, false)
 }
 pub fn parse_browse(value: &Value) -> Result<Results> {
-    parse_rows(value, Filter::All, false)
+    parse_rows(value, Filter::All, false, false)
 }
-fn parse_rows(value: &Value, filter: Filter, deduplicate: bool) -> Result<Results> {
+/// Explicit account imports preserve user-added recordings and duplicate rows.
+/// Public search and browse retain the catalogue-only policy.
+pub fn parse_library_browse(value: &Value) -> Result<Results> {
+    parse_rows(value, Filter::All, false, true)
+}
+fn parse_rows(value: &Value, filter: Filter, deduplicate: bool, library: bool) -> Result<Results> {
     ensure!(
         value.get("contents").is_some()
             || value.get("continuationContents").is_some()
@@ -517,6 +522,7 @@ fn parse_rows(value: &Value, filter: Filter, deduplicate: bool) -> Result<Result
         depth: usize,
         deduplicate: bool,
         artist: Option<&str>,
+        library: bool,
     ) {
         if depth > 60 {
             return;
@@ -529,7 +535,7 @@ fn parse_rows(value: &Value, filter: Filter, deduplicate: bool) -> Result<Result
                     "musicResponsiveListItemRenderer"
                         | "musicTwoRowItemRenderer"
                         | "musicCardShelfRenderer"
-                ) && let Some(mut entry) = row(v, filter)
+                ) && let Some(mut entry) = row(v, filter, library)
                 {
                     if key == "musicCardShelfRenderer" && entry.kind == Kind::Artist {
                         card_artist = Some(entry.title.clone());
@@ -543,7 +549,8 @@ fn parse_rows(value: &Value, filter: Filter, deduplicate: bool) -> Result<Result
                             ..Default::default()
                         });
                     }
-                    if (!deduplicate || seen.insert(entry.id.clone())) && result.entries.len() < 100
+                    if (!deduplicate || seen.insert(entry.id.clone()))
+                        && result.entries.len() < if library { 20_000 } else { 100 }
                     {
                         result.entries.push(entry);
                     }
@@ -568,15 +575,34 @@ fn parse_rows(value: &Value, filter: Filter, deduplicate: bool) -> Result<Result
                     depth + 1,
                     deduplicate,
                     card_artist.as_deref().or(artist),
+                    library,
                 );
             }
         } else if let Some(list) = value.as_array() {
             for v in list {
-                walk(v, filter, result, seen, depth + 1, deduplicate, artist);
+                walk(
+                    v,
+                    filter,
+                    result,
+                    seen,
+                    depth + 1,
+                    deduplicate,
+                    artist,
+                    library,
+                );
             }
         }
     }
-    walk(value, filter, &mut result, &mut seen, 0, deduplicate, None);
+    walk(
+        value,
+        filter,
+        &mut result,
+        &mut seen,
+        0,
+        deduplicate,
+        None,
+        library,
+    );
     // Bring catalogue songs ahead of release and artist shelves.
     // Preserve the service's top result and every browse page's exact order.
     if deduplicate && filter == Filter::All && result.entries.len() > 1 {

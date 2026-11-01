@@ -272,7 +272,7 @@ impl App {
         else {
             return;
         };
-        if uris.is_empty() || uris.len() > 500 {
+        if uris.is_empty() || uris.len() > 20_000 {
             return;
         }
         let Some(tracks) = uris
@@ -322,7 +322,7 @@ impl App {
             return false;
         }
         let index = index as usize;
-        if index >= tracks.len() || tracks.len() > 500 {
+        if index >= tracks.len() || tracks.len() > 20_000 {
             return false;
         }
         if tracks.iter().any(|t| {

@@ -455,6 +455,29 @@ impl<S: Sealer> ProtectedStore for SealedFiles<S> {
 #[cfg(windows)]
 struct Dpapi;
 
+/// Music browser sessions can exceed Credential Manager's blob limit. Reuse
+/// the user-bound, atomically replaced DPAPI store instead of plaintext files.
+/// The caller runs this on a blocking worker and serializes saves/deletions.
+#[cfg(windows)]
+pub(crate) fn music_account_secret(
+    config: &Path,
+    key: &str,
+    write: Option<Option<Vec<u8>>>,
+) -> Result<Option<Vec<u8>>, Error> {
+    if !matches!(key, "youtube-music-library" | "juicevault-library") {
+        return Err(Error::Invalid);
+    }
+    let mut store = SealedFiles {
+        dir: config.join("music-accounts"),
+        sealer: Dpapi,
+    };
+    match write {
+        Some(Some(bytes)) => store.write(key, &bytes).map(|()| None),
+        Some(None) => store.delete(key).map(|()| None),
+        None => store.read(key),
+    }
+}
+
 #[cfg(windows)]
 impl Dpapi {
     fn transform(input: &[u8], context: &[u8], seal: bool) -> Result<Vec<u8>, Error> {

@@ -44,6 +44,8 @@ pub mod mod_tempo;
 pub mod model;
 pub mod motion;
 pub mod music;
+pub mod music_accounts;
+pub mod music_session;
 pub mod new_releases;
 pub mod notch;
 mod oauth_transport;

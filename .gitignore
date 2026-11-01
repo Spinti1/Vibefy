@@ -31,6 +31,8 @@ node_modules/
 *.pfx
 *.key
 oauth.json
+google-oauth.json
+google-client-secret.txt
 credentials.json
 session.json
 settings.json

@@ -1075,6 +1075,45 @@ async fn resolve_track_audio_inner(
         if let Some(bytes) = cache.get_cached_audio(&key) {
             return Ok(bytes);
         }
+        if track.uri.starts_with("vibefy:juicevault:") {
+            let http = crate::http::Http::from_proxy(proxy).map_err(anyhow::Error::msg)?;
+            let mut response = http
+                .client()
+                .map_err(anyhow::Error::msg)?
+                .get(&url)
+                .timeout(Duration::from_secs(90))
+                .send()
+                .await?;
+            anyhow::ensure!(
+                response.status().is_success(),
+                "JuiceVault audio returned HTTP {}",
+                response.status().as_u16()
+            );
+            anyhow::ensure!(
+                response.url().scheme() == "https"
+                    && response.url().host_str() == Some("api.juicevault.xyz"),
+                "Unexpected JuiceVault stream redirect"
+            );
+            const LIMIT: usize = 128 * 1024 * 1024;
+            anyhow::ensure!(
+                response.content_length().is_none_or(|n| n <= LIMIT as u64),
+                "JuiceVault track exceeds the 128 MB cache limit"
+            );
+            let mut bytes = Vec::new();
+            while let Some(chunk) = response.chunk().await? {
+                anyhow::ensure!(
+                    bytes.len().saturating_add(chunk.len()) <= LIMIT,
+                    "JuiceVault track exceeds the 128 MB cache limit"
+                );
+                bytes.extend_from_slice(&chunk);
+            }
+            anyhow::ensure!(
+                !bytes.is_empty(),
+                "JuiceVault returned an empty audio stream"
+            );
+            cache.save_audio(&key, &bytes);
+            return Ok(bytes);
+        }
         let mut command = tokio::process::Command::new(yt_dlp);
         apply_yt_proxy(&mut command, proxy);
         command.args([

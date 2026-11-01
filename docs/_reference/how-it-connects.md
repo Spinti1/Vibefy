@@ -6,6 +6,51 @@ nav_order: 1
 
 ## Vibefy HTTPS and sign-in transport
 
+## Optional YouTube Music and JuiceVault connections (0.4.25)
+
+Settings and the sign-in screen offer independent music-account connections.
+A connected Music or JuiceVault account opens the source player without Spotify.
+Spotify operations still require their own Spotify sign-in and permissions.
+
+YouTube Music uses the user's existing browser session, following the documented
+[ytmusicapi browser setup](https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html).
+The user explicitly selects a UTF-8 request-header file or browser.json; Vibefy
+never scans browser profiles, exports all browser cookies or reads passwords.
+Settings includes the DevTools setup steps and a Music browser link. The import
+file grants session access: keep it private and delete it after connecting.
+Only Cookie, the Music account selector and optional channel selector are used.
+Origin is fixed to music.youtube.com; imported destinations and Authorization
+headers are ignored. The SAPISID signature is renewed for each request. A dedicated
+client honors the configured proxy and disables redirects. Response bodies,
+session files and page traversal are bounded; network/authentication failures
+are redacted and returned to the UI without logging headers or service bodies.
+
+The saved-playlists Music shelf is read with continuation pages. Selected lists,
+including private lists accessible to that session, import as Home snapshots,
+retaining order and duplicate entries. This is read-only, not two-way sync.
+Search remains catalogue-only; explicit personal playlist imports retain their
+original recordings. Browser sessions expire or can be rejected by YouTube.
+This unofficial interface can change; it is not a guarantee of unlimited access.
+No Google Cloud project, Client ID, bundled client secret or OAuth tester list is
+used. The earlier OAuth prototype was not published.
+
+Windows stores music-account data in user-bound DPAPI-encrypted files under
+config/music-accounts, using the existing atomic private-file store. This avoids
+Credential Manager's blob-size limit for browser headers. Other supported
+platforms use the system keychain. Saves/deletions run off the UI thread and are
+serialized even through cancellation. Startup restores once, without idle polls.
+Disconnect deletes local session storage; Home snapshots are removed separately.
+
+JuiceVault uses its documented browser handoff with a random verifier and SHA-256
+challenge. The browser signs in; polling honors Retry-After. The public playlist
+API uses the username entered by the listener. Private-library and refresh routes
+are undocumented and are not claimed as supported. Archive playback uses validated
+UUIDs, the configured proxy, bounded streams and the existing audio cache. Account
+tokens are not sent to playback/artwork or to other providers. See the
+[JuiceVault API documentation](https://api.juicevault.xyz/).
+
+## Vibefy HTTPS and sign-in transport details
+
 The shared asynchronous and blocking reqwest clients trust the OS certificate
 store and bundled Mozilla public roots. This supports fresh Windows installs
 with incomplete OS roots while retaining configured enterprise/proxy trust.

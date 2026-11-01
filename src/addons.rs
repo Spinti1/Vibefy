@@ -256,6 +256,10 @@ pub enum Command {
 
 /// Accept source identities, never arbitrary URLs or shell fragments.
 pub fn direct_url(uri: &str) -> Option<String> {
+    if let Some(id) = uri.strip_prefix("vibefy:juicevault:") {
+        return crate::music_accounts::uuid(id)
+            .then(|| format!("https://api.juicevault.xyz/music/stream/{id}"));
+    }
     if let Some(id) = uri.strip_prefix("vibefy:youtube:") {
         return valid_video_id(id).then(|| format!("https://www.youtube.com/watch?v={id}"));
     }
@@ -288,6 +292,7 @@ pub fn safe_art_url(text: &str) -> bool {
                 url.host_str(),
                 Some(
                     "i.scdn.co"
+                        | "api.juicevault.xyz"
                         | "i.ytimg.com"
                         | "img.youtube.com"
                         | "i1.sndcdn.com"
@@ -613,7 +618,9 @@ pub fn load_collections(path: &std::path::Path) -> Vec<Collection> {
     collections
         .into_iter()
         .take(30)
-        .filter(|c| c.tracks.len() <= 500 && c.tracks.iter().all(|t| direct_url(&t.uri).is_some()))
+        .filter(|c| {
+            c.tracks.len() <= 20_000 && c.tracks.iter().all(|t| direct_url(&t.uri).is_some())
+        })
         .collect()
 }
 

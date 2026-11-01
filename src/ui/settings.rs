@@ -400,6 +400,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     if section_matches(&needle, &account, &account_rows) {
         any_visible = true;
         section(ui, &palette, &account, |ui| {
+            if app.user.is_none() {
+                theme::text(ui, "Spotify", theme::semibold(15.0), palette.text);
+                if theme::pill_button(ui, &palette, "Connect Spotify", false).clicked() {
+                    app.actions.push(Action::SignIn);
+                }
+                return;
+            }
             if row_matches(&needle, &format!("{sign_out} {account}"), "") {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 14.0;
@@ -454,6 +461,12 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         });
     }
 
+    if needle.is_empty() || "connected accounts google youtube juicevault login".contains(&needle) {
+        any_visible = true;
+        section(ui, &palette, "Connected music accounts", |ui| {
+            super::music_accounts::show(app, ui);
+        });
+    }
     let (status, detail, action) = match &app.local_playback {
         crate::backend::LocalPlayback::Ready { .. } => (
             pgettext(locale, "playback status", "Ready"),
@@ -1784,7 +1797,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 &mut app.actions,
                 ui,
                 &palette,
-                "YouTube Music metadata · ytmusicapi reference (MIT)",
+                "YouTube Music metadata & session protocol · ytmusicapi (MIT)",
                 "https://github.com/sigma67/ytmusicapi",
             );
             credit_link(

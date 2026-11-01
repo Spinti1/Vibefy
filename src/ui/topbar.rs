@@ -380,7 +380,16 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                             pick_image(&user.images, app.art_px(28.0)).map(str::to_string),
                         )
                     })
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| {
+                        (
+                            app.music_accounts
+                                .iter()
+                                .find(|state| state.connected)
+                                .map(|state| state.name.clone())
+                                .unwrap_or_default(),
+                            None,
+                        )
+                    });
                 let (rect, response) =
                     ui.allocate_exact_size(Vec2::splat(AVATAR_SIZE), Sense::click());
                 if ui.is_rect_visible(rect) {
