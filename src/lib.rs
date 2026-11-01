@@ -7,6 +7,7 @@ pub mod app;
 #[cfg(target_os = "linux")]
 pub mod appearance;
 pub mod audio_match;
+pub mod audio_only_mp4;
 pub mod auth;
 pub mod auto_sync;
 pub mod autoscroll;

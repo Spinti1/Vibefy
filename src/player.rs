@@ -471,7 +471,7 @@ pub fn receive_track_metadata(
     (state.playback == Playback::Loading).then(|| track.clone())
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CachedMatch {
     pub youtube_id: String,
     pub title: String,
@@ -541,6 +541,9 @@ pub struct MatchCache {
     audio_dir: PathBuf,
     entries: Arc<Mutex<HashMap<String, CachedMatch>>>,
     resolving: Arc<Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>>,
+    audio_writes: Arc<Mutex<()>>,
+    compacting: Arc<Mutex<std::collections::HashSet<String>>>,
+    compaction_worker: Arc<tokio::sync::Semaphore>,
 }
 
 impl MatchCache {
@@ -563,6 +566,9 @@ impl MatchCache {
             audio_dir,
             entries: Arc::new(Mutex::new(entries)),
             resolving: Default::default(),
+            audio_writes: Default::default(),
+            compacting: Default::default(),
+            compaction_worker: Arc::new(tokio::sync::Semaphore::new(1)),
         }
     }
 
@@ -592,9 +598,11 @@ impl MatchCache {
 
     pub fn get_cached_audio(&self, youtube_id: &str) -> Option<Vec<u8>> {
         let file_path = self.audio_dir.join(format!("{youtube_id}.m4a"));
-        std::fs::read(&file_path)
+        let bytes = std::fs::read(&file_path)
             .ok()
-            .filter(|bytes| !bytes.is_empty())
+            .filter(|bytes| !bytes.is_empty())?;
+        self.schedule_audio_compaction(youtube_id, &bytes);
+        Some(bytes)
     }
     /// Speculation only needs file presence, not a full allocation/read.
     pub fn has_cached_audio(&self, youtube_id: &str) -> bool {
@@ -655,6 +663,9 @@ impl MatchCache {
             Ok(e) => e,
             Err(p) => p.into_inner(),
         };
+        if entries.get(spotify_id) == Some(&matched) {
+            return;
+        }
         entries.insert(spotify_id.to_string(), matched);
 
         if let Ok(json) = serde_json::to_string_pretty(&*entries) {
@@ -664,7 +675,95 @@ impl MatchCache {
 
     pub fn save_audio(&self, youtube_id: &str, bytes: &[u8]) {
         let file_path = self.audio_dir.join(format!("{youtube_id}.m4a"));
+        let _guard = self.audio_writes.lock().unwrap_or_else(|e| e.into_inner());
         let _ = fastframe_file::write(&file_path, bytes);
+        self.schedule_audio_compaction(youtube_id, bytes);
+    }
+
+    fn schedule_audio_compaction(&self, key: &str, bytes: &[u8]) {
+        if key.is_empty()
+            || key.len() > 128
+            || !key
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            || !crate::audio_only_mp4::contains_video(bytes)
+        {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        if !self
+            .compacting
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key.to_owned())
+        {
+            return;
+        }
+        let cache = self.clone();
+        let key = key.to_owned();
+        runtime.spawn(async move {
+            // Playback receives the original bytes first. One background job
+            // at a time avoids competing remux jobs during rapid track changes.
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let Ok(_permit) = Arc::clone(&cache.compaction_worker).acquire_owned().await else {
+                return;
+            };
+            let worker = cache.clone();
+            let worker_key = key.clone();
+            let _ =
+                tokio::task::spawn_blocking(move || worker.compact_cached_audio(&worker_key)).await;
+            cache
+                .compacting
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&key);
+        });
+    }
+
+    /// Keep the playing buffer intact; atomically replace only an unchanged cache file.
+    pub fn compact_cached_audio(&self, key: &str) -> Option<(usize, usize)> {
+        if key.is_empty()
+            || key.len() > 128
+            || !key
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            return None;
+        }
+        let path = self.audio_dir.join(format!("{key}.m4a"));
+        let before = std::fs::symlink_metadata(&path).ok()?;
+        if !before.is_file() || before.len() > 128 * 1024 * 1024 {
+            return None;
+        }
+        let modified = before.modified().ok()?;
+        use std::io::Read;
+        let mut bytes = Vec::new();
+        std::fs::File::open(&path)
+            .ok()?
+            .take(128 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        if bytes.len() as u64 != before.len() {
+            return None;
+        }
+        let audio = crate::audio_only_mp4::extract(&bytes).ok()??;
+        let _guard = self.audio_writes.lock().unwrap_or_else(|e| e.into_inner());
+        let current = std::fs::symlink_metadata(&path).ok()?;
+        if !current.is_file()
+            || current.len() != before.len()
+            || current.modified().ok()? != modified
+        {
+            return None;
+        }
+        fastframe_file::write(&path, &audio).ok()?;
+        log::info!(
+            "Audio-only cache compaction: {} -> {} bytes",
+            bytes.len(),
+            audio.len()
+        );
+        Some((bytes.len(), audio.len()))
     }
 
     // TODO: Manual search override: Allow user to right-click track in UI and choose
@@ -1059,16 +1158,18 @@ async fn resolve_track_audio_inner(
     let queries = crate::recording_match::search_queries(&reference);
     for (batch, pair) in queries.chunks(2).enumerate() {
         let final_batch = (batch + 1) * 2 >= queries.len();
-        let results = if pair.len() == 2 {
-            let (left, right) = tokio::join!(
-                search_candidates_for_query(yt_dlp, &pair[0], proxy),
-                search_candidates_for_query(yt_dlp, &pair[1], proxy)
-            );
-            vec![left, right]
-        } else {
-            vec![search_candidates_for_query(yt_dlp, &pair[0], proxy).await]
-        };
-        for result in results {
+        let mut searches = tokio::task::JoinSet::new();
+        for query in pair {
+            let query = query.clone();
+            let binary = yt_dlp.to_owned();
+            let proxy = proxy.clone();
+            searches
+                .spawn(async move { search_candidates_for_query(&binary, &query, &proxy).await });
+        }
+        while let Some(result) = searches.join_next().await {
+            let result =
+                result.unwrap_or_else(|error| Err(anyhow::anyhow!("Search task failed: {error}")));
+
             match result {
                 Ok(entries) => {
                     completed_searches += 1;
@@ -1085,111 +1186,116 @@ async fn resolve_track_audio_inner(
                 }
                 Err(error) => last_search_error = Some(error),
             }
-        }
-        let mut shortlist: Vec<_> = candidates.values().cloned().collect();
-        shortlist.sort_by(|(a, sa), (b, sb)| sb.cmp(sa).then_with(|| a.id.cmp(&b.id)));
-        shortlist.truncate(12);
-        let global_order: Vec<_> = shortlist
-            .iter()
-            .map(|(entry, _)| entry.id.clone())
-            .collect();
-        shortlist.retain(|(entry, _)| !inspected.contains(&entry.id));
-        if !final_batch {
-            // Speculate only on catalogue-like entries. Other uploads retain
-            // the full-query ordering and inspection budget.
-            shortlist.retain(|(entry, _)| {
-                entry.track.is_some()
-                    || entry
-                        .channel
-                        .as_deref()
-                        .is_some_and(|channel| channel.ends_with(" - Topic"))
-            });
-            shortlist.truncate(2);
-        }
-        for pair in shortlist.chunks(2) {
-            for (entry, _) in pair {
-                inspected.insert(entry.id.clone());
+            let mut shortlist: Vec<_> = candidates.values().cloned().collect();
+            shortlist.sort_by(|(a, sa), (b, sb)| sb.cmp(sa).then_with(|| a.id.cmp(&b.id)));
+            shortlist.truncate(12);
+            let global_order: Vec<_> = shortlist
+                .iter()
+                .map(|(entry, _)| entry.id.clone())
+                .collect();
+            shortlist.retain(|(entry, _)| !inspected.contains(&entry.id));
+            let final_results = final_batch && searches.is_empty();
+            if !final_results {
+                // Speculate only on catalogue-like entries. Other uploads retain
+                // the full-query ordering and inspection budget.
+                shortlist.retain(|(entry, _)| {
+                    entry.track.is_some()
+                        || entry
+                            .channel
+                            .as_deref()
+                            .is_some_and(|channel| channel.ends_with(" - Topic"))
+                });
+                shortlist.truncate(2);
             }
-            let details = if pair.len() == 2 {
-                let (left, right) = tokio::join!(
-                    inspect_recording(yt_dlp, &pair[0].0, proxy),
-                    inspect_recording(yt_dlp, &pair[1].0, proxy)
-                );
-                vec![left, right]
-            } else {
-                vec![inspect_recording(yt_dlp, &pair[0].0, proxy).await]
-            };
-            for result in details {
-                match result {
-                    Ok((recording, info)) => {
-                        completed_inspections += 1;
-                        inspected_success.insert(recording.id.clone());
-                        if let Some(matched) =
-                            crate::recording_match::verified_match(&reference, &recording)
+            'inspection_pairs: for pair in shortlist.chunks(2) {
+                for (entry, _) in pair {
+                    inspected.insert(entry.id.clone());
+                }
+                let mut details = tokio::task::JoinSet::new();
+                for (entry, _) in pair {
+                    let entry = entry.clone();
+                    let binary = yt_dlp.to_owned();
+                    let proxy = proxy.clone();
+                    details.spawn(async move { inspect_recording(&binary, &entry, &proxy).await });
+                }
+                while let Some(result) = details.join_next().await {
+                    let result = result.unwrap_or_else(|error| {
+                        Err(anyhow::anyhow!("Inspection task failed: {error}"))
+                    });
+
+                    match result {
+                        Ok((recording, info)) => {
+                            completed_inspections += 1;
+                            inspected_success.insert(recording.id.clone());
+                            if let Some(matched) =
+                                crate::recording_match::verified_match(&reference, &recording)
+                            {
+                                inspected_info.insert(recording.id.clone(), info);
+                                verified.push((recording, matched));
+                            }
+                        }
+                        Err(error) => last_inspection_error = Some(error),
+                    }
+                    // A fully inspected catalogue recording with matching duration can
+                    // play immediately; fan uploads still wait for every search variant.
+                    verified.sort_by(|(a, ma), (b, mb)| {
+                        mb.score.cmp(&ma.score).then_with(|| a.id.cmp(&b.id))
+                    });
+                    // Only the best three download candidates need their larger
+                    // format lists retained. Lower-ranked matches keep URL fallback.
+                    inspected_info.retain(|id, _| {
+                        verified
+                            .iter()
+                            .take(3)
+                            .any(|(recording, _)| &recording.id == id)
+                    });
+                    for (recording, matched) in verified.iter().filter(|(recording, matched)| {
+                        fast_catalog_match(&reference, recording, matched)
+                    }) {
+                        if unavailable.contains(&recording.id) {
+                            continue;
+                        }
+                        match download_recording_audio(
+                            yt_dlp,
+                            &recording.id,
+                            inspected_info.get(&recording.id),
+                            proxy,
+                        )
+                        .await
                         {
-                            inspected_info.insert(recording.id.clone(), info);
-                            verified.push((recording, matched));
+                            Ok(bytes) => {
+                                cache.save_audio(&recording.id, &bytes);
+                                cache.save_verified_match(track, recording, matched.source);
+                                return Ok(bytes);
+                            }
+                            Err(error) => {
+                                unavailable.insert(recording.id.clone());
+                                last_download_error = Some(error);
+                            }
                         }
                     }
-                    Err(error) => last_inspection_error = Some(error),
-                }
-            }
-            // A fully inspected catalogue recording with matching duration can
-            // play immediately; fan uploads still wait for every search variant.
-            verified
-                .sort_by(|(a, ma), (b, mb)| mb.score.cmp(&ma.score).then_with(|| a.id.cmp(&b.id)));
-            // Only the best three download candidates need their larger
-            // format lists retained. Lower-ranked matches keep URL fallback.
-            inspected_info.retain(|id, _| {
-                verified
-                    .iter()
-                    .take(3)
-                    .any(|(recording, _)| &recording.id == id)
-            });
-            for (recording, matched) in verified
-                .iter()
-                .filter(|(recording, matched)| fast_catalog_match(&reference, recording, matched))
-            {
-                if unavailable.contains(&recording.id) {
-                    continue;
-                }
-                match download_recording_audio(
-                    yt_dlp,
-                    &recording.id,
-                    inspected_info.get(&recording.id),
-                    proxy,
-                )
-                .await
-                {
-                    Ok(bytes) => {
-                        cache.save_audio(&recording.id, &bytes);
-                        cache.save_verified_match(track, recording, matched.source);
-                        return Ok(bytes);
-                    }
-                    Err(error) => {
-                        unavailable.insert(recording.id.clone());
-                        last_download_error = Some(error);
+                    let prefix_successes = global_order
+                        .iter()
+                        .take_while(|id| inspected.contains(*id))
+                        .filter(|id| inspected_success.contains(*id))
+                        .count();
+                    let first_pair_inspected =
+                        global_order.iter().take(2).all(|id| inspected.contains(id));
+                    if final_results
+                        && details.is_empty()
+                        && ((first_pair_inspected
+                            && verified.iter().any(|(recording, matched)| {
+                                global_order.iter().take(2).any(|id| id == &recording.id)
+                                    && matches!(matched.source, SourceKind::VerifiedArtist)
+                                    && recording.duration.is_some_and(|duration| {
+                                        (duration - f64::from(reference.duration_secs)).abs() <= 3.0
+                                    })
+                            }))
+                            || (prefix_successes >= 6 && !verified.is_empty()))
+                    {
+                        break 'inspection_pairs;
                     }
                 }
-            }
-            let prefix_successes = global_order
-                .iter()
-                .take_while(|id| inspected.contains(*id))
-                .filter(|id| inspected_success.contains(*id))
-                .count();
-            let first_pair_inspected = global_order.iter().take(2).all(|id| inspected.contains(id));
-            if final_batch
-                && ((first_pair_inspected
-                    && verified.iter().any(|(recording, matched)| {
-                        global_order.iter().take(2).any(|id| id == &recording.id)
-                            && matches!(matched.source, SourceKind::VerifiedArtist)
-                            && recording.duration.is_some_and(|duration| {
-                                (duration - f64::from(reference.duration_secs)).abs() <= 3.0
-                            })
-                    }))
-                    || (prefix_successes >= 6 && !verified.is_empty()))
-            {
-                break;
             }
         }
     }

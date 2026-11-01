@@ -50,6 +50,9 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.4.21" date="2026-11-01">
+      <description><p>Lossless background audio-only cache compaction and earlier playback from fully verified catalogue results.</p></description>
+    </release>
     <release version="0.4.20" date="2026-11-01">
       <description><p>Shared lyrics data, recycled visualizer buffers, removed unused constants and more compact release packaging.</p></description>
     </release>

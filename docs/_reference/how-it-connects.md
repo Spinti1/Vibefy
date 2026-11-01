@@ -37,10 +37,10 @@ credentials. Search metadata only creates a shortlist; full watch-page music
 credits are inspected before audio download. Publisher channel evidence is a
 ranking preference; correctly identified independent uploads are not excluded
 because a channel badge, popularity count or rights-holder line is absent.
-Up to twelve candidates are inspected, two at a time, with expansion beyond six
+Search and inspection results are handled in completion order; fully inspected catalogue matches can finish before slower sibling requests. Up to twelve candidates are inspected, two at a time, with expansion beyond six
 only when needed. The cache is bound to Spotify metadata and matcher evidence.
 The audio format is the best available native AAC/M4A, without an artificial
-bitrate/sample-rate minimum, with compatible MP4 as a last format fallback.
+bitrate/sample-rate minimum, with combined compatible MP4 as a last format fallback. Supported ordinary combined MP4 cache files lose their video through background sample copying, without audio recoding. Audio timing/edit tables are preserved. Playback receives the original bytes before compaction; an unchanged cache file is replaced atomically. Unsupported layouts retain the original. No new runtime binary is required.
 There is no second provider, transcoding service or additional background model.
 Unknown placeholder tracks wait for the existing Spotify Track request before
 searching. Metadata arrivals update matching queue entries without changing

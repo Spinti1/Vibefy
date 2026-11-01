@@ -33,6 +33,8 @@ Version 0.4.19 accepts closely similar recording titles, with exact titles ranke
 
 Version 0.4.20 shares lyrics data between frames instead of copying timed words, reuses visualizer buffers, and records visual history only for Vivy. Release builds use full LTO and Setup uses stronger compression. The complete Auto Sync model and runtime remain included; network-dependent search and playback times still vary.
 
+Version 0.4.21 processes search and inspection results as they arrive, allowing fully verified catalogue recordings to start before slower sibling requests finish. Supported combined AAC MP4 cache files are compacted to audio-only in the background without recoding samples or changing timing. Existing files are handled when accessed. Unsupported layouts keep their original cache file; playback does not wait for compaction.
+
 ## Mobile web beta
 
 On desktop and laptop, the [website](https://usevibefy.online) presents the native app and downloads. On phones it opens the mobile player with search, queue, local collections, public playlist import, LRCLIB lyrics and official YouTube playback. Optional browser adaptations include Nyan Cat, Oneko, Cat Jam (manual tempo) and Track Peek. Browser Jam connects phone users through WebRTC; it is separate from native LAN sessions.

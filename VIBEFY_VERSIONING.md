@@ -1,8 +1,8 @@
 # Vibefy releases
 
-Current source version: **0.4.20**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
+Current source version: **0.4.21**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
 
-For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.21), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
+For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.22), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
 
 0.4.4: About and Mods credits, clearer buttons, cache management and 2 GB advisory, performance improvements.
 
@@ -37,3 +37,5 @@ For each future user-requested functional update, increment the Vibefy patch ver
 0.4.19: Bounded similarity replaces exact cleaned-title equality for Spotify-to-YouTube playback; exact matches rank higher, with artist/version/duration and sequel guards preserved. Settings show the actual automatic AAC/M4A format in place of inactive legacy bitrate buttons.
 
 0.4.20: Shared immutable lyrics for rendering and sync settings; recycled visualizer buffers and history only for Vivy; removed unused constants; full release LTO and stronger installer compression, with all source helpers and sync models retained.
+
+0.4.21: Native lossless background AAC/MP4 cache compaction; process search/inspection responses as they arrive for fully verified catalogue playback; skip identical recording-index writes. No new runtime executable, bitrate reduction or changed artist/version/duration rules.
