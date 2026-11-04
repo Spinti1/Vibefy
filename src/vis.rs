@@ -703,10 +703,8 @@ mod tests {
         let (mut tapped, recorded) = recorded_tap(Arc::clone(&control), crate::eq::shared());
         write_level(&mut tapped, 0.25);
         control.handle_player_event(&crate::sink::PlayerEvent::Seeked {
-            play_request_id: 1,
-            track_id: librespot_core::SpotifyUri::from_uri("spotify:track:14XWXWv5FoCbFzLksawpEe")
-                .unwrap(),
-            position_ms: 0,
+            track_id: "spotify:track:14XWXWv5FoCbFzLksawpEe".into(),
+            play_time_ms: 0,
         });
         recorded.lock().unwrap().clear();
         write_level(&mut tapped, 0.0);

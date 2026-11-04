@@ -1,4 +1,7 @@
-use spotifast::{mod_animation as animation, mod_tempo};
+#[path = "../src/mod_animation.rs"]
+mod animation;
+use spotifast::mod_tempo;
+pub use spotifast::theme;
 
 #[test]
 fn original_six_nyan_frames_are_unique_pngs() {

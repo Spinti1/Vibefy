@@ -30,13 +30,22 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
+      - name: Fetch pinned optional mod test fixtures
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force mods/packages | Out-Null
+          foreach($entry in (Get-Content mods/catalog.json -Raw | ConvertFrom-Json)) {
+            $file="mods/packages/$($entry.slug).vmod"
+            Invoke-WebRequest "https://github.com/Spinti1/Vibefy/releases/download/mods-v1/$($entry.slug).vmod" -OutFile $file
+            if((Get-Item $file).Length -ne $entry.bytes -or (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $entry.sha256){throw 'Mod fixture integrity mismatch'}
+          }
       - run: cargo fmt --all --check
       - run: |
           New-Item -ItemType Directory -Force target | Out-Null
           rustc --edition 2024 --test src/title_similarity.rs -o target/title-similarity-tests.exe
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           ./target/title-similarity-tests.exe
-      - run: cargo test --release --locked -j 2 --features demo --test update_integrity --test update_launch --test branding --test spotify_match --test source_playlist --test window_restore --test recording_match --test native_addons --test mod_artwork --test visual_buffers --test audio_only_cache --test lyrics_providers --test oauth_transport --test playlist_outbox --test music_accounts --test playlist_mirror --test google_youtube
+      - run: cargo test --release --locked -j 2 --features demo --test update_integrity --test update_launch --test branding --test spotify_match --test source_playlist --test window_restore --test recording_match --test native_addons --test mod_artwork --test visual_buffers --test audio_only_cache --test lyrics_providers --test oauth_transport --test playlist_outbox --test music_accounts --test playlist_mirror --test google_youtube --test mod_packages --test hidden_playlists --test player_controls --test navigation_views
       - run: cargo test --release --locked -j 2 --features demo --test fast_paths concurrent_play_and_prefetch_reuse_inspected_metadata_and_one_download
       - run: 'cargo test --release --locked -j 2 --features demo --test spicy_native tests::'
       - run: cargo test --release --locked -j 2 --features demo --test spicy_native ui::word_line_plain_and_error_views_render_in_both_themes

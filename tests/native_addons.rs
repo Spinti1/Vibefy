@@ -2,6 +2,23 @@ use serde_json::json;
 use spotifast::addons::{self, Id, Preferences};
 
 #[test]
+fn saved_collections_beyond_thirty_survive_reload() {
+    let path =
+        std::env::temp_dir().join(format!("vibefy-collections-{}.json", rand::random::<u64>()));
+    let collections: Vec<_> = (0..45)
+        .map(|index| addons::Collection {
+            title: format!("Playlist {index}"),
+            source: format!("https://www.youtube.com/playlist?list=PL{index}"),
+            ..Default::default()
+        })
+        .collect();
+    std::fs::write(&path, serde_json::to_vec(&collections).unwrap()).unwrap();
+    let loaded = addons::load_collections(&path);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(loaded, collections);
+}
+
+#[test]
 fn mods_are_opt_in_and_uninstall_does_not_enable_other_mods() {
     let mut preferences: Preferences = serde_json::from_str("{}").unwrap();
     assert!(addons::ALL.iter().all(|&id| !preferences.active(id)));
@@ -271,6 +288,18 @@ mod native_ui {
         );
         app.attach(&ctx);
         spotifast::demo::populate(&mut app);
+        for entry in spotifast::mod_packages::catalog() {
+            let bytes = std::fs::read(format!(
+                "{}/mods/packages/{}.vmod",
+                env!("CARGO_MANIFEST_DIR"),
+                entry.slug
+            ))
+            .unwrap();
+            app.addons.modules.insert(
+                entry.id,
+                spotifast::mod_packages::decode(entry.id, &bytes).unwrap(),
+            );
+        }
         (ctx, app, root)
     }
     fn frame(ctx: &egui::Context, app: &mut App, width: f32) -> egui::FullOutput {
@@ -309,12 +338,12 @@ mod native_ui {
         assert!(
             tree.nodes
                 .iter()
-                .any(|(_, n)| n.value().or(n.label()) == Some("Visualizer settings"))
+                .any(|(_, n)| n.value().or(n.label()) == Some("Settings"))
         );
         assert!(
             tree.nodes
                 .iter()
-                .any(|(_, n)| n.value().or(n.label()) == Some("Visualizer"))
+                .any(|(_, n)| n.value().or(n.label()) == Some("vivy"))
         );
         app.actions
             .push(Action::Addon(addons::Command::ChooseVisualizer(
@@ -324,9 +353,15 @@ mod native_ui {
         assert_eq!(app.settings.addons.visualizer, Some(Id::Vivy));
         app.actions
             .push(Action::Addon(addons::Command::Enable(Id::Backmusic, true)));
-        app.actions.push(Action::Addon(addons::Command::Style(1)));
+        frame(&ctx, &mut app, 760.0);
         app.actions
-            .push(Action::Addon(addons::Command::Intensity(2.0)));
+            .push(Action::Addon(addons::Command::ConfigureVisual(
+                addons::VisualConfig {
+                    style: 1,
+                    intensity: 2.0,
+                    ..Default::default()
+                },
+            )));
         frame(&ctx, &mut app, 760.0);
         app.actions
             .push(Action::Addon(addons::Command::ChooseVisualizer(Id::Vivy)));
@@ -357,7 +392,7 @@ mod native_ui {
                     })
                     .unwrap_or_else(|| panic!("Missing {label}"))
             };
-            let full = button("Fullscreen visualizer");
+            let full = button("Fullscreen");
             let volume = tree
                 .nodes
                 .iter()
@@ -421,14 +456,14 @@ mod native_ui {
                     Some(&format!("{theme},{mode}")),
                 );
                 for style in [0, 1] {
-                    app.settings.addons.visual_style = style;
+                    let id = app.settings.addons.visualizer.unwrap();
+                    app.settings.addons.visual_mut(id).style = style;
                     let out = frame(&ctx, &mut app, 760.0);
                     assert!(!out.shapes.is_empty());
                     frame(&ctx, &mut app, 760.0);
-                    assert!(
-                        !app.addons.ridges.is_empty(),
-                        "live audio must reach the native visualizer"
-                    );
+                    if app.settings.addons.visualizer == Some(Id::Vivy) {
+                        assert!(!app.addons.ridges.is_empty(), "live audio must reach Vivy");
+                    }
                     assert!(
                         app.addons.bands.iter().any(|level| *level > 0.01),
                         "visualizer must respond to non-silent samples"

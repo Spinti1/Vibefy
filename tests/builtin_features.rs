@@ -1,4 +1,5 @@
 #![cfg(feature = "demo")]
+pub use spotifast::theme;
 use spotifast::{
     addons::{self, Command, Id},
     app::{App, AppOptions},
@@ -192,7 +193,8 @@ fn cat_size_is_persisted_bounded_and_only_exposed_for_installed_cat_jam() {
 
 #[test]
 fn original_cat_art_reaches_the_window_edges_at_every_supported_size() {
-    use spotifast::mod_animation as cat;
+    #[path = "../src/mod_animation.rs"]
+    mod cat;
     let image = image::load_from_memory(cat::CAT_JAM).unwrap().into_rgba8();
     for scale in [0.5, 0.9, 1.0, 1.5, 2.0] {
         for size in [egui::vec2(760.0, 1000.0), egui::vec2(1280.0, 720.0)] {

@@ -94,14 +94,9 @@ nfpm:
       - libstdc++
   rpm:
     buildhost: github-actions
-# Windows code and installers are signed through Azure Artifact Signing as
-# PlentyLabs when the windows-signing environment provides the account
-# (PACKAGING.md, "Windows signing").
-windows:
-  signing:
-    provider: azure-artifact-signing
-    description: Spotifast
-    publisher: PlentyLabs UG (haftungsbeschränkt) & Co. KG
+# Vibefy Windows installers use packaging/vibefy/build-setup.ps1.
+# Signing is not configured: upstream Azure identity and GitHub trust do not
+# authorize this fork. See packaging/vibefy/SIGNING.md.
 targets:
   macos-universal:
     platform: macos

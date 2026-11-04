@@ -1186,6 +1186,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
     match filter {
         Filter::Playlists => {
             playlist_rows(app, sort, &needle, &mut entries);
+            entries.retain(|entry| !app.playlist_hidden(&entry.uri));
             match &app.library.playlists {
                 Loadable::Loaded(_) => {}
                 Loadable::Loading | Loadable::NotLoaded => loading = true,

@@ -1,16 +1,14 @@
 //! The Home page.
 
-use std::sync::Arc;
-
 use egui::{CornerRadius, Rect, Sense, Vec2, pos2, vec2};
 
 use crate::api::models::{Album, Episode, PlayableItem, Playlist, Show, pick_image};
 use crate::app::App;
 use crate::i18n::gettext;
-use crate::model::{Action, Loadable, Page, RowContext, TopPeriod};
+use crate::model::{Action, Loadable, Page};
 use crate::theme::{self, Icon};
 
-use super::widgets::{self, TrackRow};
+use super::widgets;
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
@@ -54,7 +52,36 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             });
         ui.add_space(16.0);
     }
-    quick_access(app, ui);
+    let all = quick_access_tiles(app);
+    for (group, title) in [(0, "Linked"), (1, "Spotify")] {
+        ui.label(
+            egui::RichText::new(title)
+                .font(theme::semibold(20.0))
+                .color(palette.text),
+        );
+        ui.add_space(10.0);
+        let tiles: Vec<_> = all
+            .iter()
+            .filter(|tile| {
+                tile_group(app, tile) == group
+                    && !tile.uri.as_deref().is_some_and(|s| app.playlist_hidden(s))
+            })
+            .cloned()
+            .collect();
+        if tiles.is_empty() {
+            ui.small(if group == 0 {
+                "Your linked Spotify and YouTube playlists appear here."
+            } else {
+                "Your Spotify playlists appear here."
+            });
+        }
+        quick_access(app, ui, &tiles);
+        ui.add_space(20.0);
+    }
+    youtube_playlists(app, ui);
+    if app.settings.addons.active(crate::addons::Id::JuiceVault) {
+        juice_playlists(app, ui);
+    }
     ui.add_space(16.0);
 
     if app.settings.home.made_for_you.visible {
@@ -65,12 +92,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     recently_played(app, ui);
     podcasts(app, ui);
     top_artists(app, ui);
-    top_tracks(app, ui);
-    if app.settings.home.recommendations.visible {
-        recommendations(app, ui);
-    }
+    hidden_playlists(app, ui);
 }
 
+#[derive(Clone)]
 struct Tile {
     image: Option<String>,
     name: String,
@@ -81,6 +106,249 @@ struct Tile {
     /// A song played on its own, which the tile plays and whose menu it
     /// offers, rather than a playlist, album or artist.
     song: Option<crate::api::models::Track>,
+}
+
+/// Linked copies remain in the Spotify shelf; native YouTube lists get their own shelf.
+fn youtube_playlists(app: &mut App, ui: &mut egui::Ui) {
+    if !app.music_accounts[0].connected {
+        return;
+    }
+    let linked: std::collections::HashSet<_> = app
+        .mirror
+        .lists
+        .iter()
+        .filter(|l| {
+            !l.youtube_id.is_empty()
+                && app.is_saved(&format!("spotify:playlist:{}", l.spotify_id)) != Some(false)
+        })
+        .map(|l| l.youtube_id.as_str())
+        .collect();
+    let mut seen = std::collections::HashSet::new();
+    let playlists: Vec<_> = app.music_accounts[0]
+        .playlists
+        .iter()
+        .filter(|p| {
+            let id = p.id.strip_prefix("VL").unwrap_or(&p.id);
+            !linked.contains(id)
+                && !app.playlist_hidden(&format!("https://www.youtube.com/playlist?list={id}"))
+                && seen.insert(id.to_owned())
+        })
+        .cloned()
+        .collect();
+
+    ui.add_space(16.0);
+    ui.label(
+        egui::RichText::new("YouTube")
+            .font(theme::semibold(20.0))
+            .color(app.palette.text),
+    );
+    ui.add_space(10.0);
+    let saved: Vec<_> = quick_access_tiles(app)
+        .into_iter()
+        .filter(|t| {
+            tile_group(app, t) == 2 && !t.uri.as_deref().is_some_and(|s| app.playlist_hidden(s))
+        })
+        .collect();
+    quick_access(app, ui, &saved);
+    if playlists.is_empty() && saved.is_empty() {
+        ui.small("Your YouTube playlists appear here.");
+    }
+    let columns = ((ui.available_width() / 230.0).floor() as usize).clamp(1, 5);
+    let width = (ui.available_width() - 12.0 * (columns - 1) as f32) / columns as f32;
+    let mut selected = None;
+    widgets::virtual_rows(ui, playlists.len().div_ceil(columns), 92.0, |ui, row| {
+        ui.horizontal(|ui| {
+            for playlist in playlists.iter().skip(row * columns).take(columns) {
+                let (rect, response) = ui.allocate_exact_size(vec2(width, 80.0), Sense::click());
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &playlist.title)
+                });
+                if ui.is_rect_visible(rect) {
+                    ui.painter().rect_filled(
+                        rect,
+                        8.0,
+                        if response.hovered() {
+                            app.palette.surface_hover
+                        } else {
+                            app.palette.surface
+                        },
+                    );
+                    let cover = Rect::from_min_size(rect.min + vec2(8.0, 8.0), vec2(64.0, 64.0));
+                    widgets::paint_cover(
+                        ui,
+                        &app.palette,
+                        playlist.image.as_deref(),
+                        cover,
+                        5.0,
+                        Icon::Music,
+                        Some(app.backend.art()),
+                    );
+                    let text = Rect::from_min_max(
+                        pos2(cover.right() + 10.0, rect.top()),
+                        rect.max - vec2(8.0, 0.0),
+                    );
+                    crate::bidi::paint_line(
+                        &ui.painter().with_clip_rect(text),
+                        text.left(),
+                        text.right(),
+                        rect.center().y,
+                        &playlist.title,
+                        theme::medium(14.0),
+                        app.palette.text,
+                    );
+                }
+                if response.clicked() && !app.music_accounts[0].busy {
+                    selected = Some(playlist.clone());
+                }
+                let source = format!(
+                    "https://www.youtube.com/playlist?list={}",
+                    playlist.id.strip_prefix("VL").unwrap_or(&playlist.id)
+                );
+                egui::Popup::context_menu(&response)
+                    .frame(widgets::menu_frame(&app.palette))
+                    .show(|ui| source_menu(app, ui, &source, &playlist.title));
+                response.on_hover_text(&playlist.title);
+            }
+        });
+        ui.add_space(12.0);
+    });
+    if app.music_accounts[0].busy {
+        ui.spinner();
+        ui.label("Loading YouTube playlist…");
+    }
+    if let Some(playlist) = selected {
+        let id = playlist.id.strip_prefix("VL").unwrap_or(&playlist.id);
+        let source = format!("https://www.youtube.com/playlist?list={id}");
+        if app.source_collection(&source).is_some() {
+            app.actions
+                .push(Action::Open(Page::LocalCollection(source)));
+        } else {
+            super::music_accounts::send(
+                app,
+                crate::music_accounts::Provider::YouTubeMusic,
+                crate::music_accounts::Action::Import(playlist),
+            );
+        }
+    }
+}
+
+fn tile_group(app: &App, tile: &Tile) -> u8 {
+    match &tile.page {
+        Page::LocalCollection(source)
+            if app
+                .mirror
+                .lists
+                .iter()
+                .any(|p| !p.youtube_id.is_empty() && &p.collection.source == source) =>
+        {
+            0
+        }
+        Page::Playlist(_) | Page::LikedSongs => 1,
+        Page::LocalCollection(source) if source.starts_with("https://api.juicevault.xyz/") => 3,
+        Page::LocalCollection(source) if crate::addons::playlist_url(source).is_ok() => 2,
+        _ => 4,
+    }
+}
+
+fn juice_playlists(app: &mut App, ui: &mut egui::Ui) {
+    use crate::music_accounts::{Action as AccountAction, Provider};
+    ui.add_space(20.0);
+    ui.label(
+        egui::RichText::new("JuiceVault")
+            .font(theme::semibold(20.0))
+            .color(app.palette.text),
+    );
+    ui.add_space(10.0);
+    let native: Vec<_> = app.music_accounts[1]
+        .playlists
+        .iter()
+        .filter(|p| {
+            !app.playlist_hidden(&format!(
+                "https://api.juicevault.xyz/user/playlists/{}",
+                p.id
+            ))
+        })
+        .cloned()
+        .collect();
+    let saved: Vec<_> = quick_access_tiles(app)
+        .into_iter()
+        .filter(|t| {
+            tile_group(app, t) == 3
+                && !t.uri.as_deref().is_some_and(|s| app.playlist_hidden(s))
+                && !native.iter().any(|p| {
+                    t.page
+                        == Page::LocalCollection(format!(
+                            "https://api.juicevault.xyz/user/playlists/{}",
+                            p.id
+                        ))
+                })
+        })
+        .collect();
+    quick_access(app, ui, &saved);
+    if native.is_empty() && saved.is_empty() {
+        ui.small("Connect JuiceVault or load a public profile from Mods.");
+    }
+    let columns = ((ui.available_width() / 260.0).floor() as usize).clamp(1, 4);
+    let width = (ui.available_width() - 10.0 * (columns - 1) as f32) / columns as f32;
+    let mut open = None;
+    widgets::virtual_rows(ui, native.len().div_ceil(columns), 74.0, |ui, row| {
+        ui.horizontal(|ui| {
+            for p in native.iter().skip(row * columns).take(columns) {
+                let (rect, response) = ui.allocate_exact_size(vec2(width, 64.0), Sense::click());
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &p.title)
+                });
+                if ui.is_rect_visible(rect) {
+                    ui.painter().rect_filled(
+                        rect,
+                        8.0,
+                        if response.hovered() {
+                            app.palette.surface_hover
+                        } else {
+                            app.palette.surface
+                        },
+                    );
+                    let cover = Rect::from_min_size(rect.min + vec2(6.0, 6.0), Vec2::splat(52.0));
+                    widgets::paint_cover(
+                        ui,
+                        &app.palette,
+                        p.image.as_deref(),
+                        cover,
+                        5.0,
+                        Icon::Music,
+                        Some(app.backend.art()),
+                    );
+                    let text = Rect::from_min_max(
+                        pos2(cover.right() + 10.0, rect.top()),
+                        rect.max - vec2(8.0, 0.0),
+                    );
+                    crate::bidi::paint_line(
+                        &ui.painter().with_clip_rect(text),
+                        text.left(),
+                        text.right(),
+                        text.center().y,
+                        &p.title,
+                        theme::medium(14.0),
+                        app.palette.text,
+                    );
+                }
+                let source = format!("https://api.juicevault.xyz/user/playlists/{}", p.id);
+                egui::Popup::context_menu(&response)
+                    .frame(widgets::menu_frame(&app.palette))
+                    .show(|ui| source_menu(app, ui, &source, &p.title));
+                if response.clicked() && !app.music_accounts[1].busy {
+                    open = Some(p.clone());
+                }
+            }
+        });
+        ui.add_space(10.0);
+    });
+    if let Some(p) = open {
+        super::music_accounts::send(app, Provider::JuiceVault, AccountAction::Import(p));
+    }
+    if app.music_accounts[1].busy {
+        ui.spinner();
+    }
 }
 
 /// The height of a quick-access tile, and so the side of its cover.
@@ -133,9 +401,18 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
         .mirror
         .lists
         .iter()
-        .filter(|list| !list.youtube_id.is_empty())
+        .filter(|list| {
+            !list.youtube_id.is_empty()
+                && app.is_saved(&format!("spotify:playlist:{}", list.spotify_id)) != Some(false)
+        })
         .map(|list| &list.collection)
-        .chain(app.addons.collections.iter().rev())
+        .chain(app.addons.collections.iter().rev().filter(|saved| {
+            !app.music_accounts[0].connected
+                || !app.music_accounts[0].playlists.iter().any(|p| {
+                    let id = p.id.strip_prefix("VL").unwrap_or(&p.id);
+                    saved.source == format!("https://www.youtube.com/playlist?list={id}")
+                })
+        }))
     {
         let page = Page::LocalCollection(saved.source.clone());
         if seen.insert(page.clone()) {
@@ -162,9 +439,11 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
         let context = play.context.as_ref().map(|context| context.uri.as_str());
         let tile = match context.map(|uri| (uri, uri.rsplit(':').next().unwrap_or(""))) {
             Some((uri, _)) if uri.ends_with(":collection") => Some(liked_tile()),
-            Some((uri, id)) if uri.starts_with("spotify:playlist:") => {
-                app.known_playlist(id).map(playlist_tile)
-            }
+            Some((uri, id)) if uri.starts_with("spotify:playlist:") => (app.is_saved(uri)
+                != Some(false))
+            .then(|| app.known_playlist(id))
+            .flatten()
+            .map(playlist_tile),
             Some((uri, id)) if uri.starts_with("spotify:album:") => app
                 .known_album(id)
                 .or(track.album.as_ref().filter(|album| album.id == id))
@@ -223,9 +502,8 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
     tiles
 }
 
-fn quick_access(app: &mut App, ui: &mut egui::Ui) {
+fn quick_access(app: &mut App, ui: &mut egui::Ui, tiles: &[Tile]) {
     let palette = app.palette;
-    let tiles = quick_access_tiles(app);
     let available = ui.available_width();
     let columns = ((available / 300.0).floor() as usize).clamp(2, 4);
     let gap = 10.0;
@@ -341,12 +619,9 @@ fn quick_access(app: &mut App, ui: &mut egui::Ui) {
                     }
                 }
                 if response.clicked() {
-                    app.actions.push(Action::Open(page.clone()));
+                    open_tile(app, page);
                 }
-                if !liked
-                    && !matches!(page, Page::LocalCollection(_))
-                    && let Some(uri) = uri
-                {
+                if !liked && let Some(uri) = uri {
                     egui::Popup::context_menu(&response)
                         .id(ui.make_persistent_id(("quick-access-menu", uri)))
                         .frame(widgets::menu_frame(&palette))
@@ -358,6 +633,9 @@ fn quick_access(app: &mut App, ui: &mut egui::Ui) {
                                 None,
                                 None,
                             ),
+                            None if matches!(page, Page::LocalCollection(_)) => {
+                                source_menu(app, ui, uri, name)
+                            }
                             None => widgets::context_menu_items(
                                 ui,
                                 app,
@@ -874,173 +1152,6 @@ fn top_artists(app: &mut App, ui: &mut egui::Ui) {
     );
 }
 
-fn track_list(
-    app: &mut App,
-    ui: &mut egui::Ui,
-    title: &str,
-    tracks: Loadable<Vec<crate::api::models::Track>>,
-    limit: usize,
-    title_page: Option<Page>,
-    more_label: Option<&str>,
-) {
-    let palette = app.palette;
-    let tracks = match tracks {
-        Loadable::Loaded(tracks) => tracks,
-        Loadable::Loading | Loadable::NotLoaded => {
-            if let Some(page) = title_page {
-                if theme::link(ui, title, theme::bold(17.0), palette.text).clicked() {
-                    app.actions.push(Action::Open(page));
-                }
-            } else {
-                theme::section_title(ui, &palette, title);
-            }
-            widgets::skeleton_rows(ui, &palette, app.locale, 4);
-            ui.add_space(12.0);
-            return;
-        }
-        Loadable::Failed(message) => {
-            theme::section_title(ui, &palette, title);
-            widgets::error_row(ui, app, &message, Some(title_page.unwrap_or(Page::Home)));
-            ui.add_space(12.0);
-            return;
-        }
-    };
-    if tracks.is_empty() {
-        return;
-    }
-    if let Some(page) = title_page {
-        if theme::link(ui, title, theme::bold(17.0), palette.text).clicked() {
-            app.actions.push(Action::Open(page));
-        }
-    } else {
-        theme::section_title(ui, &palette, title);
-    }
-    ui.add_space(4.0);
-    let uris: Arc<[String]> = tracks
-        .iter()
-        .map(|track| track.uri.clone())
-        .collect::<Vec<_>>()
-        .into();
-    let context = RowContext::Uris(Arc::clone(&uris));
-    for (index, track) in tracks.iter().take(limit).enumerate() {
-        let item = PlayableItem::Track(track.clone());
-        widgets::track_row(
-            ui,
-            app,
-            TrackRow {
-                index,
-                number: None,
-                item: &item,
-                context: &context,
-                show_cover: !app.settings.tracklist_compact,
-                show_album: true,
-                added_at: None,
-                added_by: None,
-                show_added_by: false,
-                show_plays: false,
-                compact: false,
-                thin: app.settings.tracklist_compact,
-                shift: 0.0,
-                picked: false,
-                picked_songs: &[],
-                picked_positions: &[],
-                position: None,
-            },
-        );
-    }
-    if let Some(label) = more_label
-        && tracks.len() > limit
-        && theme::link(ui, label, theme::semibold(14.0), palette.secondary).clicked()
-    {
-        app.actions.push(Action::Open(Page::TopSongs));
-    }
-    ui.add_space(16.0);
-}
-
-fn top_tracks(app: &mut App, ui: &mut egui::Ui) {
-    let palette = app.palette;
-    let title = gettext(app.locale, "Your top songs");
-    let more = gettext(app.locale, "Show more top songs");
-    let tracks = app.home.top_tracks.clone();
-
-    if theme::link(ui, &*title, theme::bold(17.0), palette.text).clicked() {
-        app.actions.push(Action::Open(Page::TopSongs));
-    }
-    ui.add_space(4.0);
-
-    let labels: Vec<_> = TopPeriod::ALL
-        .iter()
-        .map(|p| (*p, p.label(app.locale)))
-        .collect();
-    let options: Vec<(TopPeriod, &str)> = labels
-        .iter()
-        .map(|(period, label)| (*period, label.as_ref()))
-        .collect();
-    if let Some(period) = widgets::chips(ui, &palette, &options, app.home.top_period) {
-        app.actions.push(Action::SetTopPeriod(period));
-    }
-    ui.add_space(8.0);
-
-    let tracks = match tracks {
-        Loadable::Loaded(tracks) => tracks,
-        Loadable::Loading | Loadable::NotLoaded => {
-            widgets::loading_row(ui, &palette, app.locale);
-            ui.add_space(12.0);
-            return;
-        }
-        Loadable::Failed(message) => {
-            widgets::error_row(ui, app, &message, Some(Page::TopSongs));
-            ui.add_space(12.0);
-            return;
-        }
-    };
-
-    let uris: Arc<[String]> = tracks
-        .iter()
-        .map(|track| track.uri.clone())
-        .collect::<Vec<_>>()
-        .into();
-    let context = RowContext::Uris(Arc::clone(&uris));
-    for (index, track) in tracks.iter().take(10).enumerate() {
-        let item = PlayableItem::Track(track.clone());
-        widgets::track_row(
-            ui,
-            app,
-            TrackRow {
-                index,
-                number: None,
-                item: &item,
-                context: &context,
-                show_cover: !app.settings.tracklist_compact,
-                show_album: true,
-                added_at: None,
-                added_by: None,
-                show_added_by: false,
-                show_plays: false,
-                compact: false,
-                thin: app.settings.tracklist_compact,
-                shift: 0.0,
-                picked: false,
-                picked_songs: &[],
-                picked_positions: &[],
-                position: None,
-            },
-        );
-    }
-    if tracks.len() > 10
-        && theme::link(ui, &*more, theme::semibold(14.0), palette.secondary).clicked()
-    {
-        app.actions.push(Action::Open(Page::TopSongs));
-    }
-    ui.add_space(16.0);
-}
-
-fn recommendations(app: &mut App, ui: &mut egui::Ui) {
-    let tracks = app.home.recommendations.clone();
-    let title = gettext(app.locale, "Recommended for you");
-    track_list(app, ui, &title, tracks, 20, None, None);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1234,5 +1345,152 @@ mod tests {
         let shelf = podcast_episodes(&podcasts, |show| show.id == "s0", today());
         assert_eq!(shelf.len(), PODCAST_CARDS);
         assert!(!ids(&shelf).contains(&"s0-e"));
+    }
+}
+
+fn open_tile(app: &mut App, page: &Page) {
+    if let Page::LocalCollection(source) = page {
+        if app.source_collection(source).is_none() {
+            for index in 0..2 {
+                let playlist = app.music_accounts[index]
+                    .playlists
+                    .iter()
+                    .find(|p| {
+                        let link = if index == 0 {
+                            format!(
+                                "https://www.youtube.com/playlist?list={}",
+                                p.id.strip_prefix("VL").unwrap_or(&p.id)
+                            )
+                        } else {
+                            format!("https://api.juicevault.xyz/user/playlists/{}", p.id)
+                        };
+                        link == *source
+                    })
+                    .cloned();
+                if let Some(playlist) = playlist {
+                    super::music_accounts::send(
+                        app,
+                        if index == 0 {
+                            crate::music_accounts::Provider::YouTubeMusic
+                        } else {
+                            crate::music_accounts::Provider::JuiceVault
+                        },
+                        crate::music_accounts::Action::Import(playlist),
+                    );
+                    return;
+                }
+            }
+        }
+    }
+    app.actions.push(Action::Open(page.clone()));
+}
+fn source_menu(app: &mut App, ui: &mut egui::Ui, source: &str, name: &str) {
+    let linked = app
+        .mirror
+        .lists
+        .iter()
+        .find(|l| l.collection.source == source)
+        .map(|l| l.spotify_id.clone());
+    if let Some(id) = linked {
+        let playlist = app.known_playlist(&id).cloned();
+        if let Some(playlist) = playlist {
+            let owned = app.user_id().is_some_and(|id| playlist.owned_by(id));
+            widgets::context_menu_items(ui, app, &playlist.uri, name, owned.then_some(&playlist));
+            ui.small("Spotify actions affect Spotify. The YouTube copy remains.");
+            return;
+        }
+    }
+    ui.set_min_width(200.0);
+    widgets::playlist_visibility_menu(ui, app, source);
+    if widgets::menu_item(ui, &app.palette, Some(Icon::Play), "Open playlist") {
+        open_tile(app, &Page::LocalCollection(source.into()));
+    }
+    if let Some(index) = app
+        .addons
+        .collections
+        .iter()
+        .position(|c| c.source == source)
+    {
+        if widgets::menu_item(
+            ui,
+            &app.palette,
+            Some(Icon::Trash),
+            "Remove saved copy from Vibefy",
+        ) {
+            app.actions
+                .push(Action::Addon(crate::addons::Command::DeleteCollection(
+                    index,
+                )));
+        }
+    }
+    if widgets::menu_item(ui, &app.palette, Some(Icon::Copy), "Copy link") {
+        ui.ctx().copy_text(source.into());
+    }
+}
+fn hidden_playlists(app: &mut App, ui: &mut egui::Ui) {
+    let mut tiles: Vec<_> = quick_access_tiles(app)
+        .into_iter()
+        .filter(|t| t.uri.as_deref().is_some_and(|s| app.playlist_hidden(s)))
+        .collect();
+    for index in 0..2 {
+        if index == 1 && !app.settings.addons.active(crate::addons::Id::JuiceVault) {
+            continue;
+        }
+        for p in &app.music_accounts[index].playlists {
+            let source = if index == 0 {
+                format!(
+                    "https://www.youtube.com/playlist?list={}",
+                    p.id.strip_prefix("VL").unwrap_or(&p.id)
+                )
+            } else {
+                format!("https://api.juicevault.xyz/user/playlists/{}", p.id)
+            };
+            if app.playlist_hidden(&source)
+                && !tiles.iter().any(|t| {
+                    t.uri.as_deref().is_some_and(|s| {
+                        app.playlist_visibility_key(s) == app.playlist_visibility_key(&source)
+                    })
+                })
+            {
+                tiles.push(Tile {
+                    image: p.image.clone(),
+                    name: p.title.clone(),
+                    page: Page::LocalCollection(source.clone()),
+                    uri: Some(source),
+                    liked: false,
+                    owned_playlist: None,
+                    song: None,
+                });
+            }
+        }
+    }
+    ui.add_space(24.0);
+    let key = ui.make_persistent_id(("hidden-playlists-open", app.user_id().unwrap_or("local")));
+    let mut open = ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false));
+    ui.horizontal(|ui| {
+        theme::text(
+            ui,
+            "Hidden playlists",
+            theme::semibold(20.0),
+            app.palette.text,
+        );
+        if theme::pill_button(
+            ui,
+            &app.palette,
+            &format!("{} ({})", if open { "Hide" } else { "Show" }, tiles.len()),
+            false,
+        )
+        .clicked()
+        {
+            open = !open;
+            ui.ctx().data_mut(|d| d.insert_temp(key, open));
+        }
+    });
+    if open {
+        ui.add_space(10.0);
+        if tiles.is_empty() {
+            ui.small("Right-click a playlist and choose Hide playlist. This does not change its privacy on Spotify or YouTube.");
+        }
+        quick_access(app, ui, &tiles);
     }
 }

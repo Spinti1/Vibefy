@@ -1,6 +1,6 @@
 use spotifast::api::models::ArtistRef;
 use spotifast::player::{LocalTrack, MatchCache, resolve_track_audio, youtube_proxy_args};
-use spotifast::settings::{ProxyConfig, ProxyMode, Settings};
+use spotifast::settings::{ProxyConfig, Settings};
 
 #[test]
 fn proxy_off_preserves_an_explicit_empty_argument() {
@@ -12,24 +12,16 @@ fn proxy_off_preserves_an_explicit_empty_argument() {
 }
 
 #[test]
-fn system_proxy_leaves_discovery_to_ytdlp() {
-    assert!(youtube_proxy_args(&ProxyConfig::System).is_empty());
-}
-
-#[test]
-fn manual_http_and_socks_proxies_keep_their_endpoint() {
-    for (mode, endpoint) in [
-        (ProxyMode::Http, "http://127.0.0.1:8123"),
-        (ProxyMode::Socks, "socks5://127.0.0.1:8123"),
-    ] {
-        let settings = Settings {
-            proxy_mode: mode,
-            proxy_host: "127.0.0.1".into(),
-            proxy_port: "8123".into(),
-            ..Default::default()
-        };
-        let proxy = settings.proxy_config().unwrap();
-        assert_eq!(youtube_proxy_args(&proxy), ["--proxy", endpoint]);
+fn obsolete_saved_proxy_is_ignored() {
+    for mode in ["http", "socks", "system"] {
+        let settings: Settings = serde_json::from_value(serde_json::json!({"proxy_mode":mode,"proxy_host":"127.0.0.1","proxy_port":"9","proxy_password":"old"})).unwrap();
+        assert_eq!(settings.proxy_config().unwrap(), ProxyConfig::Off);
+        assert!(settings.proxy_password.is_empty());
+        assert!(!settings.encode().unwrap().contains("proxy_host"));
+        assert_eq!(
+            youtube_proxy_args(&settings.proxy_config().unwrap()),
+            ["--proxy", ""]
+        );
     }
 }
 

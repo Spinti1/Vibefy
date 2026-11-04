@@ -275,7 +275,8 @@ fn parse_request_line(line: &str, expected_state: &str) -> Result<String> {
         .ok_or_else(|| anyhow!("malformed request"))?;
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     if path != REDIRECT_PATH && path != "/ncspot_login" {
-        bail!("unexpected redirect path: {path}");
+        // Redirect input is untrusted and may contain authorization material.
+        bail!("unexpected redirect path");
     }
     let mut code = None;
     let mut state = None;
@@ -643,24 +644,18 @@ mod tests {
             urlencoding::encode(&personal_redirect_uri())
         )));
         assert!(!flow.url.contains("show_dialog=true"));
-        let playback = begin(Grant::playback());
-        assert!(
-            playback
-                .url
-                .contains(&format!("client_id={PLAYBACK_CLIENT_ID}"))
-        );
-        assert!(playback.url.contains("8898"));
-        assert!(playback.url.contains("show_dialog=true"));
     }
 
     #[test]
-    fn playback_scopes_conform_to_spotify_streaming_contract() {
-        assert_eq!(PLAYBACK_SCOPES, &["streaming"]);
-        let playback = Grant::playback();
-        assert_eq!(playback.scopes, vec!["streaming".to_string()]);
-        let personal = Grant::personal_web_api("test-id").unwrap();
-        let flow = begin(personal);
-        assert!(!flow.url.contains("show_dialog=true"));
+    fn web_grants_do_not_request_removed_streaming_authorization() {
+        for grant in [
+            Grant::shared_web_api(),
+            Grant::personal_web_api("test-id").unwrap(),
+        ] {
+            assert_eq!(grant.scopes, WEB_SCOPES);
+            assert!(!grant.scopes.contains(&"streaming"));
+            assert!(begin(grant).url.contains("code_challenge_method=S256"));
+        }
     }
 
     #[test]

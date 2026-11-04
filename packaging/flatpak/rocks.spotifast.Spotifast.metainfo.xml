@@ -50,6 +50,22 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.4.42" date="2026-11-04"><description><p>Playback lifecycle fixes and updated regression tests.</p></description></release>
+    <release version="0.4.41" date="2026-11-03"><description><p>Optional mod packages and library reliability improvements.</p></description></release>
+    <release version="0.4.40" date="2026-11-03"><description><p>Compact Track Peek cards beside the playback controls.</p></description></release>
+    <release version="0.4.39" date="2026-11-03"><description><p>Removes the Home recommendation shelf and its loading code.</p></description></release>
+    <release version="0.4.38" date="2026-11-03"><description><p>Hidden playlists, playlist context menus and windowed visualizers.</p></description></release>
+    <release version="0.4.37" date="2026-11-03"><description><p>Permanent Track Peek cards, separate visualizer controls and direct connections.</p></description></release>
+    <release version="0.4.36" date="2026-11-03"><description><p>Improve artist navigation, fullscreen, queue and visual settings.</p></description></release>
+    <release version="0.4.35" date="2026-11-03"><description><p>Fix local playback stuck connecting during account restoration.</p></description></release>
+    <release version="0.4.34" date="2026-11-02"><description><p>Linked playlist renaming, lyrics matching fixes and playback cache reuse.</p></description></release>
+    <release version="0.4.33" date="2026-11-02"><description><p>Provider library shelves, optional JuiceVault search and account libraries, and additional YouTube Music lyrics.</p></description></release>
+    <release version="0.4.32" date="2026-11-02">
+      <description><p>Playlist selection gallery with covers and direct selection, plus a dedicated transfer progress screen.</p></description>
+    </release>
+    <release version="0.4.31" date="2026-11-02"><description><p>Ordered Spotify and YouTube setup, selectable playlist transfer with progress, and a deduplicated YouTube library on Home.</p></description></release>
+    <release version="0.4.30" date="2026-11-02"><description><p>Allow official regional Google sign-in redirects after 2FA, with strict host checks and redacted local diagnostics.</p></description></release>
+    <release version="0.4.29" date="2026-11-02"><description><p>Dedicated first-party YouTube sign-in window on Windows, separate local profile, and existing unlisted playlist sync.</p></description></release>
     <release version="0.4.28" date="2026-11-02"><description><p>Direct YouTube connection through Google's account chooser, official playlist access, and unlisted Spotify playlist copies.</p></description></release>
     <release version="0.4.27" date="2026-11-02"><description><p>Create unlisted YouTube Music playlist copies while preserving existing private copies.</p></description></release>
     <release version="0.4.26" date="2026-11-02"><description><p>Private YouTube Music playlist copies from Spotify, independent queued additions, recording review and unified Home playlists.</p></description></release>

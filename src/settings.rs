@@ -77,7 +77,6 @@ impl Default for HomeShelfSettings {
 #[serde(default)]
 pub struct HomeSettings {
     pub made_for_you: HomeShelfSettings,
-    pub recommendations: HomeShelfSettings,
 }
 
 /// What moves behind the player bar's controls.
@@ -182,51 +181,14 @@ impl ThemeChoice {
 #[serde(rename_all = "lowercase")]
 pub enum ProxyMode {
     /// No proxy, ignoring environment and OS proxy settings.
-    Off,
-    /// Environment variables and, on macOS and Windows, the OS proxy.
     #[default]
+    Off,
+    /// Legacy value, ignored when reading settings.
     System,
     /// A configured HTTP proxy.
     Http,
     /// A configured SOCKS5 proxy.
     Socks,
-}
-
-impl ProxyMode {
-    pub const ALL: [ProxyMode; 4] = [Self::Off, Self::System, Self::Http, Self::Socks];
-
-    pub fn label(self, locale: crate::i18n::Locale) -> std::borrow::Cow<'static, str> {
-        use crate::i18n::pgettext;
-        match self {
-            Self::Off => pgettext(locale, "proxy", "Off"),
-            Self::System => pgettext(locale, "proxy", "System"),
-            Self::Http => "HTTP".into(),
-            Self::Socks => "SOCKS5".into(),
-        }
-    }
-
-    pub fn is_manual(self) -> bool {
-        matches!(self, Self::Http | Self::Socks)
-    }
-}
-
-/// Only confirmed proxy preferences are written with other settings. The
-/// password stays in memory and the protected store, never in this snapshot.
-#[derive(Clone, PartialEq, Eq)]
-pub struct ProxyPreferences {
-    mode: ProxyMode,
-    host: String,
-    port: String,
-    username: String,
-}
-
-impl ProxyPreferences {
-    pub fn apply_to(&self, settings: &mut Settings) {
-        settings.proxy_mode = self.mode;
-        settings.proxy_host.clone_from(&self.host);
-        settings.proxy_port.clone_from(&self.port);
-        settings.proxy_username.clone_from(&self.username);
-    }
 }
 
 /// An equalizer preset saved by name: the preamp and the ten bands, so a
@@ -237,10 +199,6 @@ pub struct UserEqPreset {
     #[serde(default)]
     pub preamp_db: f32,
     pub bands_db: [f32; 10],
-}
-
-fn proxy_mode_is_system(mode: &ProxyMode) -> bool {
-    *mode == ProxyMode::System
 }
 
 /// How often the banner suggesting a personal app has appeared. It shows at
@@ -262,6 +220,8 @@ impl SlowAppBanner {
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// Hidden Home playlists, scoped to the signed-in Spotify account.
+    pub hidden_playlists: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     pub addons: crate::addons::Preferences,
     /// The Spotify Connect name other devices see.
     pub device_name: String,
@@ -437,25 +397,25 @@ pub struct Settings {
     /// The main window is rolled up to its title bar.
     pub winamp_shaded: bool,
     /// Which proxy to use. Older files without this field stay on `system`.
-    #[serde(default, skip_serializing_if = "proxy_mode_is_system")]
+    #[serde(skip)]
     pub proxy_mode: ProxyMode,
     /// Combined address from older settings files. Split into host and port
     /// on load; not written again.
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub proxy: String,
     /// Host of a manual HTTP or SOCKS5 proxy. Ignored when the mode is Off
     /// or System.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(skip)]
     pub proxy_host: String,
     /// Port of a manual HTTP or SOCKS5 proxy.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(skip)]
     pub proxy_port: String,
     /// Optional proxy login for Web requests.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(skip)]
     pub proxy_username: String,
     /// Optional proxy password, in memory and the platform credential store.
     /// Legacy JSON copies remain until protected migration succeeds.
-    #[serde(default, skip_serializing)]
+    #[serde(skip)]
     pub proxy_password: String,
     /// Legacy settings and their password must survive until protected migration
     /// succeeds. This flag is only in memory and is never persisted.
@@ -482,6 +442,7 @@ impl Default for Settings {
     /// settings files, including an inactive playlist ownership filter.
     fn default() -> Self {
         Self {
+            hidden_playlists: Default::default(),
             device_name: "Vibefy".to_string(),
             addons: crate::addons::Preferences::default(),
             bitrate: 320,
@@ -559,7 +520,7 @@ impl Default for Settings {
             playlist_shaded: false,
             eq_shaded: false,
             winamp_shaded: false,
-            proxy_mode: ProxyMode::System,
+            proxy_mode: ProxyMode::Off,
             proxy: String::new(),
             proxy_host: String::new(),
             proxy_port: String::new(),
@@ -615,46 +576,7 @@ impl Settings {
     pub(crate) fn proxy_password_record(
         &self,
     ) -> Result<Option<crate::credentials::ProxyPassword>, String> {
-        if self.proxy_password.is_empty() {
-            return Ok(None);
-        }
-        let manual = ManualProxy::parse(
-            ManualKind::Http,
-            &self.proxy_host,
-            &self.proxy_port,
-            &self.proxy_username,
-            &self.proxy_password,
-        )?;
-        Ok(manual.password_record())
-    }
-
-    pub(crate) fn restore_proxy_password(
-        &mut self,
-        saved: &crate::credentials::ProxyPassword,
-    ) -> bool {
-        let Ok(mut manual) = ManualProxy::parse(
-            ManualKind::Http,
-            &self.proxy_host,
-            &self.proxy_port,
-            &self.proxy_username,
-            "",
-        ) else {
-            return false;
-        };
-        if !manual.restore_password(saved) {
-            return false;
-        }
-        self.proxy_password = manual.password;
-        true
-    }
-
-    pub fn proxy_preferences(&self) -> ProxyPreferences {
-        ProxyPreferences {
-            mode: self.proxy_mode,
-            host: self.proxy_host.clone(),
-            port: self.proxy_port.clone(),
-            username: self.proxy_username.clone(),
-        }
+        Ok(None)
     }
 
     pub fn library_pins(&self) -> Vec<String> {
@@ -714,309 +636,45 @@ impl Settings {
         self.search_history.truncate(12);
     }
 
-    pub(crate) fn migrate_proxy(&mut self, text: &str) {
-        if !text.contains("\"proxy_mode\"") {
-            self.proxy_mode = infer_legacy_proxy_mode(&self.proxy);
-        }
-        if self.proxy_host.is_empty() && !self.proxy.trim().is_empty() {
-            let (host, port) = split_legacy_address(&self.proxy);
-            self.proxy_host = host;
-            if self.proxy_port.is_empty() {
-                self.proxy_port = port;
-            }
-        }
+    pub(crate) fn migrate_proxy(&mut self, _text: &str) {
+        self.proxy_mode = ProxyMode::Off;
+        self.proxy.clear();
+        self.proxy_host.clear();
+        self.proxy_port.clear();
+        self.proxy_username.clear();
+        self.proxy_password.clear();
+        self.proxy_password_legacy = false;
     }
 
     /// The proxy the HTTP client should use. Off and System always succeed.
     /// HTTP and SOCKS5 need a host and port.
     pub fn proxy_config(&self) -> Result<ProxyConfig, String> {
-        match self.proxy_mode {
-            ProxyMode::Off => Ok(ProxyConfig::Off),
-            ProxyMode::System => Ok(ProxyConfig::System),
-            ProxyMode::Http => Ok(ProxyConfig::Http(ManualProxy::parse(
-                ManualKind::Http,
-                &self.proxy_host,
-                &self.proxy_port,
-                &self.proxy_username,
-                &self.proxy_password,
-            )?)),
-            ProxyMode::Socks => Ok(ProxyConfig::Socks(ManualProxy::parse(
-                ManualKind::Socks,
-                &self.proxy_host,
-                &self.proxy_port,
-                &self.proxy_username,
-                &self.proxy_password,
-            )?)),
-        }
+        Ok(ProxyConfig::Off)
     }
 }
 
-fn infer_legacy_proxy_mode(proxy: &str) -> ProxyMode {
-    let raw = proxy.trim();
-    if raw.is_empty() {
-        return ProxyMode::System;
-    }
-    let scheme = raw.split("://").next().unwrap_or("").to_ascii_lowercase();
-    match scheme.as_str() {
-        "socks" | "socks5" | "socks5h" => ProxyMode::Socks,
-        _ => ProxyMode::Http,
-    }
-}
-
-fn validate_host(host: &str) -> Result<String, String> {
-    let host = host.trim();
-    if host.is_empty() {
-        return Err("enter a host".into());
-    }
-    let host = host
-        .split_once("://")
-        .map_or(host, |(_, rest)| rest)
-        .trim_start_matches('[')
-        .trim_end_matches(']');
-    if host.is_empty() {
-        return Err("enter a host".into());
-    }
-    if host.parse::<std::net::IpAddr>().is_ok() {
-        return Ok(host.to_string());
-    }
-    if is_hostname(host) {
-        return Ok(host.to_string());
-    }
-    Err("the host must be a hostname or IP address".into())
-}
-
-fn is_hostname(host: &str) -> bool {
-    if host.len() > 253 || host.starts_with('.') || host.ends_with('.') {
-        return false;
-    }
-    host.split('.').all(|label| {
-        (1..=63).contains(&label.len())
-            && !label.starts_with('-')
-            && !label.ends_with('-')
-            && label
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-    })
-}
-
-fn validate_port(port: &str) -> Result<u16, String> {
-    let port = port.trim();
-    if port.is_empty() {
-        return Err("enter a port".into());
-    }
-    if !port.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err("the port must be a number between 1 and 65535".into());
-    }
-    match port.parse::<u16>() {
-        Ok(port) if port > 0 => Ok(port),
-        _ => Err("the port must be a number between 1 and 65535".into()),
-    }
-}
-
-fn split_legacy_address(raw: &str) -> (String, String) {
-    let raw = raw.trim();
-    let rest = raw.split_once("://").map_or(raw, |(_, rest)| rest);
-    let rest = rest.rsplit_once('@').map_or(rest, |(_, rest)| rest);
-    if let Some(inner) = rest.strip_prefix('[')
-        && let Some((host, port)) = inner.split_once("]:")
-    {
-        return (host.to_string(), port.trim().to_string());
-    }
-    if let Some((host, port)) = rest.rsplit_once(':')
-        && !host.contains(':')
-    {
-        return (host.to_string(), port.trim().to_string());
-    }
-    (rest.to_string(), String::new())
-}
-
-/// The resolved proxy policy used by the HTTP client and local playback.
+/// Compatibility token for network worker APIs. Vibefy always connects directly.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum ProxyConfig {
-    /// Invalid saved settings block requests until corrected in the interface.
-    Invalid(String),
-    Off,
     #[default]
-    System,
-    Http(ManualProxy),
-    Socks(ManualProxy),
+    Off,
+    Invalid(String),
 }
-
 impl ProxyConfig {
+    pub(crate) fn youtube_browser_arguments(&self) -> Result<Option<String>, String> {
+        Ok(Some("--no-proxy-server".into()))
+    }
     pub(crate) fn password_record(&self) -> Option<crate::credentials::ProxyPassword> {
-        match self {
-            Self::Http(manual) | Self::Socks(manual) => manual.password_record(),
-            _ => None,
-        }
+        None
     }
-
-    pub(crate) fn restore_password(&mut self, saved: &crate::credentials::ProxyPassword) -> bool {
-        match self {
-            Self::Http(manual) | Self::Socks(manual) => manual.restore_password(saved),
-            _ => false,
-        }
+    pub(crate) fn restore_password(&mut self, _saved: &crate::credentials::ProxyPassword) -> bool {
+        false
     }
-
-    /// Returns a proxy URL string for external engines like yt-dlp.
     pub fn to_url_string(&self) -> Option<String> {
-        match self {
-            Self::Http(manual) | Self::Socks(manual) => Some(manual.to_url_string()),
-            _ => None,
-        }
+        None
     }
-
-    /// Librespot's CONNECT client only understands unauthenticated,
-    /// plaintext HTTP proxies. Never give it a credential-bearing URL: the
-    /// upstream client logs that URL at info level and does not send proxy
-    /// authentication in either of its HTTP paths.
     pub fn librespot_url(&self) -> Option<reqwest::Url> {
-        match self {
-            Self::Http(manual) => manual.librespot_url(),
-            Self::System => system_http_proxy(),
-            Self::Invalid(_) | Self::Off | Self::Socks(_) => None,
-        }
-    }
-}
-
-/// The HTTP proxy System mode would hand librespot, if it can resolve one.
-/// SOCKS system proxies are ignored: the engine cannot use them.
-fn system_http_proxy() -> Option<reqwest::Url> {
-    let matcher = hyper_util::client::proxy::matcher::Matcher::from_system();
-    let dest = http::Uri::from_static("https://apresolve.spotify.com");
-    let intercept = matcher.intercept(&dest)?;
-    librespot_system_proxy(&intercept)
-}
-
-fn librespot_system_proxy(
-    intercept: &hyper_util::client::proxy::matcher::Intercept,
-) -> Option<reqwest::Url> {
-    if intercept.basic_auth().is_some() || intercept.raw_auth().is_some() {
-        return None;
-    }
-    http_proxy_from_uri(intercept.uri())
-}
-
-fn http_proxy_from_uri(uri: &http::Uri) -> Option<reqwest::Url> {
-    match uri.scheme_str() {
-        Some("http") => reqwest::Url::parse(&uri.to_string()).ok(),
-        _ => None,
-    }
-}
-
-#[derive(Clone, Copy)]
-enum ManualKind {
-    Http,
-    Socks,
-}
-
-/// A configured HTTP or SOCKS5 endpoint.
-#[derive(Clone, PartialEq, Eq)]
-pub struct ManualProxy {
-    endpoint: reqwest::Url,
-    username: String,
-    password: String,
-}
-
-impl std::fmt::Debug for ManualProxy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ManualProxy")
-            .field("url", &self.redacted())
-            .finish()
-    }
-}
-
-impl ManualProxy {
-    fn password_record(&self) -> Option<crate::credentials::ProxyPassword> {
-        if self.password.is_empty() {
-            return None;
-        }
-        Some(crate::credentials::ProxyPassword {
-            host: self.endpoint.host_str()?.to_string(),
-            port: self.endpoint.port()?,
-            username: self.username.clone(),
-            password: self.password.clone(),
-        })
-    }
-
-    fn restore_password(&mut self, saved: &crate::credentials::ProxyPassword) -> bool {
-        if self.endpoint.host_str() != Some(saved.host.as_str())
-            || self.endpoint.port() != Some(saved.port)
-            || self.username != saved.username
-        {
-            return false;
-        }
-        self.password.clone_from(&saved.password);
-        true
-    }
-
-    fn parse(
-        kind: ManualKind,
-        host: &str,
-        port: &str,
-        username: &str,
-        password: &str,
-    ) -> Result<Self, String> {
-        let host = validate_host(host)?;
-        let port = validate_port(port)?;
-        let host = if host.contains(':') {
-            format!("[{host}]")
-        } else {
-            host
-        };
-        let scheme = match kind {
-            ManualKind::Http => "http",
-            // Resolve Spotify hostnames at the proxy, so SOCKS mode does not
-            // leak DNS queries or fail behind a proxy-only network.
-            ManualKind::Socks => "socks5h",
-        };
-        let endpoint = reqwest::Url::parse(&format!("{scheme}://{host}:{port}"))
-            .map_err(|error| format!("not a proxy address: {error}"))?;
-        Ok(Self {
-            endpoint,
-            username: username.to_string(),
-            password: password.to_string(),
-        })
-    }
-
-    /// A reqwest proxy with credentials applied separately so build errors
-    /// cannot echo a password.
-    pub fn reqwest_proxy(&self) -> Result<reqwest::Proxy, reqwest::Error> {
-        let mut proxy = reqwest::Proxy::all(self.endpoint.clone())?;
-        if !self.username.is_empty() || !self.password.is_empty() {
-            proxy = proxy.basic_auth(&self.username, &self.password);
-        }
-        Ok(proxy)
-    }
-
-    fn librespot_url(&self) -> Option<reqwest::Url> {
-        (self.username.is_empty() && self.password.is_empty()).then(|| self.endpoint.clone())
-    }
-
-    /// The credential-free endpoint, for logs and the debugger.
-    pub fn redacted(&self) -> reqwest::Url {
-        self.endpoint.clone()
-    }
-
-    /// Converts this proxy configuration to a URL string usable by external commands such as yt-dlp.
-    pub fn to_url_string(&self) -> String {
-        let scheme = match self.endpoint.scheme() {
-            "socks5h" => "socks5",
-            other => other,
-        };
-        let host = self.endpoint.host_str().unwrap_or("127.0.0.1");
-        let port = self.endpoint.port().unwrap_or(8080);
-        if !self.username.is_empty() {
-            if !self.password.is_empty() {
-                format!(
-                    "{scheme}://{}:{}@{host}:{port}",
-                    self.username, self.password
-                )
-            } else {
-                format!("{scheme}://{}@{host}:{port}", self.username)
-            }
-        } else {
-            format!("{scheme}://{host}:{port}")
-        }
+        None
     }
 }
 
@@ -1255,29 +913,15 @@ mod tests {
 
     #[test]
     fn partial_home_preferences_keep_defaults_and_survive_a_settings_round_trip() {
-        for (home, made_for_you, recommendations) in [
-            ("{}", true, true),
-            (r#"{"made_for_you":{"visible":false}}"#, false, true),
-            (r#"{"recommendations":{"visible":false}}"#, true, false),
-            (
-                r#"{"made_for_you":{"visible":false},"recommendations":{"visible":false}}"#,
-                false,
-                false,
-            ),
-        ] {
-            let settings: Settings =
-                serde_json::from_str(&format!(r#"{{"volume":12345,"home":{home}}}"#)).unwrap();
-            assert_eq!(settings.home.made_for_you.visible, made_for_you);
-            assert_eq!(settings.home.recommendations.visible, recommendations);
-            assert_eq!(settings.volume, 12345);
-            let restored: Settings =
-                serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        for visible in [true, false] {
+            let settings: Settings = serde_json::from_value(
+                serde_json::json!({"volume":12345,"home":{"made_for_you":{"visible":visible}}}),
+            )
+            .unwrap();
+            assert_eq!(settings.home.made_for_you.visible, visible);
+            let restored: Settings = serde_json::from_str(&settings.encode().unwrap()).unwrap();
             assert_eq!(restored, settings);
         }
-        let old: Settings = serde_json::from_str(r#"{"volume":12345}"#).unwrap();
-        assert!(old.home.made_for_you.visible);
-        assert!(old.home.recommendations.visible);
-        assert_eq!(old.volume, 12345);
     }
 
     /// Notepad and Windows PowerShell can save UTF-8 with a byte order mark.
@@ -1517,241 +1161,6 @@ mod tests {
         let json = serde_json::to_string(&settings).unwrap();
         let restored: Settings = serde_json::from_str(&json).unwrap();
         assert!(restored.middle_click_autoscroll);
-    }
-
-    #[test]
-    fn older_settings_use_the_system_proxy() {
-        let settings: Settings = serde_json::from_str("{}").unwrap();
-        assert_eq!(settings.proxy_mode, super::ProxyMode::System);
-        assert!(settings.proxy_host.is_empty());
-        assert!(settings.proxy_port.is_empty());
-        assert!(settings.proxy_username.is_empty());
-        assert!(settings.proxy_password.is_empty());
-        assert_eq!(settings.proxy_config().unwrap(), super::ProxyConfig::System);
-    }
-
-    #[test]
-    fn a_proxy_round_trips_through_settings() {
-        let settings = Settings {
-            proxy_mode: super::ProxyMode::Socks,
-            proxy_host: "127.0.0.1".into(),
-            proxy_port: "1080".into(),
-            proxy_username: "alice".into(),
-            proxy_password: "secret".into(),
-            ..Settings::default()
-        };
-        let json = serde_json::to_string(&settings).unwrap();
-        let restored: Settings = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.proxy_mode, settings.proxy_mode);
-        assert_eq!(restored.proxy_host, settings.proxy_host);
-        assert_eq!(restored.proxy_port, settings.proxy_port);
-        assert_eq!(restored.proxy_username, settings.proxy_username);
-        assert!(restored.proxy_password.is_empty());
-        assert!(json.contains("socks"));
-        assert!(json.contains("127.0.0.1"));
-        assert!(json.contains("1080"));
-        assert!(json.contains("alice"));
-        assert!(!json.contains("secret"));
-        assert!(!json.contains("proxy_password"));
-        assert!(!json.contains("\"proxy\":"));
-    }
-
-    #[test]
-    fn settings_debug_keeps_proxy_credentials_private() {
-        let settings = Settings {
-            proxy_username: "private-proxy-user".into(),
-            proxy_password: "private-proxy-password".into(),
-            ..Default::default()
-        };
-        let debug = format!("{settings:?}");
-        assert!(!debug.contains("private-proxy-user"));
-        assert!(!debug.contains("private-proxy-password"));
-    }
-
-    #[test]
-    fn a_saved_proxy_password_is_bound_to_its_endpoint_and_username() {
-        let original = Settings {
-            proxy_mode: super::ProxyMode::Http,
-            proxy_host: "127.0.0.1".into(),
-            proxy_port: "8080".into(),
-            proxy_username: "dummy-user".into(),
-            proxy_password: " dummy-private-password\n".into(),
-            ..Default::default()
-        };
-        let password = original.proxy_password_record().unwrap().unwrap();
-        let mut restored = original.clone();
-        restored.proxy_password.clear();
-        assert!(restored.restore_proxy_password(&password));
-        assert_eq!(restored.proxy_password, original.proxy_password);
-        for (host, port, username) in [
-            ("other.invalid", "8080", "dummy-user"),
-            ("127.0.0.1", "8081", "dummy-user"),
-            ("127.0.0.1", "8080", "other-user"),
-        ] {
-            let mut changed = Settings {
-                proxy_host: host.into(),
-                proxy_port: port.into(),
-                proxy_username: username.into(),
-                ..restored.clone()
-            };
-            changed.proxy_password.clear();
-            assert!(!changed.restore_proxy_password(&password));
-            assert!(changed.proxy_password.is_empty());
-        }
-        assert!(
-            !serde_json::to_string(&restored)
-                .unwrap()
-                .contains("dummy-private-password")
-        );
-    }
-
-    #[test]
-    fn an_empty_proxy_is_omitted_from_the_file() {
-        let json = serde_json::to_string(&Settings::default()).unwrap();
-        assert!(!json.contains("proxy"));
-    }
-
-    #[test]
-    fn off_is_written_and_round_trips() {
-        let settings = Settings {
-            proxy_mode: super::ProxyMode::Off,
-            ..Settings::default()
-        };
-        let json = serde_json::to_string(&settings).unwrap();
-        assert!(json.contains("\"off\""));
-        let restored: Settings = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.proxy_mode, super::ProxyMode::Off);
-        assert_eq!(restored.proxy_config().unwrap(), super::ProxyConfig::Off);
-    }
-
-    #[test]
-    fn a_legacy_socks_url_becomes_socks_mode() {
-        let dir = std::env::temp_dir().join(format!("spotifast-proxy-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("settings.json");
-        std::fs::write(
-            &path,
-            r#"{"proxy":"socks5://127.0.0.1:1080","proxy_username":"alice"}"#,
-        )
-        .unwrap();
-        let settings = Settings::load(&path);
-        assert_eq!(settings.proxy_mode, super::ProxyMode::Socks);
-        assert_eq!(settings.proxy_host, "127.0.0.1");
-        assert_eq!(settings.proxy_port, "1080");
-        let super::ProxyConfig::Socks(manual) = settings.proxy_config().unwrap() else {
-            panic!("expected a SOCKS proxy");
-        };
-        assert_eq!(manual.redacted().scheme(), "socks5h");
-        assert_eq!(manual.redacted().host_str(), Some("127.0.0.1"));
-        assert_eq!(manual.redacted().port(), Some(1080));
-        assert!(manual.redacted().username().is_empty());
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn http_and_socks_parse_a_host_and_port() {
-        let http = super::ManualProxy::parse(super::ManualKind::Http, "127.0.0.1", "7890", "", "")
-            .unwrap();
-        assert_eq!(http.redacted().as_str(), "http://127.0.0.1:7890/");
-        assert!(
-            super::ProxyConfig::Http(http.clone())
-                .librespot_url()
-                .is_some()
-        );
-
-        let socks =
-            super::ManualProxy::parse(super::ManualKind::Socks, "127.0.0.1", "1080", "", "")
-                .unwrap();
-        assert_eq!(socks.redacted().scheme(), "socks5h");
-        assert_eq!(socks.redacted().port(), Some(1080));
-        assert_eq!(super::ProxyConfig::Socks(socks).librespot_url(), None);
-    }
-
-    #[test]
-    fn engine_only_accepts_plain_http_proxy_urls() {
-        assert_eq!(super::ProxyConfig::Off.librespot_url(), None);
-        let http_uri: http::Uri = "http://127.0.0.1:8080".parse().unwrap();
-        let https_uri: http::Uri = "https://127.0.0.1:8080".parse().unwrap();
-        let socks_uri: http::Uri = "socks5://127.0.0.1:1080".parse().unwrap();
-        assert!(super::http_proxy_from_uri(&http_uri).is_some());
-        assert!(super::http_proxy_from_uri(&https_uri).is_none());
-        assert!(super::http_proxy_from_uri(&socks_uri).is_none());
-    }
-
-    #[test]
-    fn proxy_credentials_stay_opaque_and_out_of_urls() {
-        let proxy = super::ManualProxy::parse(
-            super::ManualKind::Http,
-            "127.0.0.1",
-            "7890",
-            "alice/name",
-            " secret/with spaces ",
-        )
-        .unwrap();
-        let redacted = proxy.redacted();
-        assert!(redacted.username().is_empty());
-        assert_eq!(redacted.password(), None);
-        assert_eq!(proxy.username, "alice/name");
-        assert_eq!(proxy.password, " secret/with spaces ");
-        assert_eq!(
-            super::ProxyConfig::Http(proxy.clone()).librespot_url(),
-            None
-        );
-        let debug = format!("{proxy:?}");
-        assert!(!debug.contains("alice"));
-        assert!(!debug.contains("secret"));
-    }
-
-    #[test]
-    fn system_proxy_authentication_and_tls_endpoints_stay_out_of_librespot() {
-        let authenticated = hyper_util::client::proxy::matcher::Matcher::builder()
-            .all("http://alice:secret@127.0.0.1:8080")
-            .build();
-        let destination = http::Uri::from_static("https://apresolve.spotify.com");
-        let intercept = authenticated.intercept(&destination).unwrap();
-        assert!(super::librespot_system_proxy(&intercept).is_none());
-
-        let tls = hyper_util::client::proxy::matcher::Matcher::builder()
-            .all("https://127.0.0.1:8080")
-            .build();
-        let intercept = tls.intercept(&destination).unwrap();
-        assert!(super::librespot_system_proxy(&intercept).is_none());
-    }
-
-    #[test]
-    fn proxy_parse_rejects_a_missing_host_or_port() {
-        assert!(
-            super::ManualProxy::parse(super::ManualKind::Http, "", "8080", "", "")
-                .unwrap_err()
-                .contains("host")
-        );
-        assert!(
-            super::ManualProxy::parse(super::ManualKind::Http, "127.0.0.1", "", "", "")
-                .unwrap_err()
-                .contains("port")
-        );
-        assert!(
-            super::ManualProxy::parse(super::ManualKind::Http, "127.0.0.1", "abc", "", "")
-                .unwrap_err()
-                .contains("number")
-        );
-        assert!(
-            super::ManualProxy::parse(super::ManualKind::Http, "not a host", "1080", "", "")
-                .unwrap_err()
-                .contains("hostname")
-        );
-        assert!(
-            super::ManualProxy::parse(super::ManualKind::Http, "127.0.0.1", "0", "", "")
-                .unwrap_err()
-                .contains("65535")
-        );
-        assert!(
-            super::ManualProxy::parse(super::ManualKind::Http, "127.0.0.1", "65536", "", "")
-                .unwrap_err()
-                .contains("65535")
-        );
-        super::ManualProxy::parse(super::ManualKind::Http, "localhost", "8080", "", "").unwrap();
-        super::ManualProxy::parse(super::ManualKind::Http, "::1", "8080", "", "").unwrap();
     }
 
     #[test]

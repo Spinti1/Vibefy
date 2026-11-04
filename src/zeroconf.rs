@@ -15,6 +15,11 @@ pub struct Receiver {
 
 impl Receiver {
     pub fn preference_key(&self) -> Option<String> {
+        if self.cast {
+            // Cast IDs may be derived from a shared advertised name. Keep
+            // preferences tied to the actual endpoint, not another speaker.
+            return Some(format!("cast:{}:{}", self.address, self.port));
+        }
         self.device_id.clone().or_else(|| Some(self.name.clone()))
     }
 }

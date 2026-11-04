@@ -190,27 +190,48 @@ impl App {
         if !crate::music::valid_browse_id(&id) {
             return;
         }
-        self.search.serial = self.search.serial.wrapping_add(1);
-        if let Some(entry) = self
+        let title = self
             .search
             .music
             .results
             .entries
             .iter()
             .find(|e| e.browse_id.as_deref() == Some(id.as_str()))
-        {
-            self.search.music.page_title = entry.title.clone();
+            .map(|e| e.title.clone())
+            .unwrap_or_else(|| id.clone());
+        self.search
+            .music
+            .pages
+            .entry(id.clone())
+            .or_insert((title, Results::default()));
+        self.open(Page::MusicBrowse(id));
+    }
+    pub(super) fn restore_music_page(&mut self, id: String) {
+        let source = format!("https://music.youtube.com/browse/{id}");
+        if self.search.music.source_key == source && self.search.music.loading {
+            return;
         }
-        self.search.music.source_key = format!("https://music.youtube.com/browse/{id}");
-        self.search.music.loading = true;
+        self.search.serial = self.search.serial.wrapping_add(1);
+        let (title, results) = self
+            .search
+            .music
+            .pages
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| (id.clone(), Results::default()));
+        self.search.music.page_title = title;
+        self.search.music.source_key = source;
+        self.search.music.loading = results.entries.is_empty();
         self.search.music.loading_more = false;
         self.search.music.error = None;
-        self.search.music.results = Default::default();
-        self.backend.send(Command::MusicBrowse {
-            serial: self.search.serial,
-            id,
-            continuation: None,
-        });
+        self.search.music.results = results;
+        if self.search.music.loading {
+            self.backend.send(Command::MusicBrowse {
+                serial: self.search.serial,
+                id,
+                continuation: None,
+            });
+        }
     }
     pub(super) fn receive_music_browse(
         &mut self,
@@ -235,6 +256,19 @@ impl App {
                 } else {
                     self.search.music.results = results;
                 }
+                // Keep only visited pages. This bounds memory by the navigation history.
+                self.search.music.pages.retain(|key, _| {
+                    self.history
+                        .iter()
+                        .any(|p| matches!(p, Page::MusicBrowse(v) if v == key))
+                });
+                self.search.music.pages.insert(
+                    id.clone(),
+                    (
+                        self.search.music.page_title.clone(),
+                        self.search.music.results.clone(),
+                    ),
+                );
                 if self.search.music.results.entries.len() >= 500 {
                     self.search.music.results.continuation = None;
                 }

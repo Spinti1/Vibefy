@@ -1325,6 +1325,9 @@ pub fn context_menu_items(
             label: name.to_string(),
         });
     }
+    if kind == "playlist" {
+        playlist_visibility_menu(ui, app, uri);
+    }
     let saved = app.is_saved(uri).unwrap_or(false);
     let (icon, text) = match (kind, saved) {
         ("artist", true) => (Icon::CircleX, pgettext(locale, "artist", "Unfollow")),
@@ -1354,7 +1357,7 @@ pub fn context_menu_items(
                 public: playlist.public,
             }));
         }
-        if menu_item(ui, &palette, Some(Icon::Trash), &gettext(locale, "Delete")) {
+        if menu_item(ui, &palette, Some(Icon::Trash), "Delete from Spotify") {
             app.actions
                 .push(Action::ShowDialog(Dialog::ConfirmDeletePlaylist {
                     id: playlist.id.clone(),
@@ -3546,109 +3549,6 @@ pub fn labeled_field(
     response
 }
 
-/// Host, port, username, and password in two columns.
-pub fn proxy_manual_form(
-    ui: &mut Ui,
-    palette: &Palette,
-    locale: Locale,
-    host: &mut String,
-    port: &mut String,
-    username: &mut String,
-    password: &mut String,
-) -> bool {
-    let mut changed = false;
-    let mut address_changed = false;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 12.0;
-        let half = ((ui.available_width() - 12.0) / 2.0).max(80.0);
-        ui.vertical(|ui| {
-            ui.set_width(half);
-            if labeled_field(
-                ui,
-                palette,
-                locale,
-                &gettext(locale, "Host"),
-                host,
-                "127.0.0.1",
-                false,
-            )
-            .changed()
-            {
-                changed = true;
-                address_changed = true;
-            }
-        });
-        ui.vertical(|ui| {
-            ui.set_width(half);
-            if labeled_field(
-                ui,
-                palette,
-                locale,
-                &gettext(locale, "Port"),
-                port,
-                "1080",
-                false,
-            )
-            .changed()
-            {
-                changed = true;
-                address_changed = true;
-            }
-        });
-    });
-    ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 12.0;
-        let half = ((ui.available_width() - 12.0) / 2.0).max(80.0);
-        ui.vertical(|ui| {
-            ui.set_width(half);
-            let label = gettext(locale, "Username");
-            if labeled_field(ui, palette, locale, &label, username, &label, false).changed() {
-                changed = true;
-                address_changed = true;
-            }
-        });
-        ui.vertical(|ui| {
-            ui.set_width(half);
-            if address_changed {
-                password.clear();
-            }
-            let label = gettext(locale, "Password");
-            if labeled_field(ui, palette, locale, &label, password, &label, true).changed() {
-                changed = true;
-            }
-        });
-    });
-    changed
-}
-
-pub fn proxy_scope_note(
-    ui: &mut Ui,
-    palette: &Palette,
-    locale: Locale,
-    mode: crate::settings::ProxyMode,
-) {
-    let note = match mode {
-        crate::settings::ProxyMode::Http => gettext(
-            locale,
-            "Proxy login applies to Web requests. Local playback uses this proxy only without a login.",
-        ),
-        crate::settings::ProxyMode::Socks => gettext(
-            locale,
-            "Spotify hostnames are resolved by the proxy. Local playback connects directly.",
-        ),
-        crate::settings::ProxyMode::Off | crate::settings::ProxyMode::System => return,
-    };
-    ui.add(
-        egui::Label::new(
-            egui::RichText::new(note)
-                .font(theme::regular(13.0))
-                .color(palette.secondary),
-        )
-        .wrap(),
-    );
-}
-
 #[cfg(test)]
 mod playing_cover_tests {
     use super::*;
@@ -3692,78 +3592,6 @@ mod tests {
     use crate::model::{Action, Page};
     use crate::paths::AppDirs;
     use crate::settings::Settings;
-
-    #[test]
-    fn editing_a_proxy_endpoint_clears_its_password_but_password_entry_is_preserved() {
-        for label in ["Host", "Port", "Username", "Password"] {
-            let ctx = egui::Context::default();
-            ctx.enable_accesskit();
-            theme::install(&ctx);
-            let mut fields = [
-                "127.0.0.1".to_string(),
-                "8080".into(),
-                "dummy-user".into(),
-                "dummy-password".into(),
-            ];
-            let mut frame = |events| {
-                let mut output = ctx.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            vec2(600.0, 400.0),
-                        )),
-                        events,
-                        ..Default::default()
-                    },
-                    |ui| {
-                        let [host, port, username, password] = &mut fields;
-                        proxy_manual_form(
-                            ui,
-                            &Palette::dark(),
-                            Locale::English,
-                            host,
-                            port,
-                            username,
-                            password,
-                        );
-                    },
-                );
-                output.textures_delta.clear();
-                output
-            };
-            let tree = frame(vec![]).platform_output.accesskit_update.unwrap();
-            let target = tree
-                .nodes
-                .iter()
-                .find(|(_, node)| {
-                    node.label() == Some(label)
-                        && matches!(
-                            node.role(),
-                            egui::accesskit::Role::TextInput | egui::accesskit::Role::PasswordInput
-                        )
-                })
-                .expect("labeled proxy field")
-                .0;
-            frame(vec![egui::Event::AccessKitActionRequest(
-                egui::accesskit::ActionRequest {
-                    target_tree: egui::accesskit::TreeId::ROOT,
-                    target_node: target,
-                    action: egui::accesskit::Action::Focus,
-                    data: None,
-                },
-            )]);
-            frame(vec![egui::Event::Text("x".into())]);
-            if label == "Password" {
-                assert!(fields[3].contains("dummy-password"));
-                assert!(fields[3].contains('x'));
-            } else {
-                assert!(
-                    fields[3].is_empty(),
-                    "{label} must clear the previous endpoint's password"
-                );
-            }
-        }
-    }
 
     struct TextMenu {
         ctx: egui::Context,
@@ -4748,5 +4576,25 @@ mod tests {
             .unwrap();
         assert_eq!(meta.options, crate::images::COVER_TEXTURE);
         assert_eq!(meta.options.mipmap_mode, Some(egui::TextureFilter::Linear));
+    }
+}
+
+/// Visibility is local and distinct from removing a playlist on its service.
+pub fn playlist_visibility_menu(ui: &mut Ui, app: &mut App, source: &str) {
+    let hidden = app.playlist_hidden(source);
+    if menu_item(
+        ui,
+        &app.palette,
+        Some(Icon::Eye),
+        if hidden {
+            "Show in Home"
+        } else {
+            "Hide playlist"
+        },
+    ) {
+        app.actions.push(Action::SetPlaylistHidden {
+            source: source.into(),
+            hidden: !hidden,
+        });
     }
 }

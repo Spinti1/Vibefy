@@ -119,23 +119,6 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
             }
             if theme::icon_button(
                 ui,
-                if app.lyrics_fullscreen.is_some() {
-                    Icon::Shrink
-                } else {
-                    Icon::Expand
-                },
-                19.0,
-                palette.secondary,
-                palette.text,
-                &gettext(app.locale, "Full screen lyrics"),
-            )
-            .clicked()
-            {
-                app.actions
-                    .push(Action::SetLyricsFullscreen(app.lyrics_fullscreen.is_none()));
-            }
-            if theme::icon_button(
-                ui,
                 Icon::Refresh,
                 19.0,
                 palette.secondary,
@@ -717,14 +700,27 @@ fn configuration(app: &mut App, ctx: &egui::Context) {
     }
     let mut save_source = false;
     egui::Window::new("Spicy Lyrics settings").id(id.with("window"))
-        .open(&mut open).collapsible(false).resizable(true).default_width(580.0)
-        .default_height(560.0).max_height(560.0).vscroll(true).show(ctx, |ui| {
+        .open(&mut open).collapsible(false).resizable(false).default_width(420.0)
+        .max_width((ctx.content_rect().width() - 40.0).max(260.0))
+        .max_height((ctx.content_rect().height() - 120.0).clamp(220.0, 520.0)).vscroll(true).show(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 for (index, title) in ["Background", "Lyrics", "Sync", "Sources"].iter().enumerate() {
                     if ui.selectable_label(tab == index, *title).clicked() { tab = index; }
                 }
             });
             ui.separator();
+            if tab < 2 {
+                ui.horizontal_wrapped(|ui| {
+                    ui.small("Presets");
+                    if ui.button("Balanced").clicked() { appearance = Appearance::default(); }
+                    if ui.button("Focus").clicked() {
+                        appearance.show_cover = false; appearance.minimal_mode = true;
+                        appearance.simple_mode = true; appearance.fps = 30; appearance.limit_fps = true;
+                    }
+                    if ui.button("Large text").clicked() { appearance.font_size = 48.0; }
+                });
+                ui.add_space(6.0);
+            }
             match tab {
                 0 => background_settings(app, ui, &mut appearance),
                 1 => lyrics_settings(ui, &mut appearance),

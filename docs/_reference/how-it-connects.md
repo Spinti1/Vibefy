@@ -6,7 +6,80 @@ nav_order: 1
 
 ## Vibefy HTTPS and sign-in transport
 
-## Official YouTube connection (0.4.28)
+## Ordered setup and initial transfer (0.4.31)
+
+New sessions enter Spotify sign-in first, then the dedicated YouTube sign-in.
+The two centered account buttons share the same native size and style. YouTube
+or JuiceVault alone no longer unlocks the main UI. Existing account grants are
+restored normally, so a previously connected account does not need another login.
+
+After both accounts are connected, users select Spotify playlists and start the
+transfer. The progress screen shows backend messages, confirmed remote song counts,
+recordings needing review, service cooldowns, and an explicit not-recommended
+skip. Skipping opens Home; an already-started transfer continues in the background.
+Selection, transfer-pass completion and setup dismissal are stored per account
+pair in the existing journal, with defaults for previous versions. Setup remains
+available in Settings. A finished pass can still contain unmatched songs or errors;
+those are disclosed and are not reported as a complete catalogue transfer.
+
+Existing complete account-scoped source snapshots can be used for the first pass
+without fetching the entire Spotify library again. Later scans refresh snapshots.
+Selected lists are processed shortest first where their lengths are known. Matches
+are made before creating a new nonempty copy; every 20 processed recordings, the
+confirmed matches can be appended to the same copy. The exact visibility/marker
+checks remain mandatory, with a bounded read-only retry for a newly created copy.
+The remote membership and durable-intent checks remain unchanged. This does not
+make playback instant: the source still has to be resolved/downloaded as needed.
+
+Home shows native YouTube playlists in their own shelf. Opening one loads its
+contents through the protected YouTube session and then opens the shared native
+collection view. Linked copies are excluded from that shelf and share their
+Spotify library tile. Settings contains account and transfer controls, not a
+second browsable playlist list. Dual-destination additions are enabled only after
+the user finishes/skips setup, and only for selected linked playlists.
+
+## YouTube session window (0.4.29)
+
+Connect YouTube opens a dedicated Windows WebView2 window on Google's first-party
+sign-in page, returning to YouTube Music. It uses a separate profile inside the
+Vibefy configuration folder, never another browser's cookie database. Cookies
+remain in WebView2's OS-protected profile; only its random profile identifier and
+account selector are retained in protected music-account storage. Do not share
+or upload the profile directory. Disconnect clears cookies and all profile data.
+
+Authenticated requests run inside the music.youtube.com origin with a fixed
+endpoint allowlist, random response correlation, size limits and timeouts. No
+native command objects are exposed to the page. Window navigation allows only
+Google/YouTube HTTPS origins. Browser security and the stock user agent remain
+enabled. New sessions require no Vibefy Google Cloud OAuth client or tester list,
+but Google can still reject embedded sign-in or expire a session. This is an
+unofficial integration, with no guarantee of unlimited service access.
+
+The browser lives on its own STA thread; it is closed after 45 idle seconds.
+WebView2 Runtime must be installed on Windows. Browser processes add resource
+usage while active. Other platforms currently retain their previous connections;
+the new sign-in window is Windows-only. Playlist additions retain explicit
+rate-limit waits and conservative recovery for unconfirmed writes. New copies
+remain unlisted; existing private copies are not made public.
+
+## Regional Google sign-in redirects (0.4.30)
+
+A local account test identified the post-2FA failure: Google's redirect through
+accounts.google.ro was cancelled by the original .com-only navigation allowlist.
+The embedded snapshot in assets/google-signin-domains.txt comes from Google's
+https://www.google.com/supported_domains endpoint, retrieved 2026-11-02. Each
+navigation must match an exact listed base domain or its dot-separated subdomain,
+remain HTTPS and contain no credentials or nonstandard port. No google.* pattern
+or arbitrary suffix is accepted. Authentication response messages remain limited
+to the exact music.youtube.com origin. Google controls the complete 2FA flow;
+Vibefy does not skip, complete or replay a challenge.
+
+A bounded local diagnostic at config/youtube-browser/signin-diagnostic.json
+records navigation hosts, event types, elapsed seconds, HTTP status and WebView2
+error numbers. It excludes complete URLs, paths, queries, fragments, cookies,
+passwords and account names. Blocked navigation gives an explicit error.
+
+## Legacy official YouTube connection (0.4.28; retained sessions)
 
 The welcome screen and Home after Spotify sign-in offer Connect YouTube directly.
 It opens Google's official account chooser in the default browser. The desktop
@@ -35,13 +108,9 @@ Google verification, daily project quota and authorization restrictions remain.
 The Data API lists the connected channel's owned playlists; it does not expose
 all personalized YouTube Music recommendations or every saved third-party list.
 
-Maintainer builds read the Desktop OAuth JSON from the ignored
-.cache/google-oauth.json, or VIBEFY_GOOGLE_OAUTH_CONFIG. It is copied only into
-Cargo's output directory for embedding in the native application, never into
-source or release attachments. Desktop clients are public clients; a bundled
-client secret is not a confidential server credential. Ordinary users never
-create a project or enter a Client ID. Development/CI builds without this file
-compile, but cannot connect Google and must not be published as a working login.
+The 0.4.29 build no longer embeds a Google client configuration. Existing
+protected 0.4.28 sessions retain their own refresh configuration; the adapter
+remains only for those sessions.
 
 ## Unlisted playlist copies (0.4.27)
 
@@ -127,8 +196,8 @@ retaining order and duplicate entries. This is read-only, not two-way sync.
 Search remains catalogue-only; explicit personal playlist imports retain their
 original recordings. Browser sessions expire or can be rejected by YouTube.
 This unofficial interface can change; it is not a guarantee of unlimited access.
-That legacy path does not use Google Cloud or an OAuth client. New connections
-use the official OAuth implementation described above.
+That legacy path does not use Google Cloud or an OAuth client. New Windows
+connections use the dedicated first-party window described above.
 
 Windows stores music-account data in user-bound DPAPI-encrypted files under
 config/music-accounts, using the existing atomic private-file store. This avoids
@@ -1102,3 +1171,68 @@ The queue, repeat/shuffle preferences and play history are not replaced by it.
 The former external preset renderer, downloads, child process, shortcuts,
 settings and sources have been removed. Old JSON fields are ignored by serde;
 existing files, other preferences, credentials and installed mods still load.
+
+### Vibefy 0.4.33: JuiceVault and provider shelves
+Home groups linked copies once, followed by Spotify, YouTube and the enabled JuiceVault add-on library. JuiceVault account controls are in Mods below WaveLink. Native login follows the first-party app contract: a login token with its server-issued grant, username/password submission, then a verified account profile and authenticated playlists. Passwords are not persisted or printed by Debug. Tokens are protected using the existing system credential store; requests carrying credentials disable redirects and retries. Expired access tokens refresh once, without repeated login attempts. Public-profile access stores only the requested username. A private playlist import sends the protected bearer token to the exact JuiceVault API host.
+JuiceVault search uses the documented archive-wide music search and ranks close title matches locally. A no-match result remains empty. The additional YouTube Music lyrics adapter uses the existing anonymous catalogue client and the exact video ID, with an eight-second deadline. It supplies plain text; existing timed sources retain priority. YTubic was a provider reference only, and no GPL implementation was copied.
+
+## Linked playlist names (0.4.34)
+
+Rename playlist on a Linked collection, or edit its Spotify name, queues a
+per-account-pair name intent in the existing private journal. The backend checks
+Spotify ownership and the YouTube copy marker before writing. Only the name is
+changed: privacy, description and membership are retained. Each destination has
+its own persisted acknowledgement. Retrying a name assignment after an uncertain
+response is idempotent. Service cooldowns remain enforced, and pending/errors are
+shown on the linked collection. Explicit renames also run when periodic transfer
+is paused. Followed playlists cannot be renamed by non-owners.
+
+Lyrics retain exact artist identity and whole-title matching after removing
+presentation labels, punctuation and diacritics. Plain/missing LRCLIB answers
+expire after 30 minutes; the updated matching uses a new cache namespace.
+Spotify and public lyrics requests start concurrently. More Lyrics no longer
+waits for both earlier providers to finish before it is polled. Timing is used
+only when a provider actually supplies it.
+
+Exact YouTube URI playback reuses the same video-ID audio cache as verified
+Spotify matches, retaining compatibility with existing URI-hash cache files.
+Fragment concurrency is bounded to four for downloads using fragments. Cold
+playback still resolves and downloads audio before playback; this is not streaming
+and cannot guarantee instant playback on slow networks.
+
+## Audio startup race fix (0.4.35)
+
+A restored YouTube session can initialize the local engine before Spotify /me
+verification completes. EngineConnected is now routed to the same account,
+generation and attempt checks used by the engine handler. The dispatcher no
+longer discards a valid completion merely because Spotify is still verifying.
+Successful and failed completions both release engine_busy and notify the UI.
+
+## Music navigation and presentation (0.4.36)
+
+Public Music artist and album pages have separate history entries. Going Back or
+Forward reuses the visited page's metadata; returning to search uses its short-lived
+query cache. Artist pages omit related-artist/recommendation shelves and display
+catalogue songs and albums. The existing audio-only song policy still applies.
+
+The player-bar fullscreen control and F shortcut use the active lyrics or visualizer
+view. Queue remains an independent side panel. Lyrics appearance offers compact
+presets; visualizer options are saved per visualizer, including brightness, frame
+rate, title visibility, and Backmusic artwork/particles. Old settings files receive
+compatible defaults. Mandatory upstream credits and legacy credential identifiers
+remain intact.
+
+## Direct connections and player controls (0.4.37)
+
+Vibefy no longer offers manual, system, HTTP or SOCKS proxy settings. Legacy
+proxy fields are ignored and omitted when preferences are saved. Native HTTP
+clients disable proxy discovery, yt-dlp receives an explicit empty proxy argument,
+and the dedicated YouTube sign-in window uses --no-proxy-server. Existing account
+credentials and playlists are preserved; old protected proxy records are not read.
+
+Lyrics and Visualizers now have separate adjacent player-bar buttons. Track Peek
+shows persistent previous/upcoming song cards beside the transport, including
+artwork when space allows. The previous card uses actual played metadata; the
+next respects manually queued songs, repeat context and a reserved shuffle choice.
+Cards perform no additional network requests during drawing. Track-menu audio
+previews remain available independently.

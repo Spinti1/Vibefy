@@ -11,6 +11,11 @@ impl App {
             return;
         }
         self.addons.busy = false;
+        if self.addons.fetching_juice {
+            self.addons.juice_result = result.as_ref().ok().cloned();
+            self.addons.juice_message = result.as_ref().err().cloned();
+            self.addons.fetching_juice = false;
+        }
         if self.addons.fetching_soundcloud {
             self.addons.soundcloud_result = result.as_ref().ok().cloned();
             self.addons.soundcloud_message = result.as_ref().err().cloned();
@@ -32,13 +37,34 @@ impl App {
 
     pub(super) fn apply_addon(&mut self, command: AddonCommand, ctx: &egui::Context) {
         match command {
+            AddonCommand::ReloadNow => {
+                self.addons
+                    .reload_requested
+                    .store(true, std::sync::atomic::Ordering::Release);
+                self.addons.reload_notice = None;
+                self.actions.push(Action::Quit);
+            }
+            AddonCommand::ReloadLater => self.addons.reload_notice = None,
             AddonCommand::CancelFetch => {
                 self.addons.request = self.addons.request.wrapping_add(1);
                 self.addons.busy = false;
                 self.addons.fetching_soundcloud = false;
+                self.addons.fetching_juice = false;
                 self.backend.send(Command::AddonCancel);
             }
             AddonCommand::Enable(id, enabled) => {
+                if self.addons.package_busy.contains(&id) {
+                    return;
+                }
+                if enabled
+                    && !self.addons.modules.contains_key(&id)
+                    && !self.addons.package_pending.contains(&id)
+                {
+                    self.addons.package_errors.remove(&id);
+                    self.addons.package_busy.insert(id);
+                    self.backend.send(Command::InstallModPackage(id));
+                    return;
+                }
                 self.settings.addons.set(id, enabled);
                 if enabled && matches!(id, Id::Vivy | Id::Backmusic) {
                     self.settings.addons.visualizer = Some(id);
@@ -49,18 +75,34 @@ impl App {
                 self.settings_dirty = true;
             }
             AddonCommand::Uninstall(id) => {
+                if self.addons.package_busy.insert(id) {
+                    self.backend.send(Command::RemoveModPackage(id));
+                }
+            }
+            AddonCommand::FinishUninstall(id) => {
                 self.stop_addon(id, ctx);
                 self.settings.addons.uninstall(id);
+                self.settings.addons.ready_packages.remove(&id);
+                self.addons.modules.remove(&id);
+                self.addons.package_errors.remove(&id);
+                self.addons.package_pending.remove(&id);
                 self.settings_dirty = true;
             }
             AddonCommand::Fetch(query) => {
-                let id = if matches!(query, crate::addons::Request::YouTube(_)) {
+                let id = if matches!(query, crate::addons::Request::JuiceVault(_)) {
+                    Id::JuiceVault
+                } else if matches!(query, crate::addons::Request::YouTube(_)) {
                     Id::YouTube
                 } else {
                     Id::WaveLink
                 };
                 if !self.settings.addons.active(id) || self.addons.busy {
                     return;
+                }
+                self.addons.fetching_juice = matches!(query, crate::addons::Request::JuiceVault(_));
+                if self.addons.fetching_juice {
+                    self.addons.juice_result = None;
+                    self.addons.juice_message = None;
                 }
                 self.addons.busy = true;
                 self.addons.fetching_soundcloud =
@@ -103,6 +145,8 @@ impl App {
             }
             AddonCommand::ChooseVisualizer(id) => {
                 if self.settings.addons.installed.contains(&id)
+                    && (!self.settings.addons.require_packages
+                        || self.addons.modules.contains_key(&id))
                     && matches!(id, Id::Vivy | Id::Backmusic)
                 {
                     self.settings.addons.set(id, true);
@@ -117,35 +161,41 @@ impl App {
                     .settings
                     .addons
                     .visualizer
-                    .filter(|id| self.settings.addons.installed.contains(id))
+                    .filter(|id| {
+                        self.settings.addons.installed.contains(id)
+                            && (!self.settings.addons.require_packages
+                                || self.addons.modules.contains_key(id))
+                    })
                     .or_else(|| self.settings.addons.installed_visualizers().next())
                 {
+                    let original_fullscreen = self
+                        .lyrics_fullscreen
+                        .unwrap_or_else(|| ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)));
+                    self.leave_lyrics_fullscreen(ctx);
+                    self.spicy.open = false;
                     self.settings.addons.visualizer = Some(id);
                     self.settings.addons.set(id, true);
                     self.settings_dirty = true;
-                    self.addons.was_fullscreen =
-                        ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+                    self.addons.was_fullscreen = original_fullscreen;
                     self.addons.fullscreen = true;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+                    // Opening the visualizer changes content, never the window mode.
                 }
             }
-            AddonCommand::Style(value) => {
-                let id = self.settings.addons.visualizer.unwrap_or(Id::Vivy);
-                self.settings.addons.visual_mut(id).style = value.min(1);
-                self.settings_dirty = true;
-            }
-            AddonCommand::Intensity(value) => {
-                let id = self.settings.addons.visualizer.unwrap_or(Id::Vivy);
-                self.settings.addons.visual_mut(id).intensity = if value.is_finite() {
-                    value.clamp(0.2, 3.0)
+            AddonCommand::ConfigureVisual(mut config) => {
+                config.style = config.style.min(1);
+                config.intensity = if config.intensity.is_finite() {
+                    config.intensity.clamp(0.2, 3.0)
                 } else {
                     1.0
                 };
-                self.settings_dirty = true;
-            }
-            AddonCommand::Particles(value) => {
+                config.brightness = if config.brightness.is_finite() {
+                    config.brightness.clamp(0.2, 1.0)
+                } else {
+                    1.0
+                };
+                config.fps = config.fps.clamp(15, 60);
                 let id = self.settings.addons.visualizer.unwrap_or(Id::Vivy);
-                self.settings.addons.visual_mut(id).particles = value;
+                *self.settings.addons.visual_mut(id) = config;
                 self.settings_dirty = true;
             }
             AddonCommand::CatJamScale(value) => {
@@ -187,7 +237,7 @@ impl App {
             }
         }
     }
-    fn stop_addon(&mut self, id: Id, ctx: &egui::Context) {
+    pub(super) fn stop_addon(&mut self, id: Id, ctx: &egui::Context) {
         if id == Id::TrackPeek {
             self.stop_peek(true);
         }
@@ -195,7 +245,13 @@ impl App {
             self.settings.addons.visualizer = None;
             self.leave_addon_fullscreen(ctx);
         }
-        if matches!(id, Id::YouTube | Id::WaveLink) {
+        if id == Id::JuiceVault {
+            self.music_accounts[1].password.0.clear();
+            self.addons.juice_result = None;
+            self.addons.juice_message = None;
+            self.addons.fetching_juice = false;
+        }
+        if matches!(id, Id::YouTube | Id::WaveLink | Id::JuiceVault) {
             self.backend.send(Command::AddonCancel);
             self.addons.request = self.addons.request.wrapping_add(1);
             self.addons.busy = false;
@@ -241,9 +297,12 @@ impl App {
     pub(super) fn leave_addon_fullscreen(&mut self, ctx: &egui::Context) {
         if self.addons.fullscreen {
             self.addons.fullscreen = false;
-            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(
-                self.addons.was_fullscreen,
-            ));
+            if ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) != self.addons.was_fullscreen
+            {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(
+                    self.addons.was_fullscreen,
+                ));
+            }
         }
     }
     fn play_addon_tracks(

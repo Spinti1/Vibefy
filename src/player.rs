@@ -283,6 +283,8 @@ pub struct LocalState {
     pub source: Option<PlaybackSource>,
     pub playback: Playback,
     pub track: Option<LocalTrack>,
+    pub previous_track: Option<LocalTrack>,
+    pub shuffle_next: Option<LocalTrack>,
     pub position_ms: u32,
     pub position_at: Option<Instant>,
     pub volume: u16,
@@ -307,6 +309,18 @@ pub struct PlaybackSource {
 }
 
 impl LocalState {
+    /// Reserve shuffle's next recording so the player and Track Peek agree.
+    pub fn plan_shuffle_next(&mut self) {
+        self.shuffle_next = None;
+        if !self.shuffle || self.queue_tracks.len() < 2 {
+            return;
+        }
+        let current = self.queue_index.min(self.queue_tracks.len() - 1);
+        let pick = rand::random_range(0..self.queue_tracks.len() - 1);
+        let index = if pick >= current { pick + 1 } else { pick };
+        self.shuffle_next = self.queue_tracks.get(index).cloned();
+    }
+
     pub fn is_active(&self) -> bool {
         self.connected && !matches!(self.playback, Playback::Stopped)
     }
@@ -418,6 +432,16 @@ pub struct Heard {
 }
 
 impl Heard {
+    #[cfg(test)]
+    pub(crate) fn at(volume: u16) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(LocalState {
+                volume,
+                ..Default::default()
+            })),
+        }
+    }
+
     pub fn level(&self) -> u16 {
         self.state.lock().unwrap_or_else(|p| p.into_inner()).volume
     }
@@ -797,13 +821,8 @@ fn extract_spotify_id(uri: &str) -> String {
 /// yt-dlp disables proxies with an explicitly empty --proxy value. It has no
 /// --no-proxy switch. Keep the empty argument intact when spawning directly.
 pub fn youtube_proxy_args(proxy: &crate::settings::ProxyConfig) -> Vec<String> {
-    if let Some(proxy_url) = proxy.to_url_string() {
-        vec!["--proxy".into(), proxy_url]
-    } else if matches!(proxy, crate::settings::ProxyConfig::Off) {
-        vec!["--proxy".into(), String::new()]
-    } else {
-        Vec::new()
-    }
+    let _ = proxy;
+    vec!["--proxy".into(), String::new()]
 }
 
 fn apply_yt_proxy(cmd: &mut tokio::process::Command, proxy: &crate::settings::ProxyConfig) {
@@ -957,6 +976,8 @@ async fn download_inspected_audio(
         "--no-progress",
         "--no-playlist",
         "--no-simulate",
+        "--concurrent-fragments",
+        "4",
         "--socket-timeout",
         "10",
         "--retries",
@@ -1058,7 +1079,15 @@ async fn resolve_track_audio_inner(
     if track.uri.starts_with("vibefy:") {
         let url =
             crate::addons::direct_url(&track.uri).context("Unsupported external track address")?;
-        let key = hex(&Sha1::digest(track.uri.as_bytes()));
+        let legacy_key = hex(&Sha1::digest(track.uri.as_bytes()));
+        // Linked playlists and Spotify resolution refer to the same recording.
+        // Share its cached bytes instead of downloading it once per URI spelling.
+        let key = track
+            .uri
+            .strip_prefix("vibefy:youtube:")
+            .filter(|id| crate::addons::valid_video_id(id))
+            .map(str::to_owned)
+            .unwrap_or_else(|| legacy_key.clone());
         cache.store_match(
             &track.uri,
             CachedMatch {
@@ -1072,7 +1101,10 @@ async fn resolve_track_audio_inner(
                 channel_id: String::new(),
             },
         );
-        if let Some(bytes) = cache.get_cached_audio(&key) {
+        if let Some(bytes) = cache
+            .get_cached_audio(&key)
+            .or_else(|| cache.get_cached_audio(&legacy_key))
+        {
             return Ok(bytes);
         }
         if track.uri.starts_with("vibefy:juicevault:") {
@@ -1122,6 +1154,8 @@ async fn resolve_track_audio_inner(
             "--no-playlist",
             "--max-filesize",
             "128M",
+            "--concurrent-fragments",
+            "4",
             "--fragment-retries",
             "1",
             "--socket-timeout",
@@ -1238,7 +1272,8 @@ async fn resolve_track_audio_inner(
                 // Speculate only on catalogue-like entries. Other uploads retain
                 // the full-query ordering and inspection budget.
                 shortlist.retain(|(entry, _)| {
-                    entry.track.is_some()
+                    entry.channel_is_verified == Some(true)
+                        || entry.track.is_some()
                         || entry
                             .channel
                             .as_deref()
@@ -1342,7 +1377,7 @@ async fn resolve_track_audio_inner(
         && let Some(error) = last_search_error
     {
         return Err(error)
-            .context("Playback cannot search YouTube. Check network and proxy settings");
+            .context("Playback cannot search YouTube. Check your internet connection");
     }
     verified.sort_by(|(a, ma), (b, mb)| mb.score.cmp(&ma.score).then_with(|| a.id.cmp(&b.id)));
     for (recording, matched) in verified
@@ -1380,7 +1415,7 @@ async fn resolve_track_audio_inner(
         && let Some(error) = last_inspection_error
     {
         return Err(error)
-            .context("Could not verify the recording publisher. Check network and proxy settings");
+            .context("Could not verify the recording publisher. Check your internet connection");
     }
     anyhow::bail!(
         "No matching YouTube recording found after comparing the track title, artist and version. Official channels are preferred but are not required."
@@ -1478,6 +1513,8 @@ impl Engine {
             username: "Free Spotify User".into(),
             error: yt_error,
             queue: Vec::new(),
+            previous_track: None,
+            shuffle_next: None,
             queue_tracks: Vec::new(),
             queue_index: 0,
             loading: false,
@@ -1498,7 +1535,7 @@ impl Engine {
         let proxy = Arc::new(Mutex::new(config.proxy.clone()));
 
         let (cmd_tx, cmd_rx) = mpsc::channel::<AudioWorkerCmd>();
-        let (event_tx, event_rx) = mpsc::channel::<WorkerEvent>();
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel::<WorkerEvent>();
 
         // Spawn background dedicated audio worker thread
         let worker_audio = Arc::clone(&audio);
@@ -1779,13 +1816,26 @@ impl Engine {
         let queue_ev = Arc::clone(&queue);
         let proxy_ev = Arc::clone(&proxy);
 
-        let rt_handle = tokio::runtime::Handle::current();
-        tokio::task::spawn_blocking(move || {
-            let _enter = rt_handle.enter();
-            while let Ok(WorkerEvent::TrackEnded {
-                generation: end_gen,
-            }) = event_rx.recv()
-            {
+        let listener_active = Arc::clone(&active);
+        tokio::spawn(async move {
+            let mut shutdown_check = tokio::time::interval(Duration::from_millis(250));
+            loop {
+                let event = tokio::select! {
+                    event = event_rx.recv() => event,
+                    _ = shutdown_check.tick() => {
+                        if !listener_active.load(Ordering::Relaxed) { break; }
+                        continue;
+                    }
+                };
+                let Some(WorkerEvent::TrackEnded {
+                    generation: end_gen,
+                }) = event
+                else {
+                    break;
+                };
+                if !listener_active.load(Ordering::Relaxed) {
+                    break;
+                }
                 if gen_ev.load(Ordering::SeqCst) == end_gen {
                     log::info!("Track completed naturally, auto-advancing to next track");
                     Engine::advance_next(
@@ -1917,12 +1967,16 @@ impl Engine {
         {
             let mut s = state.lock().unwrap();
             s.source = None;
+            if s.track.as_ref().is_some_and(|old| old.uri != track.uri) {
+                s.previous_track = s.track.clone();
+            }
             s.track = Some(track.clone());
             s.playback = Playback::Loading;
             s.loading = true;
             s.error = None;
             s.position_ms = start_pos_ms;
             s.position_at = None;
+            s.plan_shuffle_next();
             s.track_sequence += 1;
             notify(EngineEvent::State(s.clone()));
         }
@@ -2112,14 +2166,27 @@ impl Engine {
         queue: &Arc<Mutex<QueueState>>,
         autoplay: bool,
     ) {
+        let planned = state
+            .lock()
+            .unwrap()
+            .shuffle_next
+            .as_ref()
+            .map(|t| t.uri.clone());
         let next_track = {
             let mut q = queue.lock().unwrap();
             if q.tracks.is_empty() {
                 None
             } else if q.repeat == RepeatMode::Track && autoplay {
                 q.tracks.get(q.current_index).cloned()
+            } else if q.manual_queue_count > 0 && q.current_index + 1 < q.tracks.len() {
+                q.current_index += 1;
+                q.manual_queue_count -= 1;
+                q.tracks.get(q.current_index).cloned()
             } else if q.shuffle && q.tracks.len() > 1 {
-                let next_idx = rand::random_range(0..q.tracks.len());
+                let next_idx = planned
+                    .as_ref()
+                    .and_then(|uri| q.tracks.iter().position(|t| &t.uri == uri))
+                    .unwrap_or_else(|| rand::random_range(0..q.tracks.len()));
                 q.current_index = next_idx;
                 q.tracks.get(q.current_index).cloned()
             } else if q.current_index + 1 < q.tracks.len() {
@@ -2458,6 +2525,7 @@ impl Engine {
                 q.shuffle = enabled;
                 let mut state = self.state.lock().unwrap();
                 state.shuffle = enabled;
+                state.plan_shuffle_next();
                 (self.notify)(EngineEvent::State(state.clone()));
             }
             PlayerCommand::Repeat(mode) => {
@@ -2630,3 +2698,53 @@ pub fn parse_rootlist(uris: &[String]) -> Vec<RootlistEntry> {
 }
 
 pub const AUDIO_KEY_REFUSED: &str = "Spotify refused an audio key";
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn idle_engine_does_not_hold_runtime_shutdown_open() {
+        let (finished, result) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let root = std::env::temp_dir()
+                .join(format!("vibefy-engine-shutdown-{}", rand::random::<u64>()));
+            let dirs = crate::paths::AppDirs {
+                config: root.join("config"),
+                state: root.join("state"),
+                cache: root.join("cache"),
+            };
+            let config = crate::app::engine_config(
+                &dirs,
+                &crate::settings::Settings::default(),
+                crate::settings::ProxyConfig::Off,
+                AudioTap::new(),
+                crate::eq::shared(),
+            );
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let engine = Engine::connect(
+                    &config,
+                    None,
+                    Default::default(),
+                    (),
+                    Arc::new(|_| {}),
+                    None,
+                )
+                .await
+                .unwrap();
+                tokio::task::yield_now().await;
+                engine.shutdown();
+            });
+            drop(runtime);
+            let _ = std::fs::remove_dir_all(root);
+            finished.send(()).unwrap();
+        });
+        result
+            .recv_timeout(Duration::from_secs(5))
+            .expect("idle engine must not keep a blocking receiver alive during runtime shutdown");
+        thread.join().unwrap();
+    }
+}

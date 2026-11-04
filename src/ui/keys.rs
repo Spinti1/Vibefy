@@ -119,11 +119,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
             key(Modifiers::NONE, Key::Q, Action::ToggleQueuePanel);
             key(Modifiers::NONE, Key::L, Action::ToggleLyricsPanel);
             key(Modifiers::NONE, Key::Slash, Action::FocusSearch);
-            key(
-                Modifiers::NONE,
-                Key::F,
-                Action::SetLyricsFullscreen(app.lyrics_fullscreen.is_none()),
-            );
+            key(Modifiers::NONE, Key::F, Action::ToggleFullscreen);
         }
     });
     if !editing_text
@@ -183,6 +179,8 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
                 data.insert_temp(id, false);
                 data.remove::<(String, i32)>(id.with("draft"));
             });
+        } else if app.addons.fullscreen {
+            app.actions.push(Action::ToggleFullscreen);
         } else if app.lyrics_fullscreen.is_some() {
             app.actions.push(Action::SetLyricsFullscreen(false));
         } else if app.spicy.open {
@@ -529,7 +527,7 @@ mod tests {
             (Key::Q, Modifiers::NONE, Action::ToggleQueuePanel),
             (Key::L, Modifiers::NONE, Action::ToggleLyricsPanel),
             (Key::Slash, Modifiers::NONE, Action::FocusSearch),
-            (Key::F, Modifiers::NONE, Action::SetLyricsFullscreen(true)),
+            (Key::F, Modifiers::NONE, Action::ToggleFullscreen),
             (
                 Key::Questionmark,
                 Modifiers::NONE,
@@ -738,13 +736,13 @@ mod tests {
         );
         assert_eq!(
             press(&mut app, Key::F, Modifiers::NONE),
-            format!("{:?}", [Action::SetLyricsFullscreen(true)]),
-            "F enters lyrics full screen"
+            format!("{:?}", [Action::ToggleFullscreen]),
+            "F toggles the shared fullscreen control"
         );
         app.lyrics_fullscreen = Some(false);
         assert_eq!(
             press(&mut app, Key::F, Modifiers::NONE),
-            format!("{:?}", [Action::SetLyricsFullscreen(false)]),
+            format!("{:?}", [Action::ToggleFullscreen]),
             "F leaves lyrics full screen"
         );
         app.backend.shutdown();

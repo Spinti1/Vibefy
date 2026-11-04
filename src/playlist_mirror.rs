@@ -28,6 +28,10 @@ use tokio::sync::mpsc;
 #[derive(Clone, Debug)]
 pub enum Action {
     Observe,
+    Rename { id: String, title: String },
+    Configure(Vec<String>),
+    FinishSetup,
+    ReopenSetup,
     Reviews(usize),
     Enable(bool),
     SyncNow,
@@ -39,6 +43,10 @@ pub enum Action {
 #[derive(Clone, Debug, Default)]
 pub struct View {
     pub ready: bool,
+    pub setup_complete: bool,
+    pub scan_finished: bool,
+    pub selected: Option<Vec<String>>,
+    pub retry_at: u64,
     pub enabled: bool,
     pub busy: bool,
     pub pair: String,
@@ -56,6 +64,7 @@ pub struct ListView {
     pub youtube_id: String,
     pub source_uris: Vec<String>,
     pub missing: usize,
+    pub copied: usize,
     pub uncertain: bool,
     pub issue: Option<String>,
     pub collection: Collection,
@@ -74,7 +83,22 @@ pub struct Intent {
     pub expected: BTreeMap<String, usize>,
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
+struct RenameIntent {
+    title: String,
+    spotify_done: bool,
+    youtube_done: bool,
+}
+
+pub fn valid_title(title: &str) -> bool {
+    !title.trim().is_empty() && title.chars().count() <= 100 && !title.chars().any(char::is_control)
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
 struct Linked {
+    #[serde(default)]
+    copied: usize,
+    #[serde(default)]
+    rename: Option<RenameIntent>,
     title: String,
     snapshot: Option<String>,
     youtube_id: String,
@@ -87,6 +111,12 @@ struct Linked {
 }
 #[derive(Default, Serialize, Deserialize)]
 struct Journal {
+    #[serde(default)]
+    setup_complete: bool,
+    #[serde(default)]
+    scan_finished: bool,
+    #[serde(default)]
+    selected: Option<Vec<String>>,
     version: u32,
     spotify: String,
     youtube: String,
@@ -115,6 +145,9 @@ pub fn pair_key(spotify: &str, youtube: &str) -> String {
         "{:x}",
         Sha256::digest(serde_json::to_vec(&(spotify, youtube)).unwrap())
     )
+}
+pub fn selected_playlist(selection: Option<&[String]>, id: &str) -> bool {
+    selection.is_none_or(|ids| ids.iter().any(|selected| selected == id))
 }
 fn valid_spotify(id: &str) -> bool {
     id.len() == 22 && id.bytes().all(|b| b.is_ascii_alphanumeric())
@@ -369,8 +402,9 @@ impl Service {
         let active: HashSet<_> = self
             .journal
             .lists
-            .values()
-            .flat_map(|list| list.tracks.iter().chain(&list.extra))
+            .iter()
+            .filter(|(id, _)| selected_playlist(self.journal.selected.as_deref(), id))
+            .flat_map(|(_, list)| list.tracks.iter().chain(&list.extra))
             .map(|track| track.uri.as_str())
             .collect();
         let reviews: Vec<_> = self
@@ -384,6 +418,10 @@ impl Service {
             .min(reviews.len().saturating_sub(1) / 100 * 100);
         let view = View {
             ready: true,
+            setup_complete: self.journal.setup_complete,
+            scan_finished: self.journal.scan_finished,
+            selected: self.journal.selected.clone(),
+            retry_at: self.journal.retry_at,
             enabled: self.journal.enabled,
             busy,
             pair: self.pair.clone(),
@@ -444,6 +482,7 @@ impl Service {
                     .map(|track| track.uri.clone())
                     .collect(),
                 missing,
+                copied: list.copied,
                 uncertain: list.intent.is_some(),
                 issue: list.issue.clone(),
                 collection: Collection {
@@ -501,6 +540,54 @@ impl Service {
     }
     async fn action(&mut self, action: Action) -> Result<()> {
         match action {
+            Action::Rename { id, title } => {
+                let title = title.trim().to_owned();
+                ensure!(
+                    valid_title(&title),
+                    "Use a playlist name between 1 and 100 characters"
+                );
+                let list = self
+                    .journal
+                    .lists
+                    .get_mut(&id)
+                    .ok_or_else(|| anyhow::anyhow!("Playlist is no longer linked"))?;
+                ensure!(
+                    !list.youtube_id.is_empty(),
+                    "Wait for the YouTube copy to be created"
+                );
+                list.rename = Some(RenameIntent {
+                    title: title.clone(),
+                    ..Default::default()
+                });
+                list.title = title;
+                list.issue = Some("Name change queued for Spotify and YouTube".into());
+                self.save().await?;
+                self.update_view(&id);
+            }
+            Action::Configure(ids) => {
+                ensure!(
+                    !ids.is_empty()
+                        && ids.len() <= 10_000
+                        && ids.iter().all(|id| valid_spotify(id)),
+                    "Select at least one Spotify playlist"
+                );
+                let ids: std::collections::BTreeSet<_> = ids.into_iter().collect();
+                self.journal.selected = Some(ids.into_iter().collect());
+                self.journal.scan_finished = false;
+                self.journal.enabled = true;
+                if !self.journal.rate_limited {
+                    self.journal.retry_at = 0;
+                }
+                self.save().await?;
+            }
+            Action::ReopenSetup => {
+                self.journal.setup_complete = false;
+                self.save().await?;
+            }
+            Action::FinishSetup => {
+                self.journal.setup_complete = true;
+                self.save().await?;
+            }
             Action::SyncNow => {
                 if !self.journal.rate_limited {
                     self.journal.retry_at = 0;
@@ -587,6 +674,10 @@ impl Service {
             }
         }
         self.inbox().await?;
+        ensure!(
+            !self.journal.lists.values().any(|l| l.rename.is_some()),
+            Interrupted
+        );
         ensure!(self.journal.enabled, "Playlist sync is paused");
         ensure!(
             self.api.account().as_ref().map(|a| a.as_str()) == Some(self.journal.spotify.as_str()),
@@ -605,6 +696,7 @@ impl Service {
                 action=self.rx.recv()=> {
                     let action=action.ok_or_else(||anyhow::anyhow!("Playlist sync stopped"))?;
                     self.action(action).await?;self.publish("Sync settings updated",true);
+                    ensure!(!self.journal.lists.values().any(|l| l.rename.is_some()), Interrupted);
                     ensure!(self.journal.enabled,"Playlist sync is paused");
                 }
             }
@@ -622,7 +714,9 @@ impl Service {
             });
         if unchanged {
             let list = self.journal.lists.get_mut(&id).unwrap();
-            list.title = playlist.name;
+            if list.rename.is_none() {
+                list.title = playlist.name;
+            }
             list.image = pick_image(&playlist.images, 300)
                 .filter(|url| crate::addons::safe_art_url(url))
                 .map(str::to_owned);
@@ -677,7 +771,9 @@ impl Service {
             "Playlist changed during import; retrying on the next sync"
         );
         let list = self.journal.lists.entry(id).or_default();
-        list.title = playlist.name;
+        if list.rename.is_none() {
+            list.title = playlist.name;
+        }
         list.image = pick_image(&playlist.images, 300)
             .filter(|s| crate::addons::safe_art_url(s))
             .map(str::to_owned);
@@ -696,6 +792,9 @@ impl Service {
             .collect();
         for (index, track) in tracks.iter().enumerate() {
             self.checkpoint().await?;
+            if !selected_playlist(self.journal.selected.as_deref(), id) {
+                return Err(Interrupted.into());
+            }
             if self.priority.is_some() {
                 return Err(Interrupted.into());
             }
@@ -736,6 +835,19 @@ impl Service {
                 &self.journal.decisions[&track.uri],
             )
             .await?;
+            if (index + 1) % 20 == 0 {
+                self.copy(id).await?;
+                self.update_view(id);
+                self.publish(
+                    format!(
+                        "Transferring {} · matched {}/{}",
+                        self.journal.lists[id].title,
+                        index + 1,
+                        tracks.len()
+                    ),
+                    true,
+                );
+            }
             tokio::time::sleep(Duration::from_millis(150)).await;
         }
         Ok(())
@@ -777,7 +889,20 @@ impl Service {
     }
     async fn copy(&mut self, id: &str) -> Result<()> {
         self.checkpoint().await?;
+        if !selected_playlist(self.journal.selected.as_deref(), id) {
+            return Err(Interrupted.into());
+        }
         let list = self.journal.lists[id].clone();
+        let creating_copy = list.youtube_id.is_empty();
+        let resolved = list.tracks.iter().chain(&list.extra).any(|track| {
+            self.journal
+                .decisions
+                .get(&track.uri)
+                .is_some_and(|d| d.chosen.is_some())
+        });
+        if list.youtube_id.is_empty() && !list.tracks.is_empty() && !resolved {
+            return Ok(());
+        }
         if list.youtube_id.is_empty() {
             if let Some(existing) = self.discover(id, &list.title).await? {
                 let saved = self.journal.lists.get_mut(id).unwrap();
@@ -821,8 +946,19 @@ impl Service {
             }
         }
         let list = self.journal.lists[id].clone();
-        let (allowed_visibility, description) =
+        let (mut allowed_visibility, mut description) =
             self.session.details(&self.proxy, &list.youtube_id).await?;
+        if creating_copy {
+            for seconds in [1, 2, 4] {
+                if allowed_visibility && description.contains(&self.marker(id)) {
+                    break;
+                }
+                self.checkpoint().await?;
+                tokio::time::sleep(Duration::from_secs(seconds)).await;
+                (allowed_visibility, description) =
+                    self.session.details(&self.proxy, &list.youtube_id).await?;
+            }
+        }
         ensure!(
             allowed_visibility && description.contains(&self.marker(id)),
             "The linked copy must be unlisted or private and keep its Vibefy marker. No songs were added."
@@ -894,6 +1030,10 @@ impl Service {
             self.journal.lists.get_mut(id).unwrap().intent = None;
             self.save().await?;
         }
+        self.journal.lists.get_mut(id).unwrap().copied = desired
+            .len()
+            .saturating_sub(missing_ids(&desired, &current).len());
+        self.save().await?;
         Ok(())
     }
     async fn rejected(&mut self, id: &str, error: &anyhow::Error) -> Result<()> {
@@ -906,7 +1046,94 @@ impl Service {
         }
         Ok(())
     }
+    async fn rename_pending(&mut self) -> Result<()> {
+        let ids: Vec<_> = self
+            .journal
+            .lists
+            .iter()
+            .filter(|(_, l)| l.rename.is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            let list = self.journal.lists[&id].clone();
+            let pending = list.rename.unwrap();
+            // Check ownership before either remote write; followed playlists are not editable.
+            let client = self
+                .api
+                .client_for(Operation::PlaylistMutation(self.api.playlist_access(&id)))
+                .await?;
+            self.last_client = Some(client.clone());
+            if !pending.youtube_done {
+                let playlist = client.playlist(&id).await?;
+                ensure!(
+                    playlist.owner.id.as_deref() == Some(self.journal.spotify.as_str()),
+                    "Only the playlist owner can rename a linked playlist"
+                );
+                let (private, description) =
+                    self.session.details(&self.proxy, &list.youtube_id).await?;
+                ensure!(
+                    private && description.contains(&self.marker(&id)),
+                    "The YouTube copy no longer has its Vibefy marker"
+                );
+                self.session
+                    .rename(&self.proxy, &list.youtube_id, &pending.title)
+                    .await?;
+                self.journal
+                    .lists
+                    .get_mut(&id)
+                    .unwrap()
+                    .rename
+                    .as_mut()
+                    .unwrap()
+                    .youtube_done = true;
+                self.save().await?;
+            }
+            if !pending.spotify_done {
+                client
+                    .update_playlist(&id, Some(&pending.title), None, None)
+                    .await?;
+                self.journal
+                    .lists
+                    .get_mut(&id)
+                    .unwrap()
+                    .rename
+                    .as_mut()
+                    .unwrap()
+                    .spotify_done = true;
+                self.save().await?;
+            }
+            self.journal.lists.get_mut(&id).unwrap().rename = None;
+            self.journal.lists.get_mut(&id).unwrap().issue = None;
+            self.save().await?;
+            self.update_view(&id);
+            self.publish("Playlist renamed on Spotify and YouTube", false);
+        }
+        Ok(())
+    }
     async fn cycle(&mut self) -> Result<()> {
+        ensure!(
+            self.api.account().as_ref().map(|a| a.as_str()) == Some(self.journal.spotify.as_str()),
+            "Spotify account changed; rename paused"
+        );
+        if let Err(error) = self.rename_pending().await {
+            let ids: Vec<_> = self
+                .journal
+                .lists
+                .iter()
+                .filter(|(_, l)| l.rename.is_some())
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in ids {
+                self.journal.lists.get_mut(&id).unwrap().issue =
+                    Some(format!("Name change pending: {error}"));
+                self.update_view(&id);
+            }
+            self.save().await?;
+            return Err(error);
+        }
+        if !self.journal.enabled {
+            return Ok(());
+        }
         self.checkpoint().await?;
         self.publish("Reading Spotify playlist changes…", true);
         // New additions have priority over the periodic library scan.
@@ -919,6 +1146,38 @@ impl Service {
                     "YouTube Music copy checked; unmatched recordings need review",
                     true,
                 );
+            }
+        }
+        if !self.journal.scan_finished {
+            if let Some(selected) = self
+                .journal
+                .selected
+                .clone()
+                .filter(|ids| ids.iter().all(|id| self.journal.lists.contains_key(id)))
+            {
+                let mut selected = selected;
+                selected.sort_by_key(|id| self.journal.lists[id].tracks.len());
+                for id in selected {
+                    self.checkpoint().await?;
+                    self.progress("Using your saved Spotify playlist snapshot…");
+                    let result = async {
+                        self.decisions(&id).await?;
+                        self.copy(&id).await
+                    }
+                    .await;
+                    self.journal.lists.get_mut(&id).unwrap().issue =
+                        result.as_ref().err().map(|e| e.to_string());
+                    self.update_view(&id);
+                    self.publish("Copying Spotify songs to YouTube Music…", true);
+                    result?;
+                }
+                self.journal.scan_finished = true;
+                self.save().await?;
+                self.publish(
+                    "Transfer pass finished. Review any unmatched recordings before continuing.",
+                    false,
+                );
+                return Ok(());
             }
         }
         let api = self.api.clone();
@@ -945,6 +1204,17 @@ impl Service {
             }
         }
         let mut errors = Vec::new();
+        if let Some(selected) = &self.journal.selected {
+            listed.retain(|p| selected.contains(&p.id));
+        }
+        listed.sort_by_key(|p| {
+            self.journal
+                .lists
+                .get(&p.id)
+                .map(|l| l.tracks.len())
+                .unwrap_or(usize::MAX)
+        });
+        self.journal.scan_finished = false;
         for playlist in listed {
             let id = playlist.id.clone();
             if !valid_spotify(&id) {
@@ -954,9 +1224,8 @@ impl Service {
             let result = async {
                 self.refresh_list(playlist).await?;
                 self.inbox().await?;
-                self.copy(&id).await?;
                 self.update_view(&id);
-                self.publish("Private copy linked; matching recordings…", true);
+                self.publish("Matching Spotify songs to YouTube Music…", true);
                 self.decisions(&id).await?;
                 self.copy(&id).await
             }
@@ -987,6 +1256,7 @@ impl Service {
                 true,
             );
         }
+        self.journal.scan_finished = true;
         self.save().await?;
         self.publish(
             if errors.is_empty() {
@@ -1008,7 +1278,8 @@ impl Service {
         );
         let mut due = 0;
         loop {
-            if self.journal.enabled && now() >= due.max(self.journal.retry_at) {
+            let renaming = self.journal.lists.values().any(|l| l.rename.is_some());
+            if (self.journal.enabled || renaming) && now() >= due.max(self.journal.retry_at) {
                 match self.cycle().await {
                     Ok(()) => {
                         due = now() + 900;
@@ -1017,7 +1288,9 @@ impl Service {
                         let _ = self.save().await;
                     }
                     Err(error) => {
-                        if error.downcast_ref::<Interrupted>().is_some() || !self.journal.enabled {
+                        if error.downcast_ref::<Interrupted>().is_some()
+                            || (!self.journal.enabled && !renaming)
+                        {
                             due = 0;
                             continue;
                         }
@@ -1057,14 +1330,14 @@ impl Service {
                     }
                 }
             }
-            let delay = if self.journal.enabled {
+            let delay = if self.journal.enabled || renaming {
                 due.max(self.journal.retry_at).saturating_sub(now()).max(1)
             } else {
                 86400
             };
             tokio::select! {
                 action=self.rx.recv()=> match action {
-                    Some(action)=> {let restart=!matches!(action,Action::Observe | Action::Reviews(_) | Action::Search{..});let review=matches!(action,Action::Search{..});
+                    Some(action)=> {let restart=!matches!(action,Action::Observe | Action::Reviews(_) | Action::Search{..} | Action::ReopenSetup | Action::FinishSetup);let review=matches!(action,Action::Search{..});
                         match self.action(action).await {Ok(())=> {if restart {due=0;}self.publish(if review {"Choose a recording below"}else{"Playlist sync settings updated"},false);},Err(error)=>self.publish(format!("Sync: {error}"),false)}
                     },None=>return,
                 },
@@ -1098,7 +1371,7 @@ pub fn start(serial: u64, context: Context) -> Handle {
                 .ok_or_else(|| anyhow::anyhow!("Connect Spotify first"))?
                 .as_str()
                 .to_owned();
-            let session = music_accounts::youtube_session(&context.config).await?;
+            let session = music_accounts::youtube_session(&context.config, &context.proxy).await?;
             let (youtube, youtube_name) = session.identity(&context.proxy).await?;
             let pair = pair_key(&account, &youtube);
             let path = context.root.join(format!("{pair}.json"));
@@ -1129,6 +1402,10 @@ pub fn start(serial: u64, context: Context) -> Handle {
                     }
                     file(cache, Some(repaired)).await?;
                 }
+            }
+            // Existing unfinished imports now wait for the playlist selection screen.
+            if !journal.setup_complete && journal.selected.is_none() {
+                journal.enabled = false;
             }
             let service = Service {
                 root: context.root,
@@ -1168,5 +1445,30 @@ pub fn start(serial: u64, context: Context) -> Handle {
         serial,
         sender,
         task,
+    }
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+    #[test]
+    fn rename_keeps_partial_acknowledgements_across_restart() {
+        let intent = RenameIntent {
+            title: "My new playlist".into(),
+            spotify_done: false,
+            youtube_done: true,
+        };
+        let restored: RenameIntent =
+            serde_json::from_slice(&serde_json::to_vec(&intent).unwrap()).unwrap();
+        assert_eq!(restored.title, intent.title);
+        assert!(restored.youtube_done);
+        assert!(!restored.spotify_done);
+    }
+    #[test]
+    fn playlist_names_accept_unicode_but_reject_empty_controls_and_overflow() {
+        assert!(valid_title("Muzică — 2026"));
+        assert!(!valid_title("  "));
+        assert!(!valid_title("bad\nname"));
+        assert!(!valid_title(&"a".repeat(101)));
     }
 }

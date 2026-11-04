@@ -520,25 +520,14 @@ directory; the ordinary demo does not scan your real themes folder.
 
 ## Home shelves
 
-Since 0.8.0, you can hide **Made for you** and **Recommended for you**
-from Home independently. Quit Spotifast before editing `settings.json`, then
-restart it. Add this field to hide both:
+The optional Made for you shelves can be hidden by setting
+`home.made_for_you.visible` to `false` in settings.json while Vibefy is closed.
+This also hides Your top mixes. The default is visible.
 
-```json
-"home": {
-  "made_for_you": { "visible": false },
-  "recommendations": { "visible": false }
-}
-```
-
-Set either `visible` value to `true` to show that shelf again. Omitted
-preferences keep both shelves visible. **Your top mixes** comes from the same
-personalized read as Made for you, so `made_for_you` hides it too. Other Home
-sections keep their normal order and contents. This changes what is displayed; hidden shelves still
-refresh in the background.
-
-**Recommended for you** is seeded with your top songs. Until Spotify has top
-songs for your account, which takes some listening, Home leaves the shelf out.
+Hidden playlists are managed directly in Home: right-click a playlist and choose
+Hide playlist. The last Home section reveals them with Show and lets you restore
+them with Show in Home. This preference is local and scoped to your account;
+it does not change playlist privacy on either platform.
 
 ## Custom themes
 

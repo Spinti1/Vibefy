@@ -93,7 +93,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 egui::Stroke::new(1.0, palette.outline),
             );
             let width = rect.width();
-            let side = (width * 0.3).clamp(200.0, 420.0);
+            let side = if app.settings.addons.active(crate::addons::Id::TrackPeek) {
+                (width * 0.24).clamp(225.0, 300.0)
+            } else {
+                (width * 0.3).clamp(200.0, 420.0)
+            };
             let cy = rect.center().y;
             let left = Rect::from_min_max(rect.min, pos2(rect.left() + side, rect.bottom()));
             let center = Rect::from_min_max(
@@ -115,7 +119,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     .max_rect(right_band)
                     .layout(Layout::right_to_left(Align::Center)),
             );
-            let transport_right = center.center().x + transport_width() / 2.0;
+            let transport_right = if app.settings.addons.active(crate::addons::Id::TrackPeek) {
+                center.right()
+            } else {
+                center.center().x + transport_width() / 2.0
+            };
             extras(app, &mut right_ui, now.as_ref(), transport_right);
         });
 }
@@ -708,6 +716,7 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         palette.dim
     };
 
+    super::track_peek::transport_cards(app, ui, region, cy, transport_width());
     let widths = TRANSPORT_WIDTHS;
     let mut x = region.center().x - transport_width() / 2.0;
     let mut slot = |width: f32| {
@@ -750,17 +759,13 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
     }
 
     let mut cell = centered(ui, slot(widths[1]));
-    if super::track_peek::adjacent(
-        theme::icon_button(
-            &mut cell,
-            Icon::SkipBackFilled,
-            18.0,
-            dim,
-            palette.text,
-            &gettext(app.locale, "Previous"),
-        ),
-        app,
-        false,
+    if theme::icon_button(
+        &mut cell,
+        Icon::SkipBackFilled,
+        18.0,
+        dim,
+        palette.text,
+        &gettext(app.locale, "Previous"),
     )
     .clicked()
     {
@@ -805,17 +810,13 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
     }
 
     let mut cell = centered(ui, slot(widths[3]));
-    if super::track_peek::adjacent(
-        theme::icon_button(
-            &mut cell,
-            Icon::SkipForwardFilled,
-            18.0,
-            dim,
-            palette.text,
-            &gettext(app.locale, "Next"),
-        ),
-        app,
-        true,
+    if theme::icon_button(
+        &mut cell,
+        Icon::SkipForwardFilled,
+        18.0,
+        dim,
+        palette.text,
+        &gettext(app.locale, "Next"),
     )
     .clicked()
     {
@@ -929,12 +930,16 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
 
 fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_right: f32) {
     let palette = app.palette;
-    let fullscreen = app.settings.addons.installed_visualizers().next().is_some();
-    ui.spacing_mut().item_spacing.x = 6.0;
+    let fullscreen = true;
+    ui.spacing_mut().item_spacing.x = if ui.max_rect().width() < 270.0 {
+        2.0
+    } else {
+        6.0
+    };
     if fullscreen
         && theme::icon_button(
             ui,
-            if app.addons.fullscreen {
+            if ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false)) {
                 Icon::Shrink
             } else {
                 Icon::Expand
@@ -942,12 +947,11 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
             18.0,
             palette.secondary,
             palette.text,
-            "Fullscreen visualizer",
+            "Fullscreen",
         )
         .clicked()
     {
-        app.actions
-            .push(Action::Addon(crate::addons::Command::Fullscreen));
+        app.actions.push(Action::ToggleFullscreen);
     }
     let volume = now
         .map(|now| now.volume_percent)
@@ -965,7 +969,14 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
     // yields space before any of the transport controls are crowded.
     let room = ui.max_rect().right() - transport_right - TRANSPORT_GAP;
     let slider_width = (room
-        - (5.0 + if fullscreen { 1.0 } else { 0.0 }) * (18.0 + theme::ICON_BUTTON_PAD)
+        - (5.0
+            + if app.settings.addons.installed_visualizers().next().is_some() {
+                1.0
+            } else {
+                0.0
+            }
+            + if fullscreen { 1.0 } else { 0.0 })
+            * (18.0 + theme::ICON_BUTTON_PAD)
         - 40.0)
         .clamp(if fullscreen { 24.0 } else { 36.0 }, 92.0);
     let controls = ui.add_enabled_ui(adjustable, |ui| {
@@ -1082,6 +1093,24 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
                 .map(|item| (item.uri().to_string(), item.name().to_string()))
                 .collect(),
         });
+    }
+    if app.settings.addons.installed_visualizers().next().is_some() {
+        let button = theme::icon_button(
+            ui,
+            Icon::AudioLines,
+            18.0,
+            if app.addons.fullscreen {
+                palette.accent
+            } else {
+                palette.secondary
+            },
+            palette.text,
+            "Visualizers",
+        );
+        if button.clicked() {
+            app.actions
+                .push(Action::Addon(crate::addons::Command::Fullscreen));
+        }
     }
     if theme::icon_button(
         ui,

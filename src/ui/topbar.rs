@@ -330,11 +330,22 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 .addons
                 .installed
                 .contains(&crate::addons::Id::WaveLink);
-            let soundcloud_width = if soundcloud {
-                theme::soft_button_width(ui, "SoundCloud search") + 21.0 + ITEM_SPACING
+            let juice = app
+                .settings
+                .addons
+                .installed
+                .contains(&crate::addons::Id::JuiceVault);
+            let juice_width = if juice {
+                theme::soft_button_width(ui, "JuiceVault search") + 21.0 + ITEM_SPACING
             } else {
                 0.0
             };
+            let soundcloud_width = juice_width
+                + if soundcloud {
+                    theme::soft_button_width(ui, "SoundCloud search") + 21.0 + ITEM_SPACING
+                } else {
+                    0.0
+                };
             let controls = RIGHT_CONTROLS_WIDTH
                 + if !app.network_reachable {
                     ICON_BUTTON_SIZE + 4.0
@@ -353,7 +364,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             // keep room for it (`least_width`).
             let lead = width - ui.available_width() + window_controls.topbar_width;
             ui.ctx().data_mut(|data| data.insert_temp(lead_id(), lead));
-            wrap_searches = soundcloud
+            wrap_searches = (soundcloud || juice)
                 && search_room < controls + soundcloud_width + badges(false) + SEARCH_FLOOR;
             soundcloud_button_width = soundcloud_width;
             let controls = controls + if wrap_searches { 0.0 } else { soundcloud_width };
@@ -628,7 +639,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 - ICON_BUTTON_SIZE
                 - ITEM_SPACING)
                 .max(SEARCH_MIN);
-            searches(app, ui, search_width, true);
+            searches(
+                app,
+                ui,
+                search_width,
+                app.settings
+                    .addons
+                    .installed
+                    .contains(&crate::addons::Id::WaveLink),
+            );
             mods_button(app, ui);
         });
         ui.add_space(8.0);
@@ -712,6 +731,22 @@ fn searches(app: &mut App, ui: &mut egui::Ui, search_width: f32, soundcloud: boo
         .clicked()
     {
         app.actions.push(Action::Open(Page::SoundCloud));
+    }
+    if app
+        .settings
+        .addons
+        .installed
+        .contains(&crate::addons::Id::JuiceVault)
+        && theme::soft_button(
+            ui,
+            &palette,
+            Some(Icon::Search),
+            "JuiceVault search",
+            app.page() == &Page::JuiceVault,
+        )
+        .clicked()
+    {
+        app.actions.push(Action::Open(Page::JuiceVault));
     }
 }
 
@@ -809,7 +844,7 @@ mod topbar_fit_tests {
         let mut room = NARROWEST_BAR;
         while room <= 2400.0 {
             let fit = topbar_fit(room, RIGHT_CONTROLS_WIDTH, DEVICE + UPDATE, CHIP * 2.0);
-            assert!(fit.search >= SEARCH_FLOOR, "field is {} px", fit.search);
+            assert!(fit.search >= SEARCH_MIN, "field is {} px", fit.search);
             assert!(fit.search <= SEARCH_MAX);
             room += 1.0;
         }

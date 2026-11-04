@@ -1,8 +1,8 @@
 # Vibefy releases
 
-Current source version: **0.4.28**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
+Current source version: **0.4.42**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
 
-For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.29), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
+For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.43), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
 
 0.4.4: About and Mods credits, clearer buttons, cache management and 2 GB advisory, performance improvements.
 
@@ -53,3 +53,33 @@ For each future user-requested functional update, increment the Vibefy patch ver
 0.4.27: New YouTube Music playlist copies are unlisted, with clear link-access wording. Existing private copies retain their visibility and recovery markers.
 
 0.4.28: Direct Connect YouTube button below Spotify and on Home; official Google browser sign-in with PKCE and protected refresh tokens; YouTube Data API playlist reading and unlisted copying with single-write recovery. Browser-header import removed from the connection UI; existing stored sessions remain readable.
+
+0.4.29: Independent Windows first-party YouTube sign-in window with a dedicated WebView2 profile, same-origin authenticated requests and local session removal. Direct Connect YouTube no longer opens the Google Cloud OAuth/testing flow. Native Spotify, playback and unlisted-copy journals remain in place; existing stored OAuth connections remain readable. No YTubic application code is incorporated.
+
+0.4.30: Fix the confirmed post-2FA block of accounts.google.ro by accepting exact Google regional domains from the official supported_domains list, with hostname boundary checks. Keep bounded host/status-only local navigation diagnostics, explicit blocked-redirect errors and the canonical Music return URL. Remove the speculative cookie-based handoff recovery; Google controls the full authentication sequence.
+
+0.4.31: Ordered Spotify then YouTube setup with matching centered account buttons, playlist selection, transfer progress and an explicit not-recommended skip. Account-paired setup state and selection survive restarts. Match before creating new copies; upload confirmed recordings progressively and reuse existing copies and complete source snapshots. Home exposes the connected YouTube library separately and deduplicates linked copies; Settings retains account/transfer controls rather than a second library list.
+
+0.4.32: Dedicated playlist-selection gallery with cached artwork, searchable selectable cards and persistent visible actions. Separate transfer screen with confirmed-song progress, per-playlist status, service cooldowns and selection editing; remove collapsible onboarding menus.
+
+0.4.33: Home shelves ordered Linked, Spotify, YouTube and optional JuiceVault. JuiceVault mod beside WaveLink includes title-ranked archive search, protected account sessions, username/password login and public/private library access. Remove linked/review dropdowns from Settings. Additional exact-video YouTube Music plain-lyrics fallback; timed sources remain preferred.
+
+0.4.34: Durable linked-playlist renaming, stricter artist identity for lyrics with metadata cleanup and bounded exact lookups, concurrent More Lyrics fallback, and shared YouTube recording cache across linked and Spotify tracks.
+
+0.4.35: Handle audio-engine completion while YouTube is connected and Spotify verification is pending. Prevent the restored-session startup race that discarded the engine and left playback stuck in Connecting.
+
+0.4.36: Artist discography without related-artist shelves, navigable cached Music pages, one contextual fullscreen control, queue alongside lyrics/visualizers, compact appearance presets and visualizer controls. Preserve upstream credits and compatibility identifiers.
+
+0.4.37: Separate lyrics and visualizer buttons, permanent Track Peek neighbours with artwork and reserved shuffle next track, removal of proxy controls and manual/system proxy routing. Existing saved proxy options are ignored; native HTTP, yt-dlp and YouTube sign-in use direct connections.
+
+0.4.38: Hidden playlists at the bottom of Home with account-scoped local visibility and restore actions. Removes the Home top-song shelf and its background request. Playlist context menus expose supported service actions. Visualizers open inside the current window; fullscreen remains a separate control.
+
+0.4.39: Removes the Recommended for you Home shelf, its preference, data state, request/response handling and unused Spotify API endpoint wrapper.
+
+0.4.40: Track Peek cards are capped at 180 logical pixels and sit beside the transport controls instead of stretching across the player.
+
+0.4.40 also fixes immediate playlist removal and stale library responses, and updates the Vibefy installer introduction while retaining upstream license notices.
+
+0.4.41: Optional verified mod packages loaded in-process after restart; aligned mod catalogue and separate settings; removed JuiceVault browser sign-in button; collection reload no longer truncates at 30; installer version validation. Windows signing remains unavailable.
+
+0.4.42: Fix audio-worker runtime shutdown, clear stale network-wait state on reconnect, preserve optimistic queue selection, restore encoded local-track labels safely, distinguish same-name Cast devices, and redact untrusted OAuth redirect paths. Repair obsolete unit-test fixtures for the current native queue, search, account setup and interface.

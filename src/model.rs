@@ -113,7 +113,9 @@ pub enum Page {
     /// The songs of the latest releases from followed artists.
     NewReleases,
     Search,
+    MusicBrowse(String),
     SoundCloud,
+    JuiceVault,
     Mods,
     /// A saved source collection, identified by its stable source URL.
     LocalCollection(String),
@@ -140,6 +142,8 @@ impl Page {
             Page::TopSongs => "top-songs".into(),
             Page::NewReleases => "new-releases".into(),
             Page::Search => "search".into(),
+            Page::MusicBrowse(id) => format!("music-browse:{id}"),
+            Page::JuiceVault => "juicevault".into(),
             Page::SoundCloud => "soundcloud".into(),
             Page::Mods => "mods".into(),
             Page::LocalCollection(source) => format!("local-collection:{source}"),
@@ -164,6 +168,7 @@ impl Page {
             "top-songs" => Page::TopSongs,
             "new-releases" => Page::NewReleases,
             "search" => Page::Search,
+            "juicevault" => Page::JuiceVault,
             "soundcloud" => Page::SoundCloud,
             "mods" => Page::Mods,
             "liked" => Page::LikedSongs,
@@ -176,6 +181,9 @@ impl Page {
             other => {
                 let (kind, id) = other.split_once(':')?;
                 match kind {
+                    "music-browse" if crate::music::valid_browse_id(id) => {
+                        Page::MusicBrowse(id.into())
+                    }
                     "local-collection" => Page::LocalCollection(id.into()),
                     "playlist" => Page::Playlist(id.into()),
                     "album" => Page::Album(id.into()),
@@ -704,7 +712,6 @@ pub struct HomeData {
     pub top_songs_complete: bool,
     pub top_songs_by_period_loading: [bool; 3],
     pub top_songs_by_period_complete: [bool; 3],
-    pub recommendations: Loadable<Vec<Track>>,
     pub made_for_you: Loadable<Vec<Playlist>>,
     /// Whether the displayed cards came from the personalized session route.
     pub made_for_you_personalized: bool,
@@ -1344,6 +1351,10 @@ pub enum Action {
         public: Option<bool>,
     },
     DeletePlaylist(String),
+    SetPlaylistHidden {
+        source: String,
+        hidden: bool,
+    },
     Transfer(String),
     /// Send the account to a receiver found on the local network.
     ActivateReceiver(Box<crate::zeroconf::Receiver>),
@@ -1454,6 +1465,7 @@ pub enum Action {
     },
     /// Show or hide what friends are listening to, in the right panel.
     ToggleListenTogether,
+    ToggleFullscreen,
     SetLyricsFullscreen(bool),
     LyricsLineShown(Option<usize>),
     FollowLyrics,
@@ -1488,10 +1500,6 @@ pub enum Action {
         playlist_order: Option<Vec<String>>,
     },
     RestartEngine,
-    /// Rebuild the HTTP client with the proxy in settings. Local playback
-    /// restarts only when its HTTP proxy changed.
-    ApplyProxy,
-    ProxyEdited,
     EnablePlayback,
     ShowWindow,
     HideWindow,

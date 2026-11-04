@@ -37,3 +37,5 @@ credentials.json
 session.json
 settings.json
 history.json
+
+/mods/packages/

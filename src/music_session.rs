@@ -1,4 +1,4 @@
-//! Explicit YouTube Music browser-session import. Never reads browser databases.
+//! YouTube Music sessions: dedicated first-party window and legacy connections.
 //! Protocol reference: sigma67/ytmusicapi (see CREDITS.md); no Python runtime.
 use crate::{addons::Collection, music_accounts::LibraryPlaylist, settings::ProxyConfig};
 use anyhow::{Result, ensure};
@@ -95,7 +95,9 @@ pub fn playlist_details(value: &Value) -> (bool, String) {
     let Some(header) = find_section(value, "musicEditablePlaylistDetailHeaderRenderer", 0) else {
         return (false, String::new());
     };
-    let editor = find_section(header, "musicPlaylistEditHeaderRenderer", 0);
+    let editor = header
+        .pointer("/editHeader/musicPlaylistEditHeaderRenderer")
+        .or_else(|| find_section(header, "musicPlaylistEditHeaderRenderer", 0));
     // Existing private copies stay private; newly created copies are unlisted.
     let allowed_visibility = matches!(
         editor.and_then(|v| v["privacy"].as_str()),
@@ -194,14 +196,44 @@ pub struct Session {
     page: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     google: Option<crate::google_youtube::Session>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    browser: Option<crate::youtube_browser::Profile>,
+    #[serde(skip)]
+    browser_proxy: ProxyConfig,
 }
 impl Session {
+    pub fn bind(&mut self, config: &Path, proxy: &ProxyConfig) -> Result<()> {
+        if let Some(profile) = &mut self.browser {
+            profile.bind(config)?;
+        }
+        self.browser_proxy = proxy.clone();
+        Ok(())
+    }
+    pub async fn connect_browser(config: &Path, proxy: &ProxyConfig) -> Result<Self> {
+        let connection = crate::youtube_browser::connect(config, proxy).await?;
+        Ok(Self {
+            cookie: String::new(),
+            account: connection.account,
+            page: connection.page,
+            google: None,
+            browser: Some(connection.profile),
+            browser_proxy: proxy.clone(),
+        })
+    }
+    pub async fn disconnect_browser(&self) -> Result<()> {
+        if let Some(profile) = &self.browser {
+            crate::youtube_browser::forget(profile).await?;
+        }
+        Ok(())
+    }
     pub async fn connect_google(proxy: &ProxyConfig) -> Result<Self> {
         Ok(Self {
             cookie: String::new(),
             account: String::new(),
             page: None,
             google: Some(crate::google_youtube::Session::connect(proxy).await?),
+            browser: None,
+            browser_proxy: proxy.clone(),
         })
     }
     pub fn append_batch_size(&self) -> usize {
@@ -210,6 +242,9 @@ impl Session {
     pub async fn display_name(&self, proxy: &ProxyConfig) -> Result<String> {
         if let Some(google) = &self.google {
             return Ok(google.identity(proxy).await?.1);
+        }
+        if self.browser.is_some() {
+            return Ok(self.identity(proxy).await?.1);
         }
         Ok("YouTube Music".into())
     }
@@ -282,6 +317,8 @@ impl Session {
             account,
             page,
             google: None,
+            browser: None,
+            browser_proxy: ProxyConfig::default(),
         };
         session.sapisid()?;
         Ok(session)
@@ -361,6 +398,47 @@ impl Session {
         body["context"] = json!({"client":{"clientName":"WEB_REMIX","clientVersion":version,"hl":"en"},"user":{}});
         if let Some(page) = &self.page {
             body["context"]["user"]["onBehalfOfUser"] = page.clone().into();
+        }
+        if let Some(profile) = &self.browser {
+            let response = crate::youtube_browser::post(
+                profile,
+                &self.browser_proxy,
+                endpoint,
+                &self.account,
+                body,
+                continuation,
+            )
+            .await
+            .map_err(|error| {
+                if matches!(endpoint, "playlist/create" | "browse/edit_playlist") {
+                    error.context(Failure::Unconfirmed)
+                } else {
+                    error
+                }
+            })?;
+            if response.status == 429 {
+                return Err(Failure::RateLimited(retry_after(
+                    response.retry_after.as_deref(),
+                    crate::playlist_mirror::now(),
+                ))
+                .into());
+            }
+            if (400..500).contains(&response.status) {
+                return Err(Failure::Rejected(response.status).into());
+            }
+            ensure!((200..300).contains(&response.status), Failure::Unconfirmed);
+            ensure!(
+                response
+                    .body
+                    .pointer("/responseContext/mainAppWebResponseContext/loggedOut")
+                    != Some(&Value::Bool(true)),
+                "Reconnect YouTube to restore your session"
+            );
+            ensure!(
+                response.body.get("error").is_none(),
+                "YouTube could not complete this operation"
+            );
+            return Ok(response.body);
         }
         let sensitive = |value: &str| -> Result<reqwest::header::HeaderValue> {
             let mut header = reqwest::header::HeaderValue::from_str(value)
@@ -495,6 +573,23 @@ impl Session {
             .filter(|id| valid_playlist_id(id))
             .map(str::to_owned)
             .ok_or_else(|| Failure::Unconfirmed.into())
+    }
+    pub async fn rename(&self, proxy: &ProxyConfig, id: &str, title: &str) -> Result<()> {
+        ensure!(
+            self.google.is_none(),
+            "Reconnect YouTube using Connect YouTube before renaming playlists"
+        );
+        ensure!(
+            valid_playlist_id(id) && crate::playlist_mirror::valid_title(title),
+            "Invalid playlist name"
+        );
+        let value = self.post(&Self::client(proxy)?, "browse/edit_playlist",
+            json!({"playlistId": id, "actions": [{"action": "ACTION_SET_PLAYLIST_NAME", "playlistName": title}]}), None).await?;
+        ensure!(
+            value["status"].as_str() == Some("STATUS_SUCCEEDED"),
+            Failure::Unconfirmed
+        );
+        Ok(())
     }
     pub async fn append(&self, proxy: &ProxyConfig, id: &str, videos: &[String]) -> Result<bool> {
         if let Some(google) = &self.google {

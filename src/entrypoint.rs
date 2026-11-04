@@ -597,13 +597,14 @@ pub(crate) fn run() -> eframe::Result<()> {
     let start_hidden = start_hidden(cli.start_hidden, link_given, demo, receipt_shown);
     #[cfg(not(feature = "demo"))]
     let start_hidden = start_hidden(cli.start_hidden, link_given, false, receipt_shown);
+    let reload = app.addons.reload_requested.clone();
     let shell = fastframe_shell::Shell::new(app, &waker).start_hidden(start_hidden);
     // The menu-bar item answers only while AppKit's loop runs. Elsewhere
     // nothing needs the main thread between headless ticks, so the shell
     // sleeps until the waker wakes it.
     #[cfg(target_os = "macos")]
     let shell = shell.idle(fastframe_tray::idle);
-    shell.run(|lease| {
+    let result = shell.run(|lease| {
         #[cfg(windows)]
         let creator_waker = waker.clone();
         #[cfg(feature = "demo")]
@@ -741,7 +742,16 @@ pub(crate) fn run() -> eframe::Result<()> {
                 || creator.take().expect("one try opens the window"),
             )
             .inspect_err(|error| log::error!("Native window failed: {error}"))
-    })
+    });
+    // Release the single-instance guard only after the shell has saved and shut down.
+    drop(instance);
+    if result.is_ok() && reload.load(std::sync::atomic::Ordering::Acquire) {
+        match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).spawn()) {
+            Ok(_) => {}
+            Err(error) => log::error!("Could not restart Vibefy: {error}"),
+        }
+    }
+    result
 }
 
 /// The Winamp mini player's window, when that is the window to open.

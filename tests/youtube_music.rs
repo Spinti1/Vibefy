@@ -324,7 +324,7 @@ async fn youtube_limits_return_promptly_and_apply_to_cloned_clients() {
 #[tokio::test]
 #[ignore = "Public YouTube Music network validation; no account or cookies"]
 async fn live_public_music_queries_and_artwork() {
-    let client = Client::new(Http::from_proxy(&spotifast::settings::ProxyConfig::System).unwrap());
+    let client = Client::new(Http::from_proxy(&spotifast::settings::ProxyConfig::Off).unwrap());
     for (query, title, artist) in [
         ("Deftones Digital Bath", "Digital Bath", "Deftones"),
         ("Ian Azteca Never Recover", "Never Recover", "Ian"),
@@ -411,7 +411,7 @@ async fn live_music_result_plays_through_the_existing_native_engine() {
         codecs::DecoderOptions, formats::FormatOptions, io::MediaSourceStream,
         meta::MetadataOptions, probe::Hint,
     };
-    let client = Client::new(Http::from_proxy(&spotifast::settings::ProxyConfig::System).unwrap());
+    let client = Client::new(Http::from_proxy(&spotifast::settings::ProxyConfig::Off).unwrap());
     let found = client
         .search("Deftones Digital Bath", Filter::Songs, None)
         .await
@@ -494,7 +494,7 @@ async fn live_music_result_plays_through_the_existing_native_engine() {
 async fn live_import_artwork_proposals() {
     let path = std::env::var("VIBEFY_ART_FIXTURE").expect("fixture path");
     let collections = spotifast::addons::load_collections(std::path::Path::new(&path));
-    let client = Client::new(Http::from_proxy(&spotifast::settings::ProxyConfig::System).unwrap());
+    let client = Client::new(Http::from_proxy(&spotifast::settings::ProxyConfig::Off).unwrap());
     let mut mapping = serde_json::Map::new();
     let mut total = 0;
     for collection in collections.iter().take(1) {

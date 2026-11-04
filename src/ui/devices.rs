@@ -594,7 +594,8 @@ mod tests {
             device_id: Some("cast-id".into()),
             address: "192.0.2.1".parse().unwrap(),
             port: 8009,
-            path: "/".into(),
+            model: None,
+            path: Some("/".into()),
             cast: true,
         };
         history.record("alice", &cast.preference_key().unwrap());
@@ -630,7 +631,8 @@ mod tests {
             device_id: Some("same-name-id".into()),
             address: "192.0.2.1".parse().unwrap(),
             port: 8009,
-            path: "/".into(),
+            model: None,
+            path: Some("/".into()),
             cast: true,
         };
         let other = crate::zeroconf::Receiver {
@@ -663,7 +665,8 @@ mod tests {
             device_id: Some("living-room".into()),
             address: "127.0.0.1".parse().unwrap(),
             port: 80,
-            path: "/".into(),
+            model: None,
+            path: Some("/".into()),
             cast: false,
         };
         let mut device = Device {

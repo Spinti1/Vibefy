@@ -1,4 +1,5 @@
 //! Original mod artwork and deterministic playback clocks.
+#[cfg(test)]
 pub const NYAN_FRAMES: [&[u8]; 6] = [
     include_bytes!("../assets/mods/nyan_1.png"),
     include_bytes!("../assets/mods/nyan_2.png"),
@@ -7,6 +8,7 @@ pub const NYAN_FRAMES: [&[u8]; 6] = [
     include_bytes!("../assets/mods/nyan_5.png"),
     include_bytes!("../assets/mods/nyan_6.png"),
 ];
+#[cfg(test)]
 pub const CAT_JAM: &[u8] = include_bytes!("../assets/mods/catjam-atlas.png");
 pub const CAT_FRAMES: usize = 325;
 pub const CAT_COLUMNS: usize = 16;

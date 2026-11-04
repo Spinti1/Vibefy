@@ -64,6 +64,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     };
     let gap = 14.0;
     let width = (ui.available_width() - gap * (columns - 1) as f32) / columns as f32;
+    // Equal-width catalogue cards; settings live in a separate detail panel.
     for row in visible.chunks(columns) {
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
@@ -76,7 +77,32 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 });
             }
         });
-        ui.add_space(8.0);
+        ui.add_space(gap);
+    }
+    if let Some(id) = app.addons.settings_open {
+        if app.settings.addons.installed.contains(&id) {
+            let mut open = true;
+            egui::Window::new(format!("{} settings", id.name()))
+                .id(egui::Id::new("mod-settings"))
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .default_width(400.0)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .show(ui.ctx(), |ui| {
+                    ui.set_max_width(
+                        400.0_f32.min((ui.ctx().content_rect().width() - 48.0).max(200.0)),
+                    );
+                    egui::ScrollArea::vertical()
+                        .max_height((ui.ctx().content_rect().height() - 140.0).max(160.0))
+                        .show(ui, |ui| controls(app, ui, id));
+                });
+            if !open {
+                app.addons.settings_open = None;
+            }
+        } else {
+            app.addons.settings_open = None;
+        }
     }
     // Lyrics integrations predate the optional catalogue. Keep them available
     // here as included mods without changing existing listeners' preferences.
@@ -192,7 +218,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 fn card(app: &mut App, ui: &mut egui::Ui, id: Id, width: f32) {
     let palette = app.palette;
     let installed = app.settings.addons.installed.contains(&id);
-    let active = app.settings.addons.active(id);
+    let active = app.settings.addons.active(id) && app.addons.modules.contains_key(&id);
+    let pending = app.addons.package_pending.contains(&id);
+    let busy = app.addons.package_busy.contains(&id);
+    let missing = installed && !app.addons.modules.contains_key(&id) && !pending;
     Frame::new()
         .fill(palette.surface)
         .stroke(Stroke::new(1.0, palette.outline))
@@ -200,66 +229,106 @@ fn card(app: &mut App, ui: &mut egui::Ui, id: Id, width: f32) {
         .inner_margin(Margin::same(16))
         .show(ui, |ui| {
             ui.set_width((width - 34.0).max(100.0));
-            ui.set_min_height(132.0);
-            ui.horizontal_top(|ui| {
-                let icon = match id {
-                    Id::YouTube => Icon::ListVideo,
-                    Id::WaveLink => Icon::AudioLines,
-                    Id::Vivy => Icon::AudioLines,
-                    Id::Backmusic => Icon::Disc,
-                    _ => Icon::Sparkles,
-                };
-                let (rect, _) =
-                    ui.allocate_exact_size(egui::Vec2::splat(32.0), egui::Sense::hover());
-                ui.painter()
-                    .rect_filled(rect, 8.0, palette.accent.gamma_multiply(0.12));
-                theme::paint_icon(ui, icon, rect.shrink(6.0), 20.0, palette.accent);
-                ui.vertical(|ui| {
-                    ui.label(
-                        egui::RichText::new(id.name())
-                            .font(theme::bold(17.0))
-                            .color(palette.text),
-                    );
-                    ui.label(
-                        egui::RichText::new(if active {
-                            "Enabled"
-                        } else if installed {
-                            "Installed · disabled"
-                        } else {
-                            "Available to install"
-                        })
-                        .size(11.0)
-                        .color(if active {
-                            palette.accent
-                        } else {
-                            palette.secondary
-                        }),
-                    );
+            ui.set_min_height(220.0);
+            ui.allocate_ui(egui::vec2(ui.available_width(), 48.0), |ui| {
+                ui.set_min_height(48.0);
+                ui.horizontal_top(|ui| {
+                    let icon = match id {
+                        Id::YouTube => Icon::ListVideo,
+                        Id::WaveLink => Icon::AudioLines,
+                        Id::Vivy => Icon::AudioLines,
+                        Id::Backmusic => Icon::Disc,
+                        _ => Icon::Sparkles,
+                    };
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::Vec2::splat(32.0), egui::Sense::hover());
+                    ui.painter()
+                        .rect_filled(rect, 8.0, palette.accent.gamma_multiply(0.12));
+                    theme::paint_icon(ui, icon, rect.shrink(6.0), 20.0, palette.accent);
+                    ui.vertical(|ui| {
+                        ui.label(
+                            egui::RichText::new(id.name())
+                                .font(theme::bold(17.0))
+                                .color(palette.text),
+                        );
+                        ui.label(
+                            egui::RichText::new(if busy {
+                                "Downloading…"
+                            } else if pending {
+                                "Installed · reload to activate"
+                            } else if missing {
+                                "Download required"
+                            } else if active {
+                                "Enabled"
+                            } else if installed {
+                                "Installed · disabled"
+                            } else {
+                                "Available to install"
+                            })
+                            .size(11.0)
+                            .color(if active {
+                                palette.accent
+                            } else {
+                                palette.secondary
+                            }),
+                        );
+                    });
                 });
             });
             ui.add_space(6.0);
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(id.description())
-                        .size(13.0)
-                        .color(palette.secondary),
-                )
-                .wrap(),
-            );
+            ui.allocate_ui(egui::vec2(ui.available_width(), 64.0), |ui| {
+                ui.set_min_height(64.0);
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(id.description())
+                            .size(13.0)
+                            .color(palette.secondary),
+                    )
+                    .wrap(),
+                );
+            });
             ui.add_space(10.0);
+            ui.add_enabled_ui(!busy, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    if missing {
+                        button(app, ui, "Download", Command::Enable(id, true), true);
+                        button(app, ui, "Uninstall", Command::Uninstall(id), false);
+                    } else if pending {
+                        button(app, ui, "Reload now", Command::ReloadNow, true);
+                        button(app, ui, "Uninstall", Command::Uninstall(id), false);
+                    } else if installed {
+                        button(
+                            app,
+                            ui,
+                            if active { "Disable" } else { "Enable" },
+                            Command::Enable(id, !active),
+                            active,
+                        );
+                        button(app, ui, "Uninstall", Command::Uninstall(id), false);
+                    } else {
+                        button(app, ui, "Install", Command::Enable(id, true), true);
+                    }
+                });
+            });
+            ui.add_space(8.0);
             ui.horizontal_wrapped(|ui| {
-                if installed {
-                    button(
-                        app,
+                ui.add_enabled_ui(active, |ui| {
+                    if theme::soft_button(
                         ui,
-                        if active { "Disable" } else { "Enable" },
-                        Command::Enable(id, !active),
-                        active,
-                    );
-                    button(app, ui, "Uninstall", Command::Uninstall(id), false);
-                } else {
-                    button(app, ui, "Install", Command::Enable(id, true), true);
-                }
+                        &palette,
+                        Some(Icon::Settings),
+                        "Settings",
+                        app.addons.settings_open == Some(id),
+                    )
+                    .clicked()
+                    {
+                        app.addons.settings_open = if app.addons.settings_open == Some(id) {
+                            None
+                        } else {
+                            Some(id)
+                        };
+                    }
+                });
                 if let Some(source) = id.source() {
                     if theme::soft_button(
                         ui,
@@ -274,25 +343,31 @@ fn card(app: &mut App, ui: &mut egui::Ui, id: Id, width: f32) {
                     }
                 }
             });
-            if active || (id == Id::CatJam && installed) {
-                ui.add_space(8.0);
-                if matches!(id, Id::YouTube | Id::WaveLink) {
-                    egui::CollapsingHeader::new(if id == Id::YouTube {
-                        "Import a playlist"
-                    } else {
-                        "Search SoundCloud"
-                    })
-                    .default_open(false)
-                    .show(ui, |ui| controls(app, ui, id));
-                } else {
-                    controls(app, ui, id);
-                }
+            if let Some(error) = app.addons.package_errors.get(&id) {
+                ui.add(
+                    egui::Label::new(egui::RichText::new(error).small().color(palette.warning))
+                        .wrap(),
+                );
             }
         });
 }
 
 fn controls(app: &mut App, ui: &mut egui::Ui, id: Id) {
     match id {
+        Id::JuiceVault => {
+            if theme::soft_button(
+                ui,
+                &app.palette,
+                Some(Icon::Search),
+                "JuiceVault search",
+                true,
+            )
+            .clicked()
+            {
+                app.actions.push(Action::Open(Page::JuiceVault));
+            }
+            super::music_accounts::juice_connect(app, ui);
+        }
         Id::WaveLink => {
             if theme::soft_button(
                 ui,
@@ -330,7 +405,7 @@ fn controls(app: &mut App, ui: &mut egui::Ui, id: Id) {
             ui.small("Imported playlists are saved on Home automatically. Unavailable videos may be omitted.");
         }
         Id::Vivy | Id::Backmusic => {
-            ui.small("Open fullscreen beside volume. Choose the visualizer and its settings in the top-left corner there.");
+            ui.small("Open Visualizers beside Lyrics. Display settings are available inside the visualizer; fullscreen is optional.");
         }
         Id::Oneko => {
             ui.small("Original Oneko sprite: kyrie25 / adryd325 (MIT).");
@@ -359,7 +434,7 @@ fn controls(app: &mut App, ui: &mut egui::Ui, id: Id) {
             ui.small("Original Cat Jam clip: BlafKing. Speed follows the estimated track BPM.");
         }
         Id::TrackPeek => {
-            ui.small("Hover Previous / Next to peek at adjacent tracks. Right-click a song and choose Preview audio. Stop or close the preview to return to your music.");
+            ui.small("Previous and upcoming songs stay visible beside the playback controls. Right-click a song and choose Preview audio. Stop or close the preview to return to your music.");
         }
         Id::Nyan => {
             ui.small("Original six Nyan frames: NoahClemmensen.");
@@ -623,4 +698,82 @@ fn tracks(
                 }
             }
         });
+}
+
+/// Isolated query/results; the provider API searches the entire public music catalogue.
+pub fn juicevault(app: &mut App, ui: &mut egui::Ui) {
+    let palette = app.palette;
+    theme::text(ui, "JuiceVault search", theme::bold(28.0), palette.text);
+    ui.label("Search the archive by song title. Exact and close matches appear first.");
+    if !app.settings.addons.active(Id::JuiceVault) {
+        button(
+            app,
+            ui,
+            "Enable JuiceVault",
+            Command::Enable(Id::JuiceVault, true),
+            true,
+        );
+        return;
+    }
+    ui.add_space(14.0);
+    ui.horizontal(|ui| {
+        let field = super::widgets::search_field(
+            ui,
+            &palette,
+            app.locale,
+            egui::Id::new("juicevault-query"),
+            &mut app.addons.juice_query,
+            "Song title on JuiceVault",
+            (ui.available_width() - 110.0).max(100.0),
+        );
+        let enter = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let click = ui
+            .add_enabled_ui(!app.addons.busy, |ui| {
+                theme::pill_button(ui, &palette, "Search", true).clicked()
+            })
+            .inner;
+        if (enter || click) && !app.addons.busy && !app.addons.juice_query.trim().is_empty() {
+            app.actions
+                .push(Action::Addon(Command::Fetch(Request::JuiceVault(
+                    app.addons.juice_query.clone(),
+                ))));
+        }
+    });
+    if app.addons.busy && app.addons.fetching_juice {
+        ui.spinner();
+        button(app, ui, "Cancel", Command::CancelFetch, false);
+    }
+    if let Some(message) = &app.addons.juice_message {
+        ui.colored_label(palette.warning, message);
+    }
+    if let Some(collection) = app.addons.juice_result.clone() {
+        ui.label(format!("{} close title matches", collection.tracks.len()));
+        if collection.tracks.is_empty() {
+            ui.small("No close title matches. Try another spelling or an alternate title.");
+        }
+        ui.push_id("juicevault-results", |ui| {
+            soundcloud_tracks(app, ui, &collection.tracks)
+        });
+    }
+}
+
+/// Reload is explicit; closing the prompt always leaves playback running.
+pub fn reload_prompt(app: &mut App, ctx: &egui::Context) {
+    let Some(id) = app.addons.reload_notice else {
+        return;
+    };
+    let response = egui::Modal::new(egui::Id::new("addon-reload")).show(ctx, |ui| {
+        ui.set_max_width(380.0);
+        ui.heading(format!("{} installed", id.name()));
+        ui.add_space(8.0);
+        ui.label("Restart Vibefy to reload your add-ons. Playback will stop; your accounts and layout will be kept.");
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            button(app, ui, "Reload now", Command::ReloadNow, true);
+            button(app, ui, "Later", Command::ReloadLater, false);
+        });
+    });
+    if response.should_close() {
+        app.actions.push(Action::Addon(Command::ReloadLater));
+    }
 }

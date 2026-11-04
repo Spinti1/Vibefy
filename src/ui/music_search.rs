@@ -22,12 +22,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         p.text,
     );
     ui.add_space(12.0);
-    let options: Vec<_> = Filter::ALL.iter().map(|f| (*f, f.label())).collect();
-    if let Some(f) = widgets::chips(ui, &p, &options, app.search.music.filter) {
-        app.actions.push(Action::MusicFilter(f));
+    let browsing = matches!(app.page(), crate::model::Page::MusicBrowse(_));
+    if !browsing {
+        let options: Vec<_> = Filter::ALL.iter().map(|f| (*f, f.label())).collect();
+        if let Some(f) = widgets::chips(ui, &p, &options, app.search.music.filter) {
+            app.actions.push(Action::MusicFilter(f));
+        }
+        ui.add_space(12.0);
     }
-    ui.add_space(12.0);
-    if app.search.committed.is_empty() {
+    if !browsing && app.search.committed.is_empty() {
         recent(app, ui);
         return;
     }
@@ -95,9 +98,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         if state
             .source_key
             .starts_with("https://music.youtube.com/browse/")
-            && theme::soft_button(ui, &p, None, "Back to search", false).clicked()
+            && theme::soft_button(ui, &p, None, "Back", false).clicked()
         {
-            actions.push(Action::Search(app.search.committed.clone()));
+            actions.push(Action::Back);
         }
     });
     ui.add_space(14.0);

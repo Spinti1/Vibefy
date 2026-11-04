@@ -20,7 +20,7 @@ const API: &str = "https://lrclib.net/api";
 /// Lyrics do not change; a cached answer is good for this long.
 const CACHE_LIFETIME: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 // Plain lyrics and misses may acquire timing later. Keep timed results longer.
-const PLAIN_CACHE_LIFETIME: Duration = Duration::from_secs(6 * 60 * 60);
+const PLAIN_CACHE_LIFETIME: Duration = Duration::from_secs(30 * 60);
 /// A candidate this far from the playing track's length is another
 /// recording, however well the names match.
 const MAX_DRIFT_SECS: f64 = 30.0;
@@ -168,26 +168,30 @@ async fn lookup_at(http: &reqwest::Client, query: &Query, api: &str) -> Result<O
     if query.duration_ms > 0 {
         exact.push(("duration", duration.as_str()));
     }
-    let exact = get_from::<Record>(http, api, "/get", &exact)
-        .await?
-        .and_then(|record| record.lyrics());
+    // Reserve time for the search when the exact endpoint stalls or errors.
+    let exact = tokio::time::timeout(
+        Duration::from_millis(1500),
+        get_from::<Record>(http, api, "/get", &exact),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .flatten()
+    .filter(|record| score(record, query).is_some())
+    .and_then(|record| record.lyrics());
     if exact
         .as_ref()
         .is_some_and(|lyrics| lyrics.synced || lyrics.instrumental)
     {
         return Ok(exact);
     }
+    let search_params = [
+        ("artist_name", artist.as_str()),
+        ("track_name", title.as_str()),
+    ];
     let candidates = tokio::time::timeout_at(
         search_deadline,
-        get_from::<Vec<Record>>(
-            http,
-            api,
-            "/search",
-            &[
-                ("artist_name", artist.as_str()),
-                ("track_name", title.as_str()),
-            ],
-        ),
+        get_from::<Vec<Record>>(http, api, "/search", &search_params),
     )
     .await;
     let candidates = match candidates {
@@ -312,13 +316,13 @@ impl Record {
 
 /// How well a search result fits what is playing; `None` rules it out.
 fn score(record: &Record, query: &Query) -> Option<i64> {
-    if !loose_match(&record.track_name, &clean_title(&query.title)) {
+    if normalize(&clean_title(&record.track_name)) != normalize(&clean_title(&query.title)) {
         return None;
     }
-    let mut score = 0;
-    if loose_match(&record.artist_name, &clean_artist(&query.artist)) {
-        score += 1000;
+    if !loose_match(&record.artist_name, &clean_artist(&query.artist)) {
+        return None;
     }
+    let mut score = 1000;
     if query.duration_ms > 0
         && let Some(duration) = record.duration.filter(|duration| *duration > 0.0)
     {
@@ -354,6 +358,11 @@ fn pick(records: Vec<Record>, query: &Query) -> Option<Record> {
 
 /// Words a title carries in brackets that a lyrics database does not.
 const BRACKET_NOISE: &[&str] = &[
+    "official",
+    "lyrics",
+    "lyric video",
+    "music video",
+    "audio",
     "remaster",
     "remastered",
     "remix",
@@ -376,6 +385,9 @@ const BRACKET_NOISE: &[&str] = &[
 
 /// What a " - " suffix says when it is not part of the title.
 const SUFFIX_NOISE: &[&str] = &[
+    "official audio",
+    "official video",
+    "official music video",
     "remaster",
     "remastered",
     "radio edit",
@@ -575,7 +587,9 @@ fn loose_match(left: &str, right: &str) -> bool {
     if a.is_empty() || b.is_empty() {
         return false;
     }
-    a == b || a.contains(&b) || b.contains(&a)
+    a == b
+        || format!(" {a} ").contains(&format!(" {b} "))
+        || format!(" {b} ").contains(&format!(" {a} "))
 }
 
 /// Lyrics from text a file holds: timed when its lines carry LRC stamps,
@@ -671,7 +685,7 @@ struct Cached {
 fn cache_key(query: &Query) -> String {
     let digest = Sha1::digest(
         format!(
-            "{}|{}|{}|{}",
+            "matched-artist-v2|{}|{}|{}|{}",
             query.artist, query.title, query.album, query.duration_ms
         )
         .as_bytes(),
@@ -970,6 +984,26 @@ mod tests {
         .unwrap();
         assert_eq!(picked.duration, Some(202.0));
         assert!(pick(vec![record("Song", "Artist", 400.0, true)], &query).is_none());
+    }
+
+    #[test]
+    fn rejects_wrong_artist_and_title_substrings_but_accepts_official_labels() {
+        let query = Query {
+            artist: "Ian".into(),
+            title: "Flexez".into(),
+            album: String::new(),
+            duration_ms: 200_000,
+        };
+        assert!(score(&record("Flexez", "Other", 200.0, true), &query).is_none());
+        assert!(score(&record("Flexez", "Dorian", 200.0, true), &query).is_none());
+        assert!(score(&record("Flexez Again", "Ian", 200.0, true), &query).is_none());
+        assert!(
+            score(
+                &record("Flexez (Official Audio)", "Ian & Azteca", 201.0, true),
+                &query
+            )
+            .is_some()
+        );
     }
 
     #[test]

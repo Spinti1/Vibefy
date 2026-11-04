@@ -12,6 +12,7 @@ use crate::player::LocalTrack;
 pub enum Id {
     Nyan,
     WaveLink,
+    JuiceVault,
     Oneko,
     CatJam,
     YouTube,
@@ -20,9 +21,10 @@ pub enum Id {
     TrackPeek,
 }
 
-pub const ALL: [Id; 8] = [
+pub const ALL: [Id; 9] = [
     Id::YouTube,
     Id::WaveLink,
+    Id::JuiceVault,
     Id::TrackPeek,
     Id::Vivy,
     Id::Backmusic,
@@ -36,6 +38,7 @@ impl Id {
         match self {
             Self::Nyan => "Nyan Cat Progress Bar",
             Self::WaveLink => "WaveLink",
+            Self::JuiceVault => "JuiceVault",
             Self::Oneko => "Oneko Cat",
             Self::CatJam => "Cat Jam Synced",
             Self::YouTube => "YouTube Playlist Import",
@@ -48,6 +51,9 @@ impl Id {
         match self {
             Self::Nyan => {
                 "The original Nyan Cat frames animate along a rainbow progress bar at the track's estimated tempo."
+            }
+            Self::JuiceVault => {
+                "Search JuiceVault, connect your account and browse public or private playlists."
             }
             Self::WaveLink => {
                 "Native SoundCloud search and playback. Public, unprotected tracks only; account libraries and private tracks are not supported."
@@ -73,6 +79,7 @@ impl Id {
     pub fn source(self) -> Option<&'static str> {
         match self {
             Self::Nyan => Some("https://github.com/NoahClemmensen/spicetify-nyan-bar-synced"),
+            Self::JuiceVault => Some("https://juicevault.xyz/"),
             Self::WaveLink => Some("https://github.com/xoft122/wavelink"),
             Self::Oneko => Some("https://github.com/kyrie25/spicetify-oneko"),
             Self::CatJam => Some("https://github.com/BlafKing/spicetify-cat-jam-synced"),
@@ -87,6 +94,10 @@ impl Id {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Preferences {
+    #[serde(skip)]
+    pub require_packages: bool,
+    #[serde(skip)]
+    pub ready_packages: BTreeSet<Id>,
     #[serde(deserialize_with = "read_ids")]
     pub installed: BTreeSet<Id>,
     #[serde(deserialize_with = "read_ids")]
@@ -111,6 +122,8 @@ fn read_ids<'de, D: serde::Deserializer<'de>>(reader: D) -> Result<BTreeSet<Id>,
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            require_packages: false,
+            ready_packages: BTreeSet::new(),
             installed: BTreeSet::new(),
             enabled: BTreeSet::new(),
             visualizer: None,
@@ -129,6 +142,10 @@ pub struct VisualConfig {
     pub style: u8,
     pub intensity: f32,
     pub particles: bool,
+    pub show_cover: bool,
+    pub show_title: bool,
+    pub brightness: f32,
+    pub fps: u16,
 }
 impl Default for VisualConfig {
     fn default() -> Self {
@@ -136,6 +153,10 @@ impl Default for VisualConfig {
             style: 0,
             intensity: 1.0,
             particles: false,
+            show_cover: true,
+            show_title: true,
+            brightness: 1.0,
+            fps: 30,
         }
     }
 }
@@ -156,6 +177,7 @@ impl Preferences {
                 1.0
             },
             particles: self.particles,
+            ..VisualConfig::default()
         };
         match id {
             Id::Backmusic => self.backmusic.unwrap_or(fallback),
@@ -173,12 +195,15 @@ impl Preferences {
         }
     }
     pub fn installed_visualizers(&self) -> impl Iterator<Item = Id> + '_ {
-        [Id::Vivy, Id::Backmusic]
-            .into_iter()
-            .filter(|id| self.installed.contains(id))
+        [Id::Vivy, Id::Backmusic].into_iter().filter(|id| {
+            self.installed.contains(id)
+                && (!self.require_packages || self.ready_packages.contains(id))
+        })
     }
     pub fn active(&self, id: Id) -> bool {
-        self.installed.contains(&id) && self.enabled.contains(&id)
+        self.installed.contains(&id)
+            && self.enabled.contains(&id)
+            && (!self.require_packages || self.ready_packages.contains(&id))
     }
     pub fn set(&mut self, id: Id, enabled: bool) {
         if enabled {
@@ -231,13 +256,17 @@ impl Collection {
 pub enum Request {
     YouTube(String),
     SoundCloud(String),
+    JuiceVault(String),
 }
 
 #[derive(Clone, Debug)]
 pub enum Command {
     CancelFetch,
+    ReloadNow,
+    ReloadLater,
     Enable(Id, bool),
     Uninstall(Id),
+    FinishUninstall(Id),
     Fetch(Request),
     SaveCollection,
     SaveSoundCloud,
@@ -245,9 +274,7 @@ pub enum Command {
     Play { tracks: Vec<LocalTrack>, index: u32 },
     ChooseVisualizer(Id),
     Fullscreen,
-    Style(u8),
-    Intensity(f32),
-    Particles(bool),
+    ConfigureVisual(VisualConfig),
     CatJamScale(f32),
     Host,
     Join(String),
@@ -486,8 +513,16 @@ pub fn source_thumbnail(entry: &serde_json::Value, youtube: bool) -> Option<Stri
 }
 
 pub async fn fetch(request: Request, proxy: crate::settings::ProxyConfig) -> Result<Collection> {
+    if let Request::JuiceVault(query) = &request {
+        return crate::music_accounts::juice_search(
+            &crate::http::Http::from_proxy(&proxy).map_err(anyhow::Error::msg)?,
+            query,
+        )
+        .await;
+    }
     let binary = crate::player::find_yt_dlp_binary().context("yt-dlp is not installed")?;
     let (target, youtube) = match request {
+        Request::JuiceVault(_) => unreachable!(),
         Request::YouTube(url) => (playlist_url(&url)?, true),
         Request::SoundCloud(query) => {
             let query = query.trim();
@@ -550,8 +585,19 @@ pub fn source_error(stderr: &[u8]) -> &'static str {
 
 #[derive(Default)]
 pub struct Runtime {
+    pub modules: std::collections::BTreeMap<Id, std::sync::Arc<crate::mod_packages::Guest>>,
+    pub package_busy: BTreeSet<Id>,
+    pub package_pending: BTreeSet<Id>,
+    pub package_errors: std::collections::BTreeMap<Id, String>,
+    pub reload_notice: Option<Id>,
+    pub reload_requested: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub settings_open: Option<Id>,
     pub artwork_checked: BTreeSet<String>,
     pub artwork_active: Option<String>,
+    pub juice_query: String,
+    pub juice_result: Option<Collection>,
+    pub juice_message: Option<String>,
+    pub fetching_juice: bool,
     pub soundcloud_result: Option<Collection>,
     pub soundcloud_message: Option<String>,
     pub soundcloud_focus_requested: bool,
@@ -606,9 +652,15 @@ impl Runtime {
 }
 
 pub fn load_collections(path: &std::path::Path) -> Vec<Collection> {
-    let Ok(bytes) = std::fs::read(path) else {
+    use std::io::Read;
+    let Ok(file) = std::fs::File::open(path) else {
         return Vec::new();
     };
+    // Enforce the bound while reading, before an oversized file is allocated.
+    let mut bytes = Vec::new();
+    if file.take(20_000_001).read_to_end(&mut bytes).is_err() {
+        return Vec::new();
+    }
     if bytes.len() > 20_000_000 {
         return Vec::new();
     }
@@ -617,7 +669,6 @@ pub fn load_collections(path: &std::path::Path) -> Vec<Collection> {
     };
     collections
         .into_iter()
-        .take(30)
         .filter(|c| {
             c.tracks.len() <= 20_000 && c.tracks.iter().all(|t| direct_url(&t.uri).is_some())
         })

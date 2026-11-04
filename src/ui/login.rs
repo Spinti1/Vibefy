@@ -6,7 +6,7 @@ use crate::app::App;
 use crate::backend::{AuthStatus, SignInProblem};
 use crate::i18n::gettext;
 use crate::model::Action;
-use crate::settings::ProxyMode;
+
 use crate::theme;
 
 /// Where listeners create their own Spotify app. Shown as a link they
@@ -77,18 +77,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, connecting: bool) {
             };
             let inner = if steps { column * 2.0 + GUTTER } else { COLUMN };
             let card_width = inner + 72.0;
-            let proxy_id = egui::Id::new("login-proxy-open");
-            let proxy_open = ui
-                .ctx()
-                .data(|data| data.get_temp::<bool>(proxy_id))
-                .unwrap_or(false);
-            let card_height: f32 = if !proxy_open {
-                400.0
-            } else if app.settings.proxy_mode.is_manual() {
-                720.0
-            } else {
-                500.0
-            };
+            let card_height: f32 = 440.0;
             let room = (rect.height() - 64.0).max(0.0);
             // The card keeps its place, and grows down to fit what it holds
             // when that is taller, such as while waiting for the browser
@@ -174,7 +163,7 @@ fn problem_text(locale: crate::i18n::Locale, problem: SignInProblem) -> String {
         ),
         SignInProblem::SharedRetired => gettext(
             locale,
-            "Spotify no longer accepts the shared sign-in Spotifast used before. Set up your own Spotify app to keep listening.",
+            "Spotify rejected this sign-in configuration. Reconnect your account or check the Spotify connection settings.",
         ),
         SignInProblem::Expired => {
             gettext(locale, "Your Spotify sign-in expired. Please sign in again.")
@@ -283,11 +272,14 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
                 client_id_field(app, ui);
                 ui.add_space(4.0);
             }
-            if big_button(ui, app, &gettext(locale, "Sign in with Spotify")) {
+            if big_button(ui, app, "Step 1 · Sign in with Spotify") {
                 app.actions.push(Action::SignIn);
             }
             ui.add_space(8.0);
-            super::music_accounts::youtube_connect(app, ui);
+            ui.add_enabled_ui(false, |ui| {
+                big_button(ui, app, "Step 2 · Sign in with YouTube");
+            });
+            ui.small("Connect Spotify first, then YouTube. Vibefy copies your selected Spotify playlists to unlisted YouTube Music playlists. Anyone with their link can view them.");
             ui.add_space(10.0);
             wrapped(
                 ui,
@@ -313,30 +305,6 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
             }
         }
     }
-    let proxy_id = egui::Id::new("login-proxy-open");
-    let mut proxy_open = ui
-        .data(|data| data.get_temp::<bool>(proxy_id))
-        .unwrap_or(false);
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.with_layout(Layout::top_down(Align::Center), |ui| {
-            if theme::link(
-                ui,
-                gettext(locale, "Proxy Settings"),
-                theme::regular(13.0),
-                palette.secondary,
-            )
-            .clicked()
-            {
-                proxy_open = !proxy_open;
-            }
-        });
-    });
-    ui.add_space(4.0);
-    if proxy_open {
-        proxy_fields(ui, app);
-    }
-    ui.data_mut(|data| data.insert_temp(proxy_id, proxy_open));
 }
 
 /// The listener's own app's Client ID, kept in settings as Settings keeps it.
@@ -554,76 +522,7 @@ fn card_rect(rect: Rect, width: f32, base: f32, content: Option<f32>, room: f32)
     )
 }
 
-fn proxy_fields(ui: &mut egui::Ui, app: &mut App) {
-    let palette = app.palette;
-    let mut changed = false;
-    let mut apply = false;
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        let row_width: f32 = ProxyMode::ALL
-            .iter()
-            .map(|choice| {
-                let galley = ui.painter().layout_no_wrap(
-                    choice.label(app.locale).into_owned(),
-                    theme::medium(13.0),
-                    palette.text,
-                );
-                galley.size().x + 24.0
-            })
-            .sum::<f32>()
-            + 6.0 * (ProxyMode::ALL.len() - 1) as f32;
-        ui.add_space((ui.available_width() - row_width).max(0.0) / 2.0);
-        for choice in ProxyMode::ALL {
-            if theme::soft_button(
-                ui,
-                &palette,
-                None,
-                &choice.label(app.locale),
-                app.settings.proxy_mode == choice,
-            )
-            .clicked()
-                && app.settings.proxy_mode != choice
-            {
-                app.settings.proxy_mode = choice;
-                changed = true;
-                apply = !choice.is_manual();
-            }
-        }
-    });
-    if app.settings.proxy_mode.is_manual() {
-        ui.add_space(10.0);
-        if super::widgets::proxy_manual_form(
-            ui,
-            &palette,
-            app.locale,
-            &mut app.settings.proxy_host,
-            &mut app.settings.proxy_port,
-            &mut app.settings.proxy_username,
-            &mut app.settings.proxy_password,
-        ) {
-            changed = true;
-        }
-        ui.add_space(6.0);
-        super::widgets::proxy_scope_note(ui, &palette, app.locale, app.settings.proxy_mode);
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            if theme::pill_button(ui, &palette, &gettext(app.locale, "Apply settings"), true)
-                .clicked()
-            {
-                apply = true;
-            }
-        });
-    }
-    if changed {
-        app.actions.push(Action::ProxyEdited);
-        app.mark_settings_dirty();
-    }
-    if apply {
-        app.actions.push(Action::ApplyProxy);
-    }
-}
-
-fn big_button(ui: &mut egui::Ui, app: &App, label: &str) -> bool {
+pub(super) fn big_button(ui: &mut egui::Ui, app: &App, label: &str) -> bool {
     let palette = app.palette;
     let galley =
         ui.painter()
@@ -663,100 +562,4 @@ fn big_button(ui: &mut egui::Ui, app: &App, label: &str) -> bool {
         palette.on_accent,
     );
     response.clicked()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{app::AppOptions, backend::Waker, paths::AppDirs, settings::Settings};
-
-    #[test]
-    fn expanded_proxy_settings_remain_reachable_in_a_short_window() {
-        let ctx = egui::Context::default();
-        ctx.enable_accesskit();
-        theme::install(&ctx);
-        let root = std::env::temp_dir().join(format!(
-            "spotifast-proxy-short-login-{}",
-            std::process::id()
-        ));
-        let mut app = App::new(
-            &Waker::default(),
-            AppDirs {
-                config: root.join("config"),
-                state: root.join("state"),
-                cache: root.join("cache"),
-            },
-            Settings {
-                proxy_mode: ProxyMode::Http,
-                ..Default::default()
-            },
-            AppOptions {
-                media_controls: false,
-                restore_sign_in: false,
-                tray: false,
-                autostart: false,
-            },
-        );
-        app.auth = AuthStatus::SignedOut;
-        ctx.data_mut(|data| data.insert_temp(egui::Id::new("login-proxy-open"), true));
-        let screen = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(760.0, 520.0));
-        let mut frame = |events| {
-            let mut output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(screen),
-                    events,
-                    ..Default::default()
-                },
-                |ui| show(&mut app, ui, false),
-            );
-            output.textures_delta.clear();
-            output.platform_output.accesskit_update.unwrap()
-        };
-        let visible_button = |tree: &egui::accesskit::TreeUpdate, label: &str| {
-            let bounds = tree
-                .nodes
-                .iter()
-                .find(|(_, node)| {
-                    node.label() == Some(label) && node.role() == egui::accesskit::Role::Button
-                })
-                .unwrap_or_else(|| panic!("missing accessible {label}"))
-                .1
-                .bounds()
-                .unwrap();
-            bounds.y0 >= 0.0 && bounds.y1 <= 480.0
-        };
-        let first = frame(vec![]);
-        assert!(visible_button(&first, "Sign in with Spotify"));
-        let center = |label: &str| {
-            let bounds = first
-                .nodes
-                .iter()
-                .find(|(_, node)| node.label() == Some(label))
-                .unwrap_or_else(|| panic!("missing accessible {label}"))
-                .1
-                .bounds()
-                .unwrap();
-            (bounds.x0 + bounds.x1) / 2.0
-        };
-        assert!(
-            (center("Proxy Settings") - center("Sign in with Spotify")).abs() < 1.0,
-            "the proxy link stays centered under sign-in"
-        );
-        frame(vec![
-            egui::Event::PointerMoved(egui::pos2(400.0, 250.0)),
-            egui::Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Point,
-                phase: egui::TouchPhase::Move,
-                delta: egui::vec2(0.0, -1000.0),
-                modifiers: egui::Modifiers::NONE,
-            },
-        ]);
-        for _ in 0..30 {
-            frame(vec![]);
-        }
-        assert!(
-            visible_button(&frame(vec![]), "Apply settings"),
-            "scrolling must reach Apply above the footer"
-        );
-    }
 }

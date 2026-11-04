@@ -4,14 +4,12 @@ use crate::{
     music_accounts::{Action, Provider},
     theme,
 };
-fn send(app: &mut App, provider: Provider, action: Action) {
+pub(super) fn send(app: &mut App, provider: Provider, action: Action) {
     let index = provider as usize;
-    let start_sync = provider == Provider::YouTubeMusic
-        && matches!(action, Action::Connect)
-        && app.user_id().is_some();
+    let start_sync = false;
     app.music_accounts_serial[index] = app.music_accounts_serial[index].wrapping_add(1);
     let state = &mut app.music_accounts[index];
-    if matches!(action, Action::Connect) {
+    if matches!(action, Action::Connect | Action::Login(_)) {
         state.auth_pending = true;
         state.enable_sync_after_connect = start_sync;
     }
@@ -55,7 +53,7 @@ pub fn youtube_connect(app: &mut App, ui: &mut egui::Ui) {
             ui.label(if state.connected {
                 "Loading YouTube playlists…"
             } else {
-                "Finish connecting in your browser…"
+                "Finish signing in to the YouTube window…"
             });
             cancelled = theme::pill_button(ui, &palette, "Cancel", false).clicked();
         } else if state.connected {
@@ -66,8 +64,8 @@ pub fn youtube_connect(app: &mut App, ui: &mut egui::Ui) {
     });
     if !state.connected && !state.busy {
         ui.small(if app.user_id().is_some() {
-            "Connect with Google to copy your Spotify playlists as unlisted. Anyone with a copy’s link can view it."
-        } else { "Choose your Google account to access your YouTube playlists." });
+            "Sign in to YouTube to copy your Spotify playlists as unlisted. Anyone with a copy’s link can view it."
+        } else { "Sign in with Google in the dedicated YouTube window to load your playlists." });
     }
     if let Some(message) = &state.message {
         theme::text(ui, message, theme::regular(12.0), palette.danger);
@@ -102,97 +100,62 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 action = Some(Action::Disconnect);
             }
         });
-        egui::CollapsingHeader::new(format!(
-            "YouTube playlists ({})",
-            app.music_accounts[0].playlists.len()
-        ))
-        .show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .max_height(240.0)
-                .show(ui, |ui| {
-                    for playlist in &app.music_accounts[0].playlists {
-                        ui.horizontal(|ui| {
-                            super::widgets::cover(
-                                ui,
-                                &palette,
-                                playlist.image.as_deref(),
-                                36.0,
-                                4.0,
-                                theme::Icon::Music,
-                            );
-                            ui.label(&playlist.title);
-                            if ui
-                                .add_enabled(
-                                    !app.music_accounts[0].busy,
-                                    egui::Button::new("Save on Home"),
-                                )
-                                .clicked()
-                            {
-                                action = Some(Action::Import(playlist.clone()));
-                            }
-                        });
-                    }
-                });
-        });
+        ui.small("Your YouTube Music playlists are on Home. Playlist transfer is managed below.");
         if let Some(action) = action {
             send(app, Provider::YouTubeMusic, action);
         }
     }
-    ui.add_space(12.0);
-    egui::CollapsingHeader::new("JuiceVault").show(ui, |ui| {
-        let state = &mut app.music_accounts[1];
-        let mut action = None;
-        let mut cancelled = false;
-        ui.add(
-            egui::TextEdit::singleline(&mut state.username)
-                .hint_text("JuiceVault username (public playlists)"),
-        );
+    super::playlist_mirror::show(app, ui);
+}
+
+pub(super) fn juice_connect(app: &mut App, ui: &mut egui::Ui) {
+    let palette = app.palette;
+    let state = &mut app.music_accounts[1];
+    let mut action = None;
+    ui.label("JuiceVault account");
+    ui.add(
+        egui::TextEdit::singleline(&mut state.username)
+            .hint_text("Username or email")
+            .char_limit(200),
+    );
+    ui.add(
+        egui::TextEdit::singleline(&mut state.password.0)
+            .password(true)
+            .hint_text("Password")
+            .char_limit(1024),
+    );
+    ui.add_enabled_ui(!state.busy, |ui| {
         ui.horizontal_wrapped(|ui| {
-            if state.busy {
-                ui.spinner();
-                cancelled = theme::pill_button(ui, &palette, "Cancel", false).clicked();
-            } else {
-                if theme::pill_button(ui, &palette, "Connect JuiceVault", false).clicked() {
-                    action = Some(Action::Connect);
-                }
-                if theme::pill_button(ui, &palette, "Load playlists", false).clicked() {
-                    action = Some(Action::Refresh);
-                }
-                if state.connected
-                    && theme::pill_button(ui, &palette, "Disconnect", false).clicked()
-                {
-                    action = Some(Action::Disconnect);
-                }
+            if theme::pill_button(ui, &palette, "Sign in", true).clicked() {
+                action = Some(Action::Login(std::mem::take(&mut state.password)));
+            }
+            if theme::pill_button(ui, &palette, "Load public profile", false).clicked() {
+                state.password.0.clear();
+                action = Some(Action::PublicProfile);
             }
         });
-        if let Some(message) = &state.message {
-            ui.small(message);
-        }
-        for playlist in &state.playlists {
-            ui.horizontal(|ui| {
-                super::widgets::cover(
-                    ui,
-                    &palette,
-                    playlist.image.as_deref(),
-                    36.0,
-                    4.0,
-                    theme::Icon::Music,
-                );
-                ui.label(&playlist.title);
-                if ui
-                    .add_enabled(!state.busy, egui::Button::new("Save on Home"))
-                    .clicked()
-                {
-                    action = Some(Action::Import(playlist.clone()));
+        if state.connected {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("Library · {}", state.name));
+                if ui.button("Refresh playlists").clicked() {
+                    action = Some(Action::Refresh);
+                }
+                if ui.button("Disconnect").clicked() {
+                    state.password.0.clear();
+                    action = Some(Action::Disconnect);
                 }
             });
         }
-        if cancelled {
-            cancel(app, Provider::JuiceVault);
-        }
-        if let Some(action) = action {
-            send(app, Provider::JuiceVault, action);
-        }
     });
-    super::playlist_mirror::show(app, ui);
+    if state.busy {
+        ui.spinner();
+        ui.label("Connecting to JuiceVault…");
+    }
+    if let Some(message) = &state.message {
+        ui.colored_label(palette.warning, message);
+    }
+    ui.small("Sign in for your private playlists, or enter a username and load its public profile. Playlists appear on Home.");
+    if let Some(action) = action {
+        send(app, Provider::JuiceVault, action);
+    }
 }

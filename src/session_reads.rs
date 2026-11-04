@@ -66,7 +66,52 @@ pub fn seed_first<T>(_items: &[T]) -> Option<&T> {
     None
 }
 
-pub fn normalize_local_track_labels(_track: &mut Track) {}
+pub fn normalize_local_track_labels(track: &mut Track) {
+    let Some(parts) = track.uri.strip_prefix("spotify:local:") else {
+        return;
+    };
+    let parts: Vec<_> = parts.split(':').collect();
+    if parts.len() != 4 {
+        return;
+    }
+    fn restore(label: &mut String, encoded: &str) {
+        // Only repair labels copied verbatim from the local URI. Real tags
+        // may legitimately contain a plus or percent sign.
+        if label == encoded {
+            let spaces = encoded.replace('+', " ");
+            if let Ok(decoded) = percent_encoding::percent_decode_str(&spaces).decode_utf8() {
+                *label = decoded.into_owned();
+            }
+        }
+    }
+    restore(&mut track.name, parts[2]);
+    if let Some(artist) = track.artists.first_mut() {
+        restore(&mut artist.name, parts[0]);
+    }
+    if let Some(album) = track.album.as_mut() {
+        restore(&mut album.name, parts[1]);
+    }
+}
+
+#[cfg(test)]
+mod local_label_tests {
+    use super::*;
+
+    #[test]
+    fn normalization_preserves_real_tags_and_invalid_utf8() {
+        let mut track = Track {
+            uri: "spotify:local:Artist:Album:Encoded+Title:180".into(),
+            name: "Actual + title %20".into(),
+            ..Default::default()
+        };
+        normalize_local_track_labels(&mut track);
+        assert_eq!(track.name, "Actual + title %20");
+        track.uri = "spotify:local:Artist:Album:%FF:180".into();
+        track.name = "%FF".into();
+        normalize_local_track_labels(&mut track);
+        assert_eq!(track.name, "%FF");
+    }
+}
 
 pub async fn playlist(_: &Session, _: &str) -> Result<Playlist, Failure> {
     Err(Failure::Retry(anyhow::anyhow!("Session reads disabled")))

@@ -546,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    fn the_session_reads_what_the_shared_app_would_have() {
+    fn removed_playback_session_never_handles_web_api_operations() {
         for (operation, personal) in [
             (Operation::PlaylistItems(PlaylistAccess::External), true),
             (Operation::PlaylistMetadata(PlaylistAccess::Unknown), false),
@@ -556,7 +556,7 @@ mod tests {
                 false,
             ),
         ] {
-            assert!(session_serves(operation, personal), "{operation:?}");
+            assert!(!session_serves(operation, personal), "{operation:?}");
         }
         for (operation, personal) in [
             (Operation::PlaylistItems(PlaylistAccess::Owned), true),
@@ -598,10 +598,10 @@ mod tests {
 
     /// Popular tracks use local playback even when a personal Web API app is ready.
     #[test]
-    fn artist_popular_tracks_can_use_the_playback_session_with_or_without_personal_access() {
+    fn artist_popular_tracks_use_web_api_without_a_playback_session() {
         let gateway = ApiGateway::new(reqwest::Client::new(), Arc::new(NetActivity::default()));
-        assert!(gateway.session_serves(Operation::ArtistTopTracks));
-        assert!(session_serves(Operation::ArtistTopTracks, true));
+        assert!(!gateway.session_serves(Operation::ArtistTopTracks));
+        assert!(!session_serves(Operation::ArtistTopTracks, true));
         assert_eq!(
             plan(Operation::ArtistTopTracks, true),
             ApiSource::Shared,
@@ -610,9 +610,9 @@ mod tests {
     }
 
     #[test]
-    fn related_artists_prefer_the_session_and_keep_the_shared_fallback() {
+    fn related_artists_use_the_shared_web_api() {
         for personal in [false, true] {
-            assert!(session_serves(Operation::RelatedArtists, personal));
+            assert!(!session_serves(Operation::RelatedArtists, personal));
             assert_eq!(plan(Operation::RelatedArtists, personal), ApiSource::Shared);
         }
     }

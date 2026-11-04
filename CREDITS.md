@@ -6,8 +6,8 @@ Vibefy is developed by **Spinti** as an independent fork of [Spotifast](https://
 
 | Project | Contribution / attribution |
 | --- | --- |
-| [Google Identity / OAuth](https://developers.google.com/identity/protocols/oauth2/native-app) and [YouTube Data API](https://developers.google.com/youtube/v3) | Official browser account authorization and playlist metadata/writes, implemented with native Rust requests. Google and YouTube services remain subject to their own terms, verification and quotas. |
-| [sigma67 / ytmusicapi](https://github.com/sigma67/ytmusicapi) | Reference for browser-session signing and YouTube Music library browse/continuation requests; independent native Rust implementation. MIT notice retained under assets/licenses. No Python runtime is bundled. New connections use the official Google desktop OAuth flow and YouTube Data API; the browser-session implementation remains for existing connections. |
+| [Google Identity / OAuth](https://developers.google.com/identity/protocols/oauth2/native-app) and [YouTube Data API](https://developers.google.com/youtube/v3) | Legacy 0.4.28 browser authorization and playlist metadata/writes, retained for existing protected sessions. Google and YouTube services remain subject to their own terms, verification and quotas. |
+| [sigma67 / ytmusicapi](https://github.com/sigma67/ytmusicapi) | Reference for browser-session signing and YouTube Music library browse/continuation requests; independent native Rust implementation. MIT notice retained under assets/licenses. No Python runtime is bundled. New Windows connections use a dedicated first-party WebView2 profile; older stored sessions remain readable. |
 | [JuiceVault](https://juicevault.xyz/) and its [documented API](https://api.juicevault.xyz/) | Browser login handoff, public playlist metadata, artwork and archive audio endpoints; service content remains with its respective rights holders. No JuiceVault application source code is bundled. |
 | [Rust](https://www.rust-lang.org/), [egui / eframe](https://github.com/emilk/egui) | Native application and immediate-mode interface; includes the pinned crmne app forks |
 | [fastframe](https://github.com/crmne/fastframe) | Native platform, storage, UI and safe update installation foundation |
@@ -63,3 +63,14 @@ The classic mini player is inherited from Spotifast by Carmine Paolino and contr
 ## HTTPS trust roots
 
 [webpki-roots](https://github.com/rustls/webpki-roots) supplies bundled Mozilla public CA roots under CDLA-Permissive-2.0, alongside the operating system trust store. Its original license is retained in THIRD_PARTY_LICENSES.txt. HTTPS certificate and hostname verification remain enabled.
+
+## YouTube connection window
+
+[YTubic by NUber-dev and contributors](https://github.com/NUber-dev/YTubic) was reviewed as a functional reference for first-party YouTube sign-in. Its GPL-3.0 application code was not copied or translated into Vibefy. Vibefy independently uses [Microsoft Edge WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) and the MIT-licensed [webview2-com bindings](https://github.com/wravery/webview2-rs). The WebView2 Runtime is supplied by Microsoft under its own terms. Existing dependency and asset licenses continue to apply.
+
+### JuiceVault and additional lyrics
+JuiceVault (https://juicevault.xyz/) provides archive metadata, playback and account libraries through its API (https://api.juicevault.xyz/). Vibefy implements an independent Rust adapter; no JuiceVault extension code is bundled. YTubic (https://github.com/NUber-dev/YTubic, GPL-3.0) was consulted to identify its lyrics providers; no YTubic implementation is copied or translated. The additional YouTube Music lookup uses Vibefy’s existing catalogue client. Lyrics retain their provider attribution.
+
+### Wasmi
+
+Optional in-app WebAssembly mod runtime: [Wasmi](https://github.com/wasmi-labs/wasmi), dual MIT/Apache-2.0. Modules receive bounded playback/drawing interfaces, not account credentials.

@@ -1,0 +1,62 @@
+{
+  "contents": {
+    "musicEditablePlaylistDetailHeaderRenderer": {
+      "editHeader": {
+        "musicPlaylistEditHeaderRenderer": {
+          "privacy": "UNLISTED",
+          "description": {
+            "runs": [
+              {
+                "text": "Vibefy mirror: fixture"
+              }
+            ]
+          }
+        }
+      },
+      "header": {
+        "musicResponsiveHeaderRenderer": {
+          "description": {
+            "musicDescriptionShelfRenderer": {
+              "description": {
+                "runs": [
+                  {
+                    "text": "Vibefy mirror: fixture"
+                  }
+                ]
+              },
+              "moreButton": {
+                "toggleButtonRenderer": {
+                  "defaultIcon": {
+                    "iconType": "redacted"
+                  },
+                  "defaultText": {
+                    "runs": [
+                      {
+                        "text": "redacted"
+                      }
+                    ]
+                  },
+                  "isDisabled": false,
+                  "isToggled": false,
+                  "toggledIcon": {
+                    "iconType": "redacted"
+                  },
+                  "toggledText": {
+                    "runs": [
+                      {
+                        "text": "redacted"
+                      }
+                    ]
+                  },
+                  "trackingParams": "redacted"
+                }
+              },
+              "shelfStyle": "redacted",
+              "trackingParams": "redacted"
+            }
+          }
+        }
+      }
+    }
+  }
+}

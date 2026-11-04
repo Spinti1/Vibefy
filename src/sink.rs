@@ -1632,9 +1632,8 @@ mod tests {
         assert_eq!(output.next(), Some(1.0));
 
         control.handle_player_event(&PlayerEvent::Seeked {
-            play_request_id: 1,
-            track_id: "spotify:track:14XWXWv5FoCbFzLksawpEe".to_string().unwrap(),
-            position_ms: 90_000,
+            track_id: "spotify:track:14XWXWv5FoCbFzLksawpEe".to_string(),
+            play_time_ms: 90_000,
         });
 
         // Rodio checks stop every 5 ms of output. After that, none of the
@@ -1660,41 +1659,14 @@ mod tests {
         control.register(&sink, Arc::clone(&interrupt));
         sink.append(chunk(500, &interrupt, &transport, &Queued::new()));
         assert_eq!(output.next(), Some(1.0));
-        let track_id = "spotify:track:14XWXWv5FoCbFzLksawpEe".to_string().unwrap();
-        let item = AudioItem {
-            track_id: track_id.clone(),
-            uri: track_id.to_uri(),
-            files: Default::default(),
-            name: "Next song".into(),
-            covers: vec![],
-            language: vec![],
-            duration_ms: 200_000,
-            is_explicit: false,
-            availability: Ok(()),
-            alternatives: None,
-            unique_fields: UniqueFields::Track {
-                artists: Default::default(),
-                album: "Album".into(),
-                album_artists: vec![],
-                popularity: 0,
-                number: 1,
-                disc_number: 1,
-            },
-        };
+        let track_id = "spotify:track:14XWXWv5FoCbFzLksawpEe".to_string();
         for event in [
             PlayerEvent::TrackChanged {
-                audio_item: Box::new(item),
+                old_track_id: "spotify:track:previous".into(),
+                new_track_id: track_id,
             },
-            PlayerEvent::PositionCorrection {
-                play_request_id: 1,
-                track_id: track_id.clone(),
-                position_ms: 100,
-            },
-            PlayerEvent::PositionChanged {
-                play_request_id: 1,
-                track_id,
-                position_ms: 200,
-            },
+            PlayerEvent::PositionCorrection { play_time_ms: 100 },
+            PlayerEvent::PositionChanged { play_time_ms: 200 },
         ] {
             control.handle_player_event(&event);
             assert!(output.by_ref().take(100).all(|sample| sample == 1.0));
@@ -1709,9 +1681,8 @@ mod tests {
         assert!(control.waiting_for_track());
 
         control.handle_player_event(&PlayerEvent::Seeked {
-            play_request_id: 1,
-            track_id: "spotify:track:14XWXWv5FoCbFzLksawpEe".to_string().unwrap(),
-            position_ms: 0,
+            track_id: "spotify:track:14XWXWv5FoCbFzLksawpEe".to_string(),
+            play_time_ms: 0,
         });
         assert!(!control.waiting_for_track());
         assert!(control.take_reset());

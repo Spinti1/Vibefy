@@ -1,0 +1,25 @@
+VIBEFY
+An independent music player by Spinti
+
+Website: https://usevibefy.online
+Source and releases: https://github.com/Spinti1/Vibefy
+
+This setup installs Vibefy for your Windows account. Updates preserve your
+existing application settings, connected accounts and library data.
+
+After installation, connect Spotify and YouTube in the app. Microsoft Edge
+WebView2 Runtime is required for the dedicated YouTube sign-in window.
+Service availability and account permissions depend on each provider.
+
+CREDITS
+Vibefy's native interface and application foundation come from Spotifast,
+created by Carmine Paolino and contributors. Vibefy is a separate project;
+it is not an official Spotifast, Spotify, Google or YouTube release.
+Additional projects and mod authors are listed in CREDITS.md and
+THIRD_PARTY_LICENSES.txt, installed with the app and available in About.
+
+WINDOWS SECURITY
+This release is not code-signed. Windows may display a SmartScreen warning.
+Open source and upstream components do not imply Microsoft certification.
+Get Vibefy only from the project links above. Release checksums verify file
+integrity; they do not replace publisher signing or guarantee safety.

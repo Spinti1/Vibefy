@@ -678,7 +678,16 @@ pub async fn fetch_with_fallback(
     let provider = async {
         match track_id(uri) {
             Some(id) => spicy(http, cache, id, key, refresh).await,
-            None => Ok(None),
+            None => {
+                if let Some(video) = uri.strip_prefix("vibefy:youtube:") {
+                    crate::music::Client::new(crate::http::Http::new(http.clone()))
+                        .lyrics(video)
+                        .await
+                        .map(|v| v.map(|l| Document::from_lyrics(l, "YouTube Music")))
+                } else {
+                    Ok(None)
+                }
+            }
         }
     };
     let fallback_request = async {
@@ -702,6 +711,35 @@ pub async fn fetch_with_fallback(
         }
     };
     select_sources(provider, fallback_request, more(http, query)).await
+}
+
+/// Start the session lookup alongside public providers. A slow Spotify session
+/// must not delay available timed lyrics, but remains eligible for missing/plain results.
+pub async fn fetch_with_exact_request(
+    http: &reqwest::Client,
+    cache: &Path,
+    uri: &str,
+    query: &Query,
+    key: &str,
+    refresh: bool,
+    exact: impl std::future::Future<Output = Option<Lyrics>>,
+) -> Result<Fetch> {
+    select_sources(
+        async {
+            fetch(http, cache, uri, query, key, refresh)
+                .await
+                .map(|f| f.document)
+        },
+        async {
+            Ok(tokio::time::timeout(TIMEOUT, exact)
+                .await
+                .ok()
+                .flatten()
+                .map(|lyrics| Document::from_lyrics(lyrics, "Spotify")))
+        },
+        async { Ok(None) },
+    )
+    .await
 }
 
 fn timed_or_instrumental(doc: &Document) -> bool {
@@ -734,22 +772,38 @@ async fn select_sources(
     // that are already available; cached Spicy word timing still wins.
     tokio::pin!(provider);
     tokio::pin!(fallback_request);
-    let (primary, lrclib) = tokio::select! {
-        primary = &mut provider => {
-            if let Ok(Some(doc)) = &primary
-                && timed_or_instrumental(doc)
-            {
-                return Ok(Fetch { document: primary?, notice: None });
+    let first_sources = async {
+        tokio::select! {
+            primary = &mut provider => {
+                if let Ok(Some(doc)) = &primary
+                    && timed_or_instrumental(doc)
+                {
+                    return (primary, Ok(None));
+                }
+                (primary, fallback_request.await)
             }
-            (primary, fallback_request.await)
+            fallback = &mut fallback_request => {
+                let primary = if fallback.as_ref().ok().and_then(Option::as_ref)
+                    .is_some_and(timed_or_instrumental) {
+                    tokio::time::timeout(Duration::from_millis(700), &mut provider).await
+                        .unwrap_or(Ok(None))
+                } else { provider.await };
+                (primary, fallback)
+            }
         }
-        fallback = &mut fallback_request => {
-            let primary = if fallback.as_ref().ok().and_then(Option::as_ref)
-                .is_some_and(timed_or_instrumental) {
-                tokio::time::timeout(Duration::from_millis(700), &mut provider).await
-                    .unwrap_or(Ok(None))
-            } else { provider.await };
-            (primary, fallback)
+    };
+    tokio::pin!(first_sources);
+    tokio::pin!(more_request);
+    let mut early_more = None;
+    let (primary, lrclib) = tokio::select! {
+        biased;
+        first = &mut first_sources => first,
+        more = &mut more_request => {
+            if let Ok(Some(doc)) = &more && timed_or_instrumental(doc) {
+                return Ok(Fetch { document: more?, notice: None });
+            }
+            early_more = Some(more);
+            first_sources.await
         }
     };
     let mut notice = None;
@@ -775,7 +829,11 @@ async fn select_sources(
             notice,
         });
     }
-    match more_request.await {
+    match if let Some(more) = early_more {
+        more
+    } else {
+        more_request.await
+    } {
         Ok(Some(doc)) => Ok(Fetch {
             document: prefer_timing(fallback, Some(doc)),
             notice,
@@ -875,6 +933,20 @@ mod selection_tests {
             assert!(!found.synced());
             assert!(!found.word_synced());
         }
+    }
+
+    #[tokio::test]
+    async fn more_timing_is_not_blocked_by_two_slow_sources() {
+        let found = tokio::time::timeout(
+            Duration::from_millis(200),
+            select_sources(std::future::pending(), std::future::pending(), async {
+                Ok(Some(doc("More", true)))
+            }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(found.document.unwrap().provider, "More");
     }
 
     #[tokio::test]

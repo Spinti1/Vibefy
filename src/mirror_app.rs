@@ -17,11 +17,7 @@ impl App {
         if self.mirror_observed.is_some() {
             self.backend.send(Command::Mirror {
                 serial: self.mirror_serial,
-                action: if std::mem::take(&mut self.music_accounts[0].enable_sync_after_connect) {
-                    crate::playlist_mirror::Action::Enable(true)
-                } else {
-                    crate::playlist_mirror::Action::Observe
-                },
+                action: crate::playlist_mirror::Action::Observe,
             });
         } else {
             self.backend.send(Command::StopMirror);

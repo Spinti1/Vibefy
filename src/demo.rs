@@ -371,6 +371,10 @@ fn json_fixture<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
 pub fn populate(app: &mut App) {
     app.backend.set_offline(true);
     app.offline = true;
+    // Demo screens represent an account that has already finished setup.
+    // No real account or browser session is read or created.
+    app.music_accounts[0].connected = true;
+    app.mirror.setup_complete = true;
     // A demo never reads the real login registration; it shows it off.
     app.autostart = Some(fastframe_autostart::State::Off);
     app.auth = AuthStatus::Connected {
@@ -378,6 +382,7 @@ pub fn populate(app: &mut App) {
     };
     app.local_device_id = Some("local-demo".into());
     app.local_ready = true;
+    app.local.connected = true;
     app.local_playback = crate::backend::LocalPlayback::Ready {
         device_id: "local-demo".into(),
     };
@@ -690,7 +695,6 @@ pub fn populate(app: &mut App) {
     ];
     app.home.top_songs_complete = true;
     app.home.top_songs_by_period_complete = [true, true, true];
-    app.home.recommendations = Loadable::Loaded(tracks.iter().skip(20).take(10).cloned().collect());
     app.home.made_for_you = Loadable::Loaded(playlists.iter().take(10).cloned().collect());
     app.home.top_mixes = Loadable::Loaded((0..TOP_MIXES.len()).map(top_mix).collect());
     // New releases: this autumn's records, newest first, and their songs.
@@ -2432,6 +2436,7 @@ mod tests {
         use egui::accesskit::{Action as AccessibleAction, Role};
         let (ctx, mut app) = accessible_app("by-you");
         app.settings.art_expanded = false;
+        app.open(Page::Settings);
         accessible_frame(&ctx, &mut app, vec![]);
         let tree = accessible_frame(&ctx, &mut app, vec![]);
         accessible_node(&tree, "Discover Weekly", Role::Button);
@@ -2573,7 +2578,6 @@ mod tests {
                 ("Playback position (%)", Role::Slider),
                 ("Volume (%)", Role::Slider),
                 ("Mute", Role::Button),
-                ("Connect to a device", Role::Button),
                 ("Queue", Role::Button),
                 ("Lyrics", Role::Button),
             ];
@@ -2880,7 +2884,7 @@ mod tests {
                 for (state, messages) in [
                     (
                         Loadable::Loading,
-                        vec![gettext(locale, "Loadingâ€¦").into_owned()],
+                        vec![gettext(locale, "Loading\u{2026}").into_owned()],
                     ),
                     (
                         Loadable::Failed("fixture {count} 42".into()),
@@ -2923,7 +2927,7 @@ mod tests {
             for (state, messages) in [
                 (
                     Loadable::Loading,
-                    vec![gettext(locale, "Loadingâ€¦").into_owned()],
+                    vec![gettext(locale, "Loading\u{2026}").into_owned()],
                 ),
                 (
                     Loadable::Failed("fixture {count} 42".into()),
@@ -2961,7 +2965,7 @@ mod tests {
                     None,
                     vec!["No recent plays", "Played songs appear here."],
                 ),
-                (true, None, vec!["Loadingâ€¦"]),
+                (true, None, vec!["Loading\u{2026}"]),
                 (false, Some("fixture failure".into()), vec!["Retry"]),
             ] {
                 app.recents.loading = loading;
@@ -3077,17 +3081,17 @@ mod tests {
             painted.iter().any(|(text, _)| text == wanted)
         };
         assert!(has(&painted, "Your podcasts"));
-        assert!(has(&painted, "20 min left â€¢ Rework"));
-        assert!(has(&painted, "New â€¢ Song Exploder"));
+        assert!(has(&painted, "20 min left \u{2022} Rework"));
+        assert!(has(&painted, "New \u{2022} Song Exploder"));
 
         let rework = app.home.podcasts[0].0.uri.clone();
         app.audiobook_shows.insert(rework);
         let exploder = app.home.podcasts[1].0.uri.clone();
         app.saved.insert(exploder, false);
         let painted = view_frame(&ctx, &mut app, vec![], view);
-        assert!(!has(&painted, "20 min left â€¢ Rework"));
-        assert!(!has(&painted, "New â€¢ Song Exploder"));
-        assert!(has(&painted, "43 min left â€¢ Darknet Diaries"));
+        assert!(!has(&painted, "20 min left \u{2022} Rework"));
+        assert!(!has(&painted, "New \u{2022} Song Exploder"));
+        assert!(has(&painted, "43 min left \u{2022} Darknet Diaries"));
 
         app.home.podcasts.clear();
         let painted = view_frame(&ctx, &mut app, vec![], view);
@@ -3131,7 +3135,7 @@ mod tests {
         let painted = view_frame(&ctx, &mut app, vec![], crate::ui::home::show);
         let left = painted
             .iter()
-            .find(|(text, _)| text == "20 min left â€¢ Rework")
+            .find(|(text, _)| text == "20 min left \u{2022} Rework")
             .map(|(_, rect)| rect.center())
             .expect("the started episode's card");
         frame(&ctx, &mut app, vec![egui::Event::PointerMoved(left)]);
@@ -3697,7 +3701,7 @@ mod tests {
             let button = accessible_node(
                 &tree,
                 if setup {
-                    "Set up personal app"
+                    "Developer setup (optional)"
                 } else {
                     "Close banner"
                 },
@@ -3773,7 +3777,7 @@ mod tests {
     }
 
     #[test]
-    fn personal_app_intro_can_be_dismissed_or_open_setup_with_keyboard_focus() {
+    fn personal_app_intro_can_be_dismissed_or_open_setup_without_focusing_a_removed_field() {
         use egui::accesskit::{Action as AccessibleAction, Role};
 
         for setup in [false, true] {
@@ -3801,7 +3805,7 @@ mod tests {
                 assert_eq!(app.page(), &Page::Settings);
                 accessible_frame(&ctx, &mut app, vec![]);
                 assert!(
-                    ctx.memory(|memory| memory.has_focus(egui::Id::new("personal-web-client-id")))
+                    !ctx.memory(|memory| memory.has_focus(egui::Id::new("personal-web-client-id")))
                 );
             }
             app.backend.shutdown();
@@ -4089,8 +4093,8 @@ mod tests {
         );
         accessible_frame(&ctx, &mut app, vec![]);
         assert!(
-            ctx.memory(|memory| memory.has_focus(egui::Id::new("personal-web-client-id"))),
-            "the Client ID field takes focus once its row is visible"
+            !ctx.memory(|memory| memory.has_focus(egui::Id::new("personal-web-client-id"))),
+            "the removed Client ID field must not take keyboard focus"
         );
         app.backend.shutdown();
     }
@@ -4162,16 +4166,13 @@ mod tests {
     fn settings_search_never_shows_a_section_for_an_unavailable_row() {
         let (ctx, mut app) = accessible_app("settings-search-availability");
         let text = settings_text(&ctx, &mut app, "Show in taskbar");
-        assert_eq!(
-            text.iter().any(|text| text == "Winamp skins"),
-            cfg!(windows)
-        );
+        assert_eq!(text.iter().any(|text| text == "Mini player"), cfg!(windows));
         if !cfg!(windows) {
             assert!(text.iter().any(|text| text.starts_with("No settings for")));
         }
         app.demo_windows_controls = true;
         let text = settings_text(&ctx, &mut app, "Show in taskbar");
-        assert!(text.iter().any(|text| text == "Winamp skins"));
+        assert!(text.iter().any(|text| text == "Mini player"));
         assert!(text.iter().any(|text| text == "Show in taskbar"));
 
         app.settings.web_client_id = None;
@@ -4182,31 +4183,27 @@ mod tests {
         app.settings.web_client_id = Some("test-client".into());
         app.web_app = Some("test-client".into());
         let text = settings_text(&ctx, &mut app, "Personal app ready");
-        assert!(text.iter().any(|text| text == "Personal app ready"));
+        assert!(!text.iter().any(|text| text == "Account"));
+        assert!(text.iter().any(|text| text.starts_with("No settings for")));
         app.backend.shutdown();
     }
 
     #[test]
-    fn create_an_app_row_hides_once_the_personal_app_is_ready() {
-        let (ctx, mut app) = accessible_app("settings-create-app");
-        app.settings.web_client_id = None;
-        app.web_app = None;
-        let text = settings_text(&ctx, &mut app, "Account");
-        assert!(text.iter().any(|text| text == "Create an app"));
-
-        app.settings.web_client_id = Some("test-client".into());
-        let text = settings_text(&ctx, &mut app, "Account");
-        assert!(text.iter().any(|text| text == "Create an app"));
-        assert!(
-            text.iter()
-                .any(|text| text == "Authorize your personal app")
-        );
-
-        app.web_app = Some("test-client".into());
-        let text = settings_text(&ctx, &mut app, "Account");
-        assert!(text.iter().any(|text| text == "Personal app ready"));
-        assert!(!text.iter().any(|text| text == "Create an app"));
-        assert!(!text.iter().any(|text| text == "Setup guide"));
+    fn settings_do_not_offer_the_removed_personal_app_setup() {
+        let (ctx, mut app) = accessible_app("settings-no-personal-app");
+        for client in [None, Some("test-client".to_owned())] {
+            app.settings.web_client_id = client.clone();
+            app.web_app = client;
+            let text = settings_text(&ctx, &mut app, "Account");
+            for removed in [
+                "Create an app",
+                "Authorize your personal app",
+                "Personal app ready",
+                "Setup guide",
+            ] {
+                assert!(!text.iter().any(|text| text == removed), "{removed}");
+            }
+        }
         app.backend.shutdown();
     }
 
@@ -4737,15 +4734,12 @@ mod tests {
         let (ctx, mut app) = accessible_app("x11-taskbar-setting");
         app.taskbar_hiding_supported = true;
         let text = settings_text(&ctx, &mut app, "Show in taskbar");
-        assert!(text.iter().any(|text| text == "Winamp skins"));
+        assert!(text.iter().any(|text| text == "Mini player"));
         assert!(text.iter().any(|text| text == "Show in taskbar"));
 
         app.taskbar_hiding_supported = false;
         let text = settings_text(&ctx, &mut app, "Show in taskbar");
-        assert_eq!(
-            text.iter().any(|text| text == "Winamp skins"),
-            cfg!(windows)
-        );
+        assert_eq!(text.iter().any(|text| text == "Mini player"), cfg!(windows));
         app.backend.shutdown();
     }
 
@@ -4779,7 +4773,7 @@ mod tests {
     }
 
     #[test]
-    fn an_idle_sonos_in_the_picker_transfers_instead_of_authorizing() {
+    fn discovered_receiver_uses_activation_without_legacy_sonos_transfer() {
         for palette in [
             crate::theme::Palette::dark(),
             crate::theme::Palette::light(),
@@ -4818,11 +4812,11 @@ mod tests {
                 &mut app,
                 pointer_click(office.center(), egui::PointerButton::Primary),
             );
-            assert!(app.actions.iter().any(
+            assert!(!app.actions.iter().any(
                 |action| matches!(action, crate::model::Action::Transfer(id) if id == "office")
             ));
             assert!(
-                !app.actions
+                app.actions
                     .iter()
                     .any(|action| matches!(action, crate::model::Action::ActivateReceiver(_)))
             );
@@ -5424,6 +5418,7 @@ mod tests {
         let (ctx, mut app) = accessible_app("player-bar-beside-artist");
         app.settings.player_bar_vis_click = true;
         app.local = LocalState {
+            connected: true,
             playback: Playback::Playing,
             track: Some(LocalTrack {
                 uri: "spotify:track:long".into(),
@@ -5493,6 +5488,7 @@ mod tests {
             },
         ];
         app.local = LocalState {
+            connected: true,
             playback: Playback::Playing,
             track: Some(LocalTrack {
                 uri: "spotify:track:uncached".into(),
@@ -5597,7 +5593,7 @@ mod tests {
                 .filter(|(label, _)| label.starts_with("Artist "))
             {
                 let separator = text.iter().find(|(label, rect)| {
-                    label == "â€¢"
+                    label == "\u{2022}"
                         && (rect.center().y - artist.center().y).abs() < 3.0
                         && rect.left() >= artist.right() - 0.1
                 });
@@ -5610,7 +5606,10 @@ mod tests {
                     );
                 }
             }
-            assert_eq!(text.iter().filter(|(label, _)| label == "â€¢").count(), 4);
+            assert_eq!(
+                text.iter().filter(|(label, _)| label == "\u{2022}").count(),
+                4
+            );
         }
         app.backend.shutdown();
     }
@@ -5993,7 +5992,7 @@ mod tests {
         for (title, detail, view) in [
             (
                 "Late night focus",
-                "Carmine",
+                "Demo listener",
                 playlist as fn(&mut App, &mut egui::Ui),
             ),
             ("Fragments", "Bonobo", album),
@@ -6004,7 +6003,7 @@ mod tests {
             let title = painted.iter().find(|(text, _)| text == title).unwrap().1;
             assert!(painted.iter().any(|(text, _)| text.contains(detail)));
             // The songs to come are skeleton rows, which screen readers
-            // hear as Loadingâ€¦, below the known header (#674).
+            // hear as Loading\u{2026}, below the known header (#674).
             let mut output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -6021,13 +6020,14 @@ mod tests {
                 .nodes
                 .iter()
                 .find(|(_, node)| {
-                    node.label() == Some("Loadingâ€¦") || node.value() == Some("Loadingâ€¦")
+                    node.label() == Some("Loading\u{2026}")
+                        || node.value() == Some("Loading\u{2026}")
                 })
                 .and_then(|(_, node)| node.bounds())
                 .expect("a loading skeleton");
             assert!(loading.y0 as f32 > title.bottom());
             assert!(
-                !painted.iter().any(|(text, _)| text == "Loadingâ€¦"),
+                !painted.iter().any(|(text, _)| text == "Loading\u{2026}"),
                 "no spinner row"
             );
         }
@@ -6035,7 +6035,7 @@ mod tests {
     }
 
     /// Home's shelves wait in card-shaped skeletons, not a spinner row, each
-    /// heard as Loadingâ€¦ (#674).
+    /// heard as Loading\u{2026} (#674).
     #[test]
     fn loading_home_shelves_show_card_skeletons() {
         let (ctx, mut app) = accessible_app("loading-home");
@@ -6045,7 +6045,7 @@ mod tests {
         let view = crate::ui::home::show;
         view_frame(&ctx, &mut app, vec![], view);
         let painted = view_frame(&ctx, &mut app, vec![], view);
-        assert!(!painted.iter().any(|(text, _)| text == "Loadingâ€¦"));
+        assert!(!painted.iter().any(|(text, _)| text == "Loading\u{2026}"));
         let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -6062,7 +6062,7 @@ mod tests {
             .nodes
             .iter()
             .filter(|(_, node)| {
-                node.value() == Some("Loadingâ€¦") || node.label() == Some("Loadingâ€¦")
+                node.value() == Some("Loading\u{2026}") || node.label() == Some("Loading\u{2026}")
             })
             .count();
         assert_eq!(skeletons, 3, "one per loading shelf");
@@ -6085,6 +6085,15 @@ mod tests {
         }
 
         let (ctx, mut app) = accessible_app("failed-collections");
+        app.network_reachable = true;
+        // Cached songs intentionally remain usable when metadata refresh fails.
+        // This case checks the retry view before any songs have been cached.
+        app.playlist_pages
+            .get_mut("pl1")
+            .unwrap()
+            .items
+            .items
+            .clear();
         app.playlist_pages.get_mut("pl1").unwrap().playlist =
             Loadable::Failed("Connection interrupted".into());
         app.album_pages.get_mut("alb0").unwrap().album =
@@ -6097,7 +6106,7 @@ mod tests {
         for (title, detail, view) in [
             (
                 "Late night focus",
-                "Carmine",
+                "Demo listener",
                 playlist as fn(&mut App, &mut egui::Ui),
             ),
             ("Fragments", "Bonobo", album),
@@ -6204,7 +6213,7 @@ mod tests {
             &ctx,
             &mut app,
             pointer_click(
-                sidebar_text(&painted, "EspaÃ±ol").center(),
+                sidebar_text(&painted, "Espa\u{00f1}ol").center(),
                 egui::PointerButton::Primary,
             ),
             App::frame_ui,
@@ -6226,7 +6235,7 @@ mod tests {
             .find(|(node_id, _)| *node_id == id)
             .unwrap()
             .1;
-        assert_eq!(node.value(), Some("EspaÃ±ol"));
+        assert_eq!(node.value(), Some("Espa\u{00f1}ol"));
 
         app.apply(Action::SetLanguage(LanguageChoice::System), &ctx);
         assert_eq!(app.settings.language, LanguageChoice::System);
@@ -6828,7 +6837,7 @@ mod tests {
                 SearchFilter::Playlists,
                 playlist(1).name,
                 playlist(1).uri,
-                vec!["Edit details", "Delete"],
+                vec!["Edit details", "Delete from Spotify"],
             ),
             (
                 SearchFilter::Podcasts,
@@ -6867,15 +6876,11 @@ mod tests {
     }
 
     #[test]
-    fn home_json_hides_only_the_chosen_recommendation_shelves() {
+    fn home_json_hides_only_the_made_for_you_shelves() {
         let (ctx, mut app) = accessible_app("home-json-visibility");
         let view = crate::ui::home::show;
-        for (made_for_you, recommendations) in
-            [(true, true), (false, true), (true, false), (false, false)]
-        {
-            app.settings.home = serde_json::from_str(&format!(
-                r#"{{"made_for_you":{{"visible":{made_for_you}}},"recommendations":{{"visible":{recommendations}}}}}"#
-            )).unwrap();
+        for made_for_you in [true, false] {
+            app.settings.home.made_for_you.visible = made_for_you;
             let size = egui::vec2(1280.0, 3200.0);
             view_frame_sized(&ctx, &mut app, vec![], view, size);
             let text = view_frame_sized(&ctx, &mut app, vec![], view, size);
@@ -6883,16 +6888,15 @@ mod tests {
                 ("Made for you", made_for_you),
                 ("Your top mixes", made_for_you),
                 ("New releases", true),
-                ("Recommended for you", recommendations),
                 ("Liked Songs", true),
                 ("Recently played", true),
                 ("Your top artists", true),
-                ("Your top songs", true),
+                ("Hidden playlists", true),
             ] {
                 assert_eq!(
                     text.iter().any(|(text, _)| text == label),
                     expected,
-                    "{label}, made_for_you={made_for_you}, recommendations={recommendations}"
+                    "{label}, made_for_you={made_for_you}"
                 );
             }
         }
@@ -6934,7 +6938,7 @@ mod tests {
                 crate::util::greeting(crate::i18n::Locale::English),
                 playlist(1).name,
                 playlist(1).uri,
-                vec!["Edit details", "Delete"],
+                vec!["Edit details", "Delete from Spotify"],
             ),
             (
                 crate::util::greeting(crate::i18n::Locale::English),
@@ -7224,7 +7228,7 @@ mod tests {
     /// Every line of the sign-in card is drawn whole, without a scroll bar,
     /// in each state at the smallest main window and a usual one (#782).
     #[test]
-    fn the_sign_in_card_fits_what_it_shows_without_scrolling() {
+    fn sign_in_actions_remain_reachable_at_the_minimum_window_size() {
         let (ctx, mut app) = accessible_app("sign-in-card");
         app.backend.set_offline(true);
         let states = [
@@ -7262,51 +7266,48 @@ mod tests {
                 }
                 output.unwrap()
             };
-            // The card's title, and that no text in the card is cut off.
-            let title = |output: &egui::FullOutput, state: &AuthStatus| {
-                let mut title = None;
-                for clipped in &output.shapes {
-                    if let egui::epaint::Shape::Text(text) = &clipped.shape {
-                        let rect = text.galley.rect.translate(text.pos.to_vec2());
-                        assert!(
-                            clipped.clip_rect.expand(0.5).contains_rect(rect),
-                            "{:?} is cut off at {size:?} in {state:?}",
-                            text.galley.job.text
-                        );
-                        if text.galley.job.text == "Spotifast" {
-                            title = Some(rect);
-                        }
-                    }
-                }
-                title.unwrap_or_else(|| panic!("the card was drawn in {state:?}"))
-            };
             for state in &states {
                 app.auth = state.clone();
                 app.user = None;
-                let before = title(&draw(&mut app, Vec::new()), state);
-                // A card with nothing hidden has nothing to scroll, and so
-                // shows no scroll bar.
-                let wheel = vec![
-                    egui::Event::PointerMoved(before.center()),
-                    egui::Event::MouseWheel {
-                        unit: egui::MouseWheelUnit::Point,
-                        delta: egui::vec2(0.0, -400.0),
-                        modifiers: egui::Modifiers::NONE,
-                        phase: egui::TouchPhase::Move,
-                    },
-                ];
-                draw(&mut app, wheel);
-                let after = title(&draw(&mut app, Vec::new()), state);
-                assert_eq!(before, after, "the card scrolled at {size:?} in {state:?}");
-                // Back to the top for the next state.
-                let wheel = vec![egui::Event::MouseWheel {
-                    unit: egui::MouseWheelUnit::Point,
-                    delta: egui::vec2(0.0, 400.0),
-                    modifiers: egui::Modifiers::NONE,
-                    phase: egui::TouchPhase::Move,
-                }];
-                draw(&mut app, wheel);
-                draw(&mut app, Vec::new());
+                let mut visible = std::collections::HashSet::new();
+                // Long error explanations may scroll; both sign-in steps and
+                // cancellation must remain reachable at the minimum size.
+                for delta in std::iter::once(2000.0).chain(std::iter::repeat_n(-40.0, 40)) {
+                    let output = draw(
+                        &mut app,
+                        vec![
+                            egui::Event::PointerMoved(egui::pos2(size.x / 2.0, size.y / 2.0)),
+                            egui::Event::MouseWheel {
+                                unit: egui::MouseWheelUnit::Point,
+                                delta: egui::vec2(0.0, delta),
+                                modifiers: egui::Modifiers::NONE,
+                                phase: egui::TouchPhase::Move,
+                            },
+                        ],
+                    );
+                    for clipped in &output.shapes {
+                        if let egui::epaint::Shape::Text(text) = &clipped.shape {
+                            let rect = text.galley.rect.translate(text.pos.to_vec2());
+                            if clipped.clip_rect.expand(0.5).contains_rect(rect) {
+                                visible.insert(text.galley.job.text.clone());
+                            }
+                        }
+                    }
+                }
+                let required: &[&str] = match state {
+                    AuthStatus::WaitingForBrowser { .. } => &["Cancel"],
+                    AuthStatus::Connecting => &["Connecting to Spotify\u{2026}"],
+                    _ => &[
+                        "Step 1 · Sign in with Spotify",
+                        "Step 2 · Sign in with YouTube",
+                    ],
+                };
+                for label in required {
+                    assert!(
+                        visible.contains(*label),
+                        "{label} is unreachable at {size:?} in {state:?}"
+                    );
+                }
             }
         }
         app.backend.shutdown();
@@ -8368,7 +8369,7 @@ mod tests {
                 }],
             );
             assert!(!egui::DragAndDrop::has_any_payload(&ctx));
-            if app.playlist_busy {
+            if app.playlist_pages["pl1"].items.items.len() == before + count {
                 dropped = true;
                 break;
             }
@@ -10605,6 +10606,7 @@ mod tests {
         for compact in [false, true] {
             let (ctx, mut app) = accessible_app(&format!("sidebar-drag-scroll-{compact}"));
             app.settings.sidebar_compact = compact;
+            app.open(Page::Settings);
             app.rootlist.clear();
             app.settings.pinned_contexts.clear();
             let playlists: Vec<_> = (0..60)
@@ -11069,7 +11071,7 @@ mod tests {
                 (None, DownloadState::Idle),
                 (Some("Update to 9.9.9"), DownloadState::Idle),
                 (
-                    Some("Downloading updateâ€¦"),
+                    Some("Downloading update\u{2026}"),
                     DownloadState::Downloading {
                         received: 1,
                         total: 2,
@@ -11213,10 +11215,9 @@ mod tests {
         let voicemeeter = "VoiceMeeter Input (VB-Audio VoiceMeeter VAIO)";
         accessible_frame(&ctx, &mut app, vec![]);
         assert!(
-            !listed(&ctx, &mut app, voicemeeter),
-            "listed only on request"
+            listed(&ctx, &mut app, voicemeeter),
+            "available immediately when the output picker opens"
         );
-        click(&ctx, &mut app, "Audio output");
         assert!(listed(&ctx, &mut app, "System default"));
         assert!(
             app.output_devices.get().is_some(),
@@ -11245,17 +11246,7 @@ mod tests {
         let speakers = demo_outputs()[0].clone();
         app.settings.audio_device = Some(speakers.name.clone());
         accessible_frame(&ctx, &mut app, vec![]);
-        let tree = accessible_frame(&ctx, &mut app, vec![]);
-        let node = accessible_node(&tree, "Audio output", egui::accesskit::Role::Button);
-        accessible_frame(
-            &ctx,
-            &mut app,
-            vec![accessible_action(
-                node,
-                egui::accesskit::Action::Click,
-                None,
-            )],
-        );
+        accessible_frame(&ctx, &mut app, vec![]);
         let tree = accessible_frame(&ctx, &mut app, vec![]);
         let rows = tree
             .nodes

@@ -173,11 +173,6 @@ pub enum ApiRequest {
     TopArtists {
         generation: u64,
     },
-    Recommendations {
-        seed_tracks: Vec<String>,
-        seed_artists: Vec<String>,
-        generation: u64,
-    },
     MadeForYou {
         generation: u64,
         force: bool,
@@ -404,7 +399,6 @@ impl ApiRequest {
                 | Self::RecentlyPlayed { .. }
                 | Self::TopTracks { .. }
                 | Self::TopArtists { .. }
-                | Self::Recommendations { .. }
                 | Self::MadeForYou { .. }
                 | Self::NewReleases { .. }
                 | Self::NewReleaseTracks { .. }
@@ -444,10 +438,6 @@ pub enum ApiResponse {
     TopArtists {
         generation: u64,
         result: ApiResult<Vec<Artist>>,
-    },
-    Recommendations {
-        generation: u64,
-        result: ApiResult<Vec<Track>>,
     },
     MadeForYou {
         generation: u64,
@@ -772,6 +762,9 @@ pub enum Command {
     },
     AddonCancelTempo,
     AddonCancel,
+    LoadModPackages(Vec<crate::addons::Id>),
+    InstallModPackage(crate::addons::Id),
+    RemoveModPackage(crate::addons::Id),
     AddonFetch {
         request: u64,
         query: crate::addons::Request,
@@ -784,10 +777,6 @@ pub enum Command {
     Autostart(AutostartRequest),
     /// Read the names of this computer's audio outputs, off the UI thread.
     ListOutputDevices,
-    ProxyRestored {
-        lease: CredentialLease,
-        result: Result<crate::credentials::Loaded, crate::credentials::Error>,
-    },
     CredentialsRestored {
         slot: CredentialSlot,
         lease: CredentialLease,
@@ -825,12 +814,6 @@ pub enum Command {
     AuthorizePlayback,
     /// Reload the engine config (audio settings changed).
     RestartEngine(EngineConfig),
-    /// Rebuild the HTTP client. Restart local playback only when its HTTP
-    /// proxy changed; Off, System, and SOCKS5 share a direct engine connection.
-    ApplyProxy {
-        request: u64,
-        config: ProxyConfig,
-    },
     Player(PlayerCommand),
     Api(ApiRequest),
     ApiFinished {
@@ -1097,6 +1080,20 @@ pub enum Event {
         recording: String,
         bpm: Option<f32>,
     },
+    ModPackagesLoaded(
+        std::collections::BTreeMap<
+            crate::addons::Id,
+            Result<std::sync::Arc<crate::mod_packages::Guest>, String>,
+        >,
+    ),
+    ModPackageInstalled {
+        id: crate::addons::Id,
+        result: Result<(), String>,
+    },
+    ModPackageRemoved {
+        id: crate::addons::Id,
+        result: Result<(), String>,
+    },
     AddonFetched {
         request: u64,
         result: Result<crate::addons::Collection, String>,
@@ -1111,17 +1108,6 @@ pub enum Event {
     LocalFiles {
         folder: std::path::PathBuf,
         uris: Arc<std::collections::HashMap<String, std::path::PathBuf>>,
-    },
-    ProxyRestored {
-        config: ProxyConfig,
-        password: Option<crate::credentials::ProxyPassword>,
-    },
-    ProxyPasswordStored,
-    ProxyStorageFailed(crate::credentials::Error),
-    ProxyApplied {
-        request: u64,
-        config: ProxyConfig,
-        result: Result<bool, String>,
     },
     UpdateSupport(Result<crate::updates::Installation, String>),
     UpdateProgress {
@@ -1361,13 +1347,11 @@ impl Backend {
         let (event_tx, event_rx) = std::sync::mpsc::channel();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
-            .thread_name("spotifast-runtime")
+            .thread_name("vibefy-runtime")
             .enable_all()
             .build()
             .expect("unable to start the async runtime");
-        let http = if restore_sign_in {
-            Http::unavailable("Restoring proxy settings".into())
-        } else {
+        let http = {
             Http::from_proxy(&engine_config.proxy).unwrap_or_else(|error| {
                 let _ = event_tx.send(Event::Error(format!(
                     "Network configuration failed: {error}"
@@ -1382,7 +1366,7 @@ impl Backend {
         let worker_art = art.clone();
         let worker_commands = command_tx.clone();
         let thread = std::thread::Builder::new()
-            .name("spotifast-backend".to_string())
+            .name("vibefy-backend".to_string())
             .spawn(move || {
                 runtime.block_on(async move {
                     let mut worker = Worker::new(
@@ -2004,20 +1988,15 @@ struct Worker {
     /// network returns.
     pending_playback_grant: Option<Credentials>,
     restore_pending: [bool; 3],
-    restoring_proxy: bool,
     addon_task: Option<tokio::task::JoinHandle<()>>,
     music_task: Option<tokio::task::JoinHandle<()>>,
     music_art_task: Option<tokio::task::JoinHandle<()>>,
     music: crate::music::Client,
     tempo_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    waiting_for_proxy: VecDeque<Command>,
     spotify_restore_started: bool,
-    proxy_revision: u64,
     authorization_attempt: u64,
     session: watch::Sender<u64>,
     engine_config: EngineConfig,
-    /// The resolved proxy handed to the current or in-flight engine connection.
-    engine_proxy: Option<reqwest::Url>,
     web_client_id: Option<String>,
     http: Http,
     /// Friends' names and avatars and their playlists' names, kept between
@@ -2140,21 +2119,17 @@ impl Worker {
             playback_grant: None,
             pending_playback_grant: None,
             restore_pending: [false; 3],
-            restoring_proxy: false,
             addon_task: None,
             music_task: None,
             peek: None,
             music_art_task: None,
             music: crate::music::Client::new(http.clone()),
             tempo_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            waiting_for_proxy: VecDeque::new(),
             spotify_restore_started: false,
-            proxy_revision: 0,
             authorization_attempt: 0,
             session: watch::channel(0).0,
             dirs,
             engine_config,
-            engine_proxy: None,
             web_client_id,
             api: Arc::new(ApiGateway::new(http.clone(), activity)),
             made_for_you: Arc::new(crate::made_for_you::MadeForYou::new(http.clone())),
@@ -2207,143 +2182,6 @@ impl Worker {
 
     /// Build before replacing either transport configuration. A rejected
     /// change leaves the existing connection in place and is reported to the UI.
-    fn apply_proxy(&mut self, proxy: ProxyConfig) -> Result<bool, String> {
-        let client = crate::http::build_client(&proxy)?;
-        let restart = self.engine_proxy != proxy.librespot_url();
-        self.http.replace(client);
-        self.engine_config.proxy = proxy;
-        if let Some(handle) = self.mirror.take() {
-            let serial = handle.serial;
-            handle.task.abort();
-            self.mirror_action(serial, crate::playlist_mirror::Action::Observe);
-        }
-        Ok(restart)
-    }
-
-    /// Applies a proxy, then signs in with `sign_in`'s Client ID when that
-    /// is the sign-in screen's button.
-    fn change_proxy(&mut self, request: u64, proxy: ProxyConfig, sign_in: Option<Option<String>>) {
-        let result = self.apply_proxy(proxy.clone());
-        if result.as_ref().is_ok_and(|restart| *restart) {
-            self.replace_engine();
-        }
-        let applied = result.is_ok();
-        if applied {
-            self.proxy_revision = request;
-        }
-        self.emit(Event::ProxyApplied {
-            request,
-            config: proxy.clone(),
-            result,
-        });
-        if applied {
-            self.persist_proxy_password(&proxy);
-            self.finish_proxy_restore();
-            if let Some(client_id) = sign_in {
-                self.sign_in(client_id);
-            }
-        }
-    }
-
-    fn persist_proxy_password(&mut self, proxy: &ProxyConfig) {
-        if !matches!(proxy, ProxyConfig::Http(_) | ProxyConfig::Socks(_)) {
-            // Off/System retain the saved manual password for later use.
-            return;
-        }
-        let events = self.events.clone();
-        let waker = self.waker.clone();
-        let pending = if let Some(password) = proxy.password_record() {
-            self.credentials.invalidate(CredentialSlot::Proxy);
-            let lease = self.credentials.lease(CredentialSlot::Proxy);
-            let saving = lease.save(StoredGrant::Proxy(password));
-            (lease, saving, true)
-        } else {
-            if let Err(error) = self.credentials.revoke(CredentialSlot::Proxy) {
-                self.emit(Event::ProxyStorageFailed(error));
-                return;
-            }
-            // The durable revocation marker already prevents a failed delete
-            // from restoring an old password. The UI can now scrub legacy JSON.
-            self.emit(Event::ProxyPasswordStored);
-            let lease = self.credentials.lease(CredentialSlot::Proxy);
-            let deleting = lease.delete();
-            (lease, deleting, false)
-        };
-        tokio::spawn(async move {
-            let (lease, operation, saving) = pending;
-            let result = operation.await;
-            if !lease.current() {
-                return;
-            }
-            match result {
-                Ok(()) if saving => {
-                    let _ = events.send(Event::ProxyPasswordStored);
-                }
-                Ok(()) => {}
-                Err(error) if error != crate::credentials::Error::Stale => {
-                    let _ = events.send(Event::ProxyStorageFailed(error));
-                }
-                Err(_) => {}
-            }
-            waker.wake();
-        });
-    }
-
-    fn on_proxy_restored(
-        &mut self,
-        lease: CredentialLease,
-        result: Result<crate::credentials::Loaded, crate::credentials::Error>,
-    ) {
-        if !lease.current() {
-            return;
-        }
-        let (password, protected) = match result {
-            Ok(loaded) => {
-                if let Some(error) = loaded.warning {
-                    self.emit(Event::ProxyStorageFailed(error));
-                }
-                let password = match loaded.grant {
-                    Some(StoredGrant::Proxy(password)) => Some(password),
-                    _ => None,
-                };
-                (password, loaded.warning.is_none())
-            }
-            Err(error) => {
-                self.emit(Event::ProxyStorageFailed(error));
-                (None, false)
-            }
-        };
-        if self.proxy_revision == 0 {
-            let mut config = self.engine_config.proxy.clone();
-            if let Some(password) = &password {
-                config.restore_password(password);
-            }
-            if let Err(error) = self.apply_proxy(config.clone()) {
-                self.http.block(error.clone());
-                config = ProxyConfig::Invalid(error.clone());
-                self.engine_config.proxy = config.clone();
-                self.emit(Event::Error(format!(
-                    "Network configuration failed: {error}"
-                )));
-            }
-            self.emit(Event::ProxyRestored { config, password });
-        }
-        if protected {
-            self.emit(Event::ProxyPasswordStored);
-        }
-        self.finish_proxy_restore();
-    }
-
-    fn finish_proxy_restore(&mut self) {
-        if !std::mem::take(&mut self.restoring_proxy) {
-            return;
-        }
-        self.restore_spotify_grants();
-        for command in self.waiting_for_proxy.drain(..) {
-            let _ = self.commands.send(command);
-        }
-    }
-
     async fn run(&mut self, mut commands: mpsc::UnboundedReceiver<Command>) {
         let (cache_writes, cache_write_receiver) = mpsc::channel(1);
         let cache_writer = tokio::spawn(store_playlist_caches(
@@ -2352,21 +2190,6 @@ impl Worker {
             self.waker.clone(),
         ));
         while let Some(command) = commands.recv().await {
-            if self.restoring_proxy
-                && !matches!(
-                    &command,
-                    Command::ProxyRestored { .. }
-                        | Command::MaintainCache(_)
-                        | Command::ApplyProxy { .. }
-                        | Command::SignIn { .. }
-                        | Command::SignOut
-                        | Command::CancelSignIn
-                        | Command::Shutdown
-                )
-            {
-                self.waiting_for_proxy.push_back(command);
-                continue;
-            }
             match command {
                 Command::TrackPeek(session) => {
                     if let Some(old) = self.peek.replace(Arc::clone(&session)) {
@@ -2640,6 +2463,54 @@ impl Worker {
                         self.emit(Event::Playback(LocalPlayback::Unavailable));
                     }
                 }
+                Command::LoadModPackages(ids) => {
+                    let root = self.dirs.state.clone();
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        match tokio::task::spawn_blocking(move || {
+                            crate::mod_packages::load_all(&root, ids)
+                        })
+                        .await
+                        {
+                            Ok(result) => {
+                                let _ = events.send(Event::ModPackagesLoaded(result));
+                            }
+                            Err(error) => {
+                                let _ = events
+                                    .send(Event::Error(format!("Could not load mods: {error}")));
+                            }
+                        }
+                        waker.wake();
+                    });
+                }
+                Command::InstallModPackage(id) => {
+                    let root = self.dirs.state.clone();
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        let result = crate::mod_packages::install(root, id)
+                            .await
+                            .map_err(|e| e.to_string());
+                        let _ = events.send(Event::ModPackageInstalled { id, result });
+                        waker.wake();
+                    });
+                }
+                Command::RemoveModPackage(id) => {
+                    let root = self.dirs.state.clone();
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let path = crate::mod_packages::package_path(&root, id);
+                        let result = match std::fs::remove_file(path) {
+                            Ok(()) => Ok(()),
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                            Err(e) => Err(e.to_string()),
+                        };
+                        let _ = events.send(Event::ModPackageRemoved { id, result });
+                        waker.wake();
+                    });
+                }
                 Command::AddonCancel => {
                     if let Some(task) = self.addon_task.take() {
                         task.abort();
@@ -2712,7 +2583,6 @@ impl Worker {
                         }
                     });
                 }
-                Command::ProxyRestored { lease, result } => self.on_proxy_restored(lease, result),
                 Command::CredentialsRestored {
                     slot,
                     lease,
@@ -2830,7 +2700,10 @@ impl Worker {
                     request,
                     config,
                     client_id,
-                } => self.change_proxy(request, config, Some(client_id)),
+                } => {
+                    let _ = (request, config);
+                    self.sign_in(client_id);
+                }
                 Command::CancelSignIn => {
                     self.authorization_attempt += 1;
                     if let Some(cancel) = self.cancel_signin.take() {
@@ -2870,7 +2743,6 @@ impl Worker {
                     self.engine_config = config;
                     self.replace_engine();
                 }
-                Command::ApplyProxy { request, config } => self.change_proxy(request, config, None),
                 Command::Player(command) => {
                     if matches!(&command, PlayerCommand::Load(_)) {
                         self.resume = None;
@@ -3074,11 +2946,12 @@ impl Worker {
                     lease: _,
                     attempt,
                 } => {
-                    if self.signed_in {
-                        self.on_engine_connected(session_generation, *engine, error, attempt);
-                    } else if let Some(engine) = *engine {
-                        engine.shutdown();
-                    }
+                    // The YouTube session can restore before Spotify's /me
+                    // verification (which may be cooling down). The completion
+                    // handler owns the account/generation/attempt checks, just
+                    // as resume_engine does. Do not drop this result and leave
+                    // engine_busy stuck true while Spotify is still verifying.
+                    self.on_engine_connected(session_generation, *engine, error, attempt);
                 }
                 Command::NetworkStatus(reachable) => {
                     self.network_reachable = reachable;
@@ -3500,13 +3373,7 @@ impl Worker {
     // ---- Web API sign-in --------------------------------------------------
 
     fn restore_session(&mut self) {
-        self.restoring_proxy = true;
-        let lease = self.credentials.lease(CredentialSlot::Proxy);
-        let commands = self.commands.clone();
-        tokio::spawn(async move {
-            let result = lease.load().await;
-            let _ = commands.send(Command::ProxyRestored { lease, result });
-        });
+        self.restore_spotify_grants();
     }
 
     fn restore_spotify_grants(&mut self) {
@@ -4291,6 +4158,7 @@ impl Worker {
             return;
         }
         // free accounts allowed in youtube mode
+        self.waiting_for_network = false;
         self.pending_playback_grant = Some(credentials.clone());
         self.cancel_signin = None;
         self.engine_busy = true;
@@ -4302,7 +4170,6 @@ impl Worker {
         let lease = self.credentials.lease(CredentialSlot::Playback);
         let config = self.engine_config.clone();
         let proxy = config.proxy.librespot_url();
-        self.engine_proxy = proxy.clone();
         let notify = self.engine_notify();
         let kept = self.kept_player.clone();
         let events = self.events.clone();
@@ -4440,6 +4307,7 @@ impl Worker {
                 self.engine = Some(engine);
                 self.start_rootlist();
                 self.reconnects.clear();
+                log::info!("Local audio engine ready");
                 self.emit(Event::Playback(LocalPlayback::Ready { device_id }));
                 self.start_album_type_lookup();
                 self.start_audiobook_lookup();
@@ -5092,20 +4960,17 @@ impl Worker {
                 })
             } else {
                 match http {
-                    Ok(http) => {
-                        let exact = spotify_lyrics(engine, &lookup_uri, &cache).await;
-                        crate::spicy_lyrics::fetch_with_fallback(
-                            &http,
-                            &cache,
-                            &lookup_uri,
-                            &request.query,
-                            &key,
-                            refresh,
-                            exact,
-                        )
-                        .await
-                        .map_err(|error| format!("{error:#}"))
-                    }
+                    Ok(http) => crate::spicy_lyrics::fetch_with_exact_request(
+                        &http,
+                        &cache,
+                        &lookup_uri,
+                        &request.query,
+                        &key,
+                        refresh,
+                        spotify_lyrics(engine, &lookup_uri, &cache),
+                    )
+                    .await
+                    .map_err(|error| format!("{error:#}")),
                     Err(error) => Err(error),
                 }
             };
@@ -5639,7 +5504,6 @@ fn operation_for(api: &ApiGateway, request: &ApiRequest) -> Operation {
         }
         ApiRequest::ArtistTopTracks { .. } => Operation::ArtistTopTracks,
         ApiRequest::RelatedArtists { .. } => Operation::RelatedArtists,
-        ApiRequest::Recommendations { .. } => Operation::UnsupportedDevelopmentMode,
         ApiRequest::Artist { .. }
         | ApiRequest::ArtistAlbums { .. }
         | ApiRequest::Album { .. }
@@ -6108,10 +5972,6 @@ async fn handle(
             generation,
         },
         ApiRequest::TopArtists { generation } => ApiResponse::TopArtists {
-            generation,
-            result: Ok(Vec::new()),
-        },
-        ApiRequest::Recommendations { generation, .. } => ApiResponse::Recommendations {
             generation,
             result: Ok(Vec::new()),
         },
@@ -7280,7 +7140,7 @@ mod album_type_lookup_tests {
     }
 
     #[test]
-    fn non_premium_status_clears_and_invalidates_all_engine_work() {
+    fn clearing_engine_work_invalidates_old_requests_but_free_accounts_can_enqueue() {
         let mut lookup = AlbumTypeLookup::default();
         lookup.enqueue(true, None, vec!["active".into(), "pending".into()]);
         let active = lookup.next().expect("request before account check");
@@ -7296,8 +7156,7 @@ mod album_type_lookup_tests {
         assert!(!lookup.finish(&active));
 
         lookup.enqueue(true, Some(false), vec!["after-check".into()]);
-        assert!(lookup.pending.is_empty());
-        assert!(lookup.seen.is_empty());
+        assert_eq!(lookup.next().unwrap().uri, "after-check");
     }
 
     #[test]
@@ -7417,8 +7276,8 @@ mod playlist_cache_tests {
         let Some(PlayableItem::Track(track)) = expected.item.as_mut() else {
             panic!("a local file is a track");
         };
-        track.name = "TelÃƒÂ©fonos".into();
-        track.artists[0].name = "Tan BiÃƒÂ³nica".into();
+        track.name = "Tel\u{00e9}fonos".into();
+        track.artists[0].name = "Tan Bi\u{00f3}nica".into();
         track.album.as_mut().unwrap().name = "Boquitas Pintadas".into();
         // Cache rows can store either the session's `item` or the Web API's `track`.
         let mut api_row = raw.clone();
@@ -7849,6 +7708,16 @@ mod playlist_cache_tests {
     }
 }
 
+// Legacy-grant fixtures exercise migration/revocation only, not password login.
+#[cfg(test)]
+fn legacy_credentials(username: &str, data: &str) -> Credentials {
+    Credentials {
+        username: Some(username.into()),
+        auth_type: 0,
+        auth_data: data.as_bytes().to_vec(),
+    }
+}
+
 /// Bind a streaming token to an account verified by either Web API grant.
 /// A late browser result after sign-out must not start an anonymous session.
 fn playback_credentials(account: Option<AccountId>, access_token: String) -> Option<Credentials> {
@@ -7869,7 +7738,8 @@ mod authorization_tests {
             device_id: Some("cast".into()),
             address: "192.0.2.1".parse().unwrap(),
             port: 8009,
-            path: "/".into(),
+            model: None,
+            path: Some("/".into()),
             cast: true,
         };
         let connect = crate::zeroconf::Receiver {
@@ -8178,97 +8048,6 @@ mod authorization_tests {
         assert_eq!(started.elapsed(), Duration::from_secs(65));
     }
 
-    #[test]
-    fn proxy_changes_compare_with_the_running_engine() {
-        const CHILD: &str = "SPOTIFAST_PROXY_SNAPSHOT_TEST";
-        if std::env::var_os(CHILD).is_none() {
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "backend::authorization_tests::proxy_changes_compare_with_the_running_engine",
-                    "--nocapture",
-                ])
-                .env(CHILD, "1")
-                .env("NO_PROXY", "*")
-                .env("no_proxy", "*")
-                .status()
-                .unwrap();
-            assert!(status.success());
-            return;
-        }
-
-        // The system proxy has been removed since the engine connected.
-        // Resolve it in a child process so the test never alters desktop settings
-        // or the environment used by concurrently running tests.
-        assert_eq!(ProxyConfig::System.librespot_url(), None);
-        let old_url = reqwest::Url::parse("http://127.0.0.1:7890/").unwrap();
-        let (runtime, mut worker, _) = worker("proxy-snapshot");
-        let _entered = runtime.enter();
-        worker.engine_config.proxy = ProxyConfig::System;
-        worker.engine_proxy = Some(old_url.clone());
-        worker.signed_in = true;
-        worker.engine_busy = true;
-        worker.change_proxy(1, ProxyConfig::Off, None);
-        assert!(
-            worker.engine_restart_pending,
-            "Off must discard an in-flight connection using the former system proxy"
-        );
-        assert_eq!(worker.engine_proxy, Some(old_url));
-        assert_eq!(worker.engine_config.proxy, ProxyConfig::Off);
-
-        let http = crate::settings::Settings {
-            proxy_mode: crate::settings::ProxyMode::Http,
-            proxy_host: "127.0.0.1".into(),
-            proxy_port: "7890".into(),
-            ..Default::default()
-        };
-        let socks = crate::settings::Settings {
-            proxy_mode: crate::settings::ProxyMode::Socks,
-            ..http.clone()
-        };
-        let other = crate::settings::Settings {
-            proxy_port: "7891".into(),
-            ..http.clone()
-        };
-        // Every choice is compared with the old connection, even after a
-        // previous Apply has updated the saved policy while reconnecting.
-        for (next, restart) in [
-            (ProxyConfig::System, true),
-            (socks.proxy_config().unwrap(), true),
-            (other.proxy_config().unwrap(), true),
-            (http.proxy_config().unwrap(), false),
-        ] {
-            assert_eq!(worker.apply_proxy(next).unwrap(), restart);
-        }
-        worker.engine_proxy = None;
-        for (next, restart) in [
-            (ProxyConfig::Off, false),
-            (ProxyConfig::System, false),
-            (socks.proxy_config().unwrap(), false),
-            (http.proxy_config().unwrap(), true),
-        ] {
-            assert_eq!(worker.apply_proxy(next).unwrap(), restart);
-        }
-    }
-
-    #[test]
-    fn proxy_restoration_defers_work_without_blocking_shutdown() {
-        let (runtime, mut worker, _) = worker("proxy-restore-barrier");
-        worker.restoring_proxy = true;
-        let mut audio = worker.engine_config.clone();
-        audio.proxy = ProxyConfig::System;
-        let (commands, receiver) = mpsc::unbounded_channel();
-        commands.send(Command::RestartEngine(audio)).unwrap();
-        commands.send(Command::Shutdown).unwrap();
-        runtime.block_on(async {
-            tokio::time::timeout(Duration::from_secs(1), worker.run(receiver))
-                .await
-                .unwrap();
-        });
-        assert_eq!(worker.waiting_for_proxy.len(), 1);
-        assert_eq!(worker.engine_config.proxy, ProxyConfig::Off);
-    }
-
     /// A session that drops on its own comes back at the level being heard,
     /// exactly, not at the level the app launched with. Music turned down
     /// to 5% after launch used to come back at the previous session's 80%.
@@ -8316,7 +8095,7 @@ mod authorization_tests {
     }
 
     #[test]
-    fn signing_out_discards_restricted_devices_and_late_discovery_results() {
+    fn removed_connect_devices_stay_unavailable_after_sign_out() {
         let (runtime, mut worker, _) = worker("sign-out-connect");
         let _entered = runtime.enter();
         let previous = Arc::clone(&worker.connect);
@@ -8326,108 +8105,20 @@ mod authorization_tests {
             ..Default::default()
         };
         previous.observe_playing(1, Some(&device));
-        assert_eq!(
-            worker.connect.restricted_target(None).as_deref(),
-            Some("sonos")
-        );
+        assert_eq!(worker.connect.restricted_target(None).as_deref(), None);
         worker.sign_out();
         previous.remember(&[crate::zeroconf::Receiver {
             name: "Old discovery".into(),
             device_id: Some("late-speaker".into()),
             address: "127.0.0.1".parse().unwrap(),
             port: 1400,
-            path: "/spotifyzc".into(),
+            model: None,
+            path: Some("/spotifyzc".into()),
             cast: false,
         }]);
         assert_eq!(worker.connect.restricted_target(None), None);
         assert_eq!(worker.connect.restricted_target(Some("sonos")), None);
         assert_eq!(worker.connect.restricted_target(Some("late-speaker")), None);
-    }
-
-    #[test]
-    fn an_invalid_saved_proxy_keeps_restored_network_work_blocked() {
-        let (runtime, mut worker, events) = worker("proxy-restore-invalid");
-        let _entered = runtime.enter();
-        let invalid = ProxyConfig::Invalid("Proxy port must be a number".into());
-        worker.engine_config.proxy = invalid.clone();
-        worker.restoring_proxy = true;
-        worker.on_proxy_restored(
-            worker.credentials.lease(CredentialSlot::Proxy),
-            Ok(crate::credentials::Loaded {
-                grant: None,
-                warning: None,
-            }),
-        );
-        assert!(worker.http.client().is_err());
-        assert!(!worker.restoring_proxy);
-        assert!(events.try_iter().any(
-            |event| matches!(event, Event::ProxyRestored { config, .. } if config == invalid)
-        ));
-    }
-
-    #[test]
-    fn explicit_proxy_apply_can_complete_before_native_restoration() {
-        let (runtime, mut worker, events) = worker("proxy-restore-apply");
-        let _entered = runtime.enter();
-        worker.restoring_proxy = true;
-        let old = worker.credentials.lease(CredentialSlot::Proxy);
-        worker.change_proxy(1, ProxyConfig::System, None);
-        assert!(!worker.restoring_proxy);
-        assert!(worker.http.client().is_ok());
-        worker.on_proxy_restored(
-            old,
-            Ok(crate::credentials::Loaded {
-                grant: None,
-                warning: None,
-            }),
-        );
-        assert_eq!(worker.engine_config.proxy, ProxyConfig::System);
-        assert!(
-            events
-                .try_iter()
-                .all(|event| !matches!(event, Event::ProxyRestored { .. }))
-        );
-    }
-
-    #[test]
-    fn audio_settings_cannot_revert_a_proxy_waiting_for_its_ui_acknowledgement() {
-        let (runtime, mut worker, _) = worker("proxy-audio-restart");
-        let old_audio = worker.engine_config.clone();
-        let settings = crate::settings::Settings {
-            proxy_mode: crate::settings::ProxyMode::Http,
-            proxy_host: "127.0.0.1".into(),
-            proxy_port: "8080".into(),
-            ..Default::default()
-        };
-        let proxy = settings.proxy_config().unwrap();
-        let (commands, receiver) = mpsc::unbounded_channel();
-        commands
-            .send(Command::ApplyProxy {
-                request: 1,
-                config: proxy.clone(),
-            })
-            .unwrap();
-        commands.send(Command::RestartEngine(old_audio)).unwrap();
-        commands.send(Command::Shutdown).unwrap();
-        runtime.block_on(worker.run(receiver));
-        assert_eq!(worker.engine_config.proxy, proxy);
-    }
-
-    #[test]
-    fn a_rejected_proxy_change_does_not_replace_the_live_configuration() {
-        let (runtime, mut worker, events) = worker("rejected-proxy");
-        let _entered = runtime.enter();
-        let original = worker.engine_config.proxy.clone();
-        let bad = ProxyConfig::Invalid("Proxy port must be a number".into());
-        worker.change_proxy(1, bad.clone(), None);
-        assert_eq!(worker.engine_config.proxy, original);
-        assert!(!worker.engine_restart_pending);
-        assert!(worker.http.client().is_ok());
-        let answers: Vec<_> = events.try_iter().collect();
-        assert_eq!(answers.len(), 1);
-        assert!(
-            matches!(&answers[0], Event::ProxyApplied { config, result: Err(_), .. } if config == &bad)
-        );
     }
 
     #[test]
@@ -8529,27 +8220,18 @@ mod authorization_tests {
         let _entered = runtime.enter();
         let _occupied =
             std::net::TcpListener::bind(("127.0.0.1", crate::auth::WEB_REDIRECT_PORT)).unwrap();
-        for typed in [
-            None,
-            Some("".into()),
-            Some("https://developer.spotify.com".into()),
-        ] {
+        worker.sign_in(Some("https://developer.spotify.com".into()));
+        assert!(events.try_iter().any(|event| matches!(
+            event,
+            Event::Auth(AuthStatus::Refused(SignInProblem::MalformedClientId))
+        )));
+        assert_eq!(worker.authorization_attempt, 0);
+        // Empty input uses the configured grant, rather than demanding a Client ID.
+        for typed in [None, Some(String::new())] {
             worker.sign_in(typed);
-            let received: Vec<_> = events.try_iter().collect();
-            assert!(received.iter().any(|event| matches!(
-                event,
-                Event::Auth(AuthStatus::Refused(SignInProblem::MalformedClientId))
-            )));
-            assert_eq!(worker.authorization_attempt, 0);
+            assert!(events.try_iter().any(|event| matches!(event,
+                Event::Auth(AuthStatus::Failed(message)) if message.contains("8989"))));
         }
-
-        worker.sign_in_source(ApiSource::Shared);
-        assert!(worker.cancel_signin.is_none());
-        assert_eq!(
-            worker.api.state(ApiSource::Shared),
-            SessionState::Unavailable
-        );
-
         let id = "0123456789abcdef0123456789abcdef";
         worker.sign_in(Some(format!(" {id} ")));
         assert_eq!(worker.web_client_id.as_deref(), Some(id));
@@ -8680,7 +8362,10 @@ mod authorization_tests {
         runtime.block_on(worker.run(receiver));
         assert!(worker.signed_in);
         assert_eq!(worker.api.account(), Some(AccountId::new("bob")));
-        assert!(events.try_iter().next().is_none());
+        assert!(events.try_iter().all(|event| !matches!(
+            event,
+            Event::Auth(AuthStatus::Refused(_) | AuthStatus::Failed(_))
+        )));
     }
 
     #[test]
@@ -8731,7 +8416,10 @@ mod authorization_tests {
 
         assert!(worker.prerelease_waiting.is_none());
         assert!(!worker.waiting_for_network);
-        assert!(!worker.engine_busy);
+        assert!(
+            worker.engine_busy,
+            "network recovery starts the YouTube engine without a Spotify playback grant"
+        );
         let received = events.try_iter().collect::<Vec<_>>();
         let failure = received.iter().position(|event| {
             matches!(
@@ -8754,7 +8442,7 @@ mod authorization_tests {
         let (runtime, mut worker, events) = worker("prerelease-offline");
         let _entered = runtime.enter();
         verify(&mut worker, ApiSource::Shared, "alice");
-        worker.playback_grant = Some(Credentials::with_password("alice", "grant"));
+        worker.playback_grant = Some(legacy_credentials("alice", "grant"));
         worker.network_reachable = false;
         worker.prerelease_waiting = Some(("spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL".into(), 5));
         worker.start_prerelease();
@@ -8773,7 +8461,7 @@ mod authorization_tests {
         let (runtime, mut worker, events) = worker("prerelease-pending-offline");
         let _entered = runtime.enter();
         verify(&mut worker, ApiSource::Shared, "alice");
-        worker.pending_playback_grant = Some(Credentials::with_password("alice", "fresh-grant"));
+        worker.pending_playback_grant = Some(legacy_credentials("alice", "fresh-grant"));
         worker.network_reachable = false;
         worker.prerelease_waiting = Some(("spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL".into(), 7));
         worker.start_prerelease();
@@ -9034,11 +8722,11 @@ mod authorization_tests {
         let (runtime, mut worker, events) = worker("engine-retry");
         let _entered = runtime.enter();
         verify(&mut worker, ApiSource::Shared, "alice");
-        worker.playback_grant = Some(Credentials::with_password("alice", "dummy-grant"));
+        worker.playback_grant = Some(legacy_credentials("alice", "dummy-grant"));
         let session = worker.album_type_lookup.session_generation;
         let reset = "Couldn't reach Spotify: connection reset";
 
-        worker.connect_engine(Credentials::with_password("alice", "dummy-grant"));
+        worker.connect_engine(legacy_credentials("alice", "dummy-grant"));
         worker.on_engine_connected(session, None, Some(reset.into()), worker.engine_attempt);
         assert_eq!(failed(&events), [reset]);
         assert_eq!(worker.engine_retries, 1);
@@ -9074,10 +8762,10 @@ mod authorization_tests {
         let (runtime, mut worker, events) = worker("engine-retry-rejected");
         let _entered = runtime.enter();
         verify(&mut worker, ApiSource::Shared, "alice");
-        worker.playback_grant = Some(Credentials::with_password("alice", "dummy-grant"));
+        worker.playback_grant = Some(legacy_credentials("alice", "dummy-grant"));
         let session = worker.album_type_lookup.session_generation;
 
-        worker.connect_engine(Credentials::with_password("alice", "dummy-grant"));
+        worker.connect_engine(legacy_credentials("alice", "dummy-grant"));
         worker.on_engine_connected(
             session,
             None,
@@ -9088,7 +8776,7 @@ mod authorization_tests {
         assert_eq!(worker.engine_retries, 0);
 
         worker.network_reachable = false;
-        worker.connect_engine(Credentials::with_password("alice", "dummy-grant"));
+        worker.connect_engine(legacy_credentials("alice", "dummy-grant"));
         worker.on_engine_connected(
             session,
             None,
@@ -9102,11 +8790,11 @@ mod authorization_tests {
     /// "Set up playback here" reconnects with a saved grant instead of
     /// clearing it and opening the browser (#818, #824).
     #[test]
-    fn set_up_playback_reconnects_with_the_saved_grant_first() {
+    fn youtube_playback_setup_does_not_request_spotify_authorization() {
         let (runtime, mut worker, events) = worker("set-up-with-saved-grant");
         let _entered = runtime.enter();
         verify(&mut worker, ApiSource::Shared, "alice");
-        worker.playback_grant = Some(Credentials::with_password("alice", "dummy-grant"));
+        worker.playback_grant = Some(legacy_credentials("alice", "dummy-grant"));
         let lease = worker.credentials.lease(CredentialSlot::Playback);
         let attempt = worker.authorization_attempt;
         let _ = events.try_iter().count();
@@ -9114,7 +8802,7 @@ mod authorization_tests {
         worker.authorize_playback();
 
         assert!(worker.engine_busy);
-        assert!(worker.authorize_if_rejected);
+        assert!(!worker.authorize_if_rejected);
         assert!(worker.cancel_signin.is_none());
         assert_eq!(worker.authorization_attempt, attempt);
         assert!(lease.current(), "the saved grant was invalidated");
@@ -9129,62 +8817,44 @@ mod authorization_tests {
                 .iter()
                 .any(|event| matches!(event, Event::Playback(LocalPlayback::Authorizing)))
         );
-
-        // Only Spotify rejecting the grant goes to the browser. The port is
-        // held so the browser flow stops at its port check and opens nothing.
-        let _port = PLAYBACK_PORT.lock().unwrap_or_else(|p| p.into_inner());
-        let _occupied =
-            std::net::TcpListener::bind(("127.0.0.1", crate::auth::PLAYBACK_REDIRECT_PORT))
-                .unwrap();
-        let session = worker.album_type_lookup.session_generation;
-        worker.on_engine_connected(
-            session,
-            None,
-            Some("Spotify rejected the saved sign-in. Please sign in again.".into()),
-            worker.engine_attempt,
-        );
-        let messages = failed(&events);
-        assert_eq!(messages.len(), 1);
-        assert!(messages[0].contains("8898"), "{messages:?}");
-        assert!(!worker.authorize_if_rejected);
     }
 
     /// Clicking while a background retry is connecting shows that attempt
     /// rather than starting another one.
     #[test]
-    fn set_up_playback_during_a_quiet_retry_shows_it() {
+    fn repeated_setup_does_not_duplicate_an_inflight_engine_attempt() {
         let (runtime, mut worker, events) = worker("set-up-during-retry");
         let _entered = runtime.enter();
         verify(&mut worker, ApiSource::Shared, "alice");
-        worker.playback_grant = Some(Credentials::with_password("alice", "dummy-grant"));
+        worker.playback_grant = Some(legacy_credentials("alice", "dummy-grant"));
         worker.engine_retry_quiet = true;
-        worker.connect_engine(Credentials::with_password("alice", "dummy-grant"));
+        worker.connect_engine(legacy_credentials("alice", "dummy-grant"));
         let engine_attempt = worker.engine_attempt;
         let _ = events.try_iter().count();
 
         worker.authorize_playback();
 
         assert_eq!(worker.engine_attempt, engine_attempt);
-        assert!(!worker.engine_retry_quiet);
-        assert!(worker.authorize_if_rejected);
+        assert!(worker.engine_retry_quiet);
+        assert!(!worker.authorize_if_rejected);
         assert!(
             events
                 .try_iter()
-                .any(|event| matches!(event, Event::Playback(LocalPlayback::Connecting)))
+                .all(|event| !matches!(event, Event::Playback(LocalPlayback::Connecting)))
         );
     }
 
     /// A busy playback callback port reports the conflict and leaves the
     /// saved playback grant alone, without opening the browser (#899).
     #[test]
-    fn occupied_playback_port_keeps_the_saved_grant() {
+    fn youtube_startup_does_not_need_the_old_playback_oauth_port() {
         let _port = PLAYBACK_PORT.lock().unwrap_or_else(|p| p.into_inner());
         let (runtime, mut worker, events) = worker("occupied-playback-port");
         let _entered = runtime.enter();
         verify(&mut worker, ApiSource::Shared, "alice");
         let saved = worker.credentials.lease(CredentialSlot::Playback);
         runtime
-            .block_on(saved.save(StoredGrant::Playback(Credentials::with_password(
+            .block_on(saved.save(StoredGrant::Playback(legacy_credentials(
                 "alice",
                 "dummy-saved-grant",
             ))))
@@ -9198,9 +8868,11 @@ mod authorization_tests {
         worker.authorize_playback();
 
         let received: Vec<_> = events.try_iter().collect();
-        assert!(received.iter().any(|event| matches!(event,
-            Event::Playback(LocalPlayback::Failed(message)) if message.contains("8898")
-        )));
+        assert!(
+            received
+                .iter()
+                .any(|event| matches!(event, Event::Playback(LocalPlayback::Connecting)))
+        );
         assert!(
             !received
                 .iter()
@@ -9387,7 +9059,7 @@ mod authorization_tests {
                 slot: CredentialSlot::Playback,
                 lease: playback.clone(),
                 result: Ok(crate::credentials::Loaded {
-                    grant: Some(StoredGrant::Playback(Credentials::with_password(
+                    grant: Some(StoredGrant::Playback(legacy_credentials(
                         "dummy-account",
                         "dummy-grant",
                     ))),
@@ -9453,32 +9125,25 @@ mod authorization_tests {
     }
 
     #[test]
-    fn restored_playback_requires_the_verified_account() {
-        let (runtime, mut worker, events) = worker("playback-account-mismatch");
+    fn youtube_engine_does_not_reuse_another_accounts_spotify_playback_grant() {
+        let (runtime, mut worker, _) = worker("legacy-playback-account");
         let _entered = runtime.enter();
         verify(&mut worker, ApiSource::Shared, "alice");
-        worker.playback_grant = Some(Credentials::with_password("bob", "dummy-reusable-grant"));
+        worker.playback_grant = Some(legacy_credentials("bob", "old-grant"));
         worker.resume_engine();
-        assert!(!worker.engine_busy);
-        assert!(worker.engine.is_none());
-        assert!(!playback_account_matches(
-            worker.playback_grant.as_ref().unwrap(),
-            worker.api.account()
-        ));
+        assert!(worker.engine_busy);
+        let pending = worker.pending_playback_grant.as_ref().unwrap();
+        assert_eq!(pending.username.as_deref(), Some("alice"));
         assert!(
-            events
-                .try_iter()
-                .any(|event| matches!(event, Event::Playback(LocalPlayback::Failed(_))))
+            pending.auth_data.is_empty(),
+            "YouTube startup must not carry Spotify playback secrets"
         );
     }
 
     #[test]
     fn engine_cache_never_writes_a_playback_grant_file() {
         let (_runtime, worker, _) = worker("memory-playback-cache");
-        let cache = worker.engine_config.open_cache().unwrap();
-        let cloned = cache.clone();
-        cache.save_credentials(&Credentials::with_password("dummy-account", "dummy-grant"));
-        assert!(cloned.credentials().is_some());
+        worker.engine_config.open_cache().unwrap();
         assert!(
             !worker
                 .dirs
@@ -9561,6 +9226,11 @@ mod authorization_tests {
     }
 
     pub(super) fn verify(worker: &mut Worker, source: ApiSource, account: &str) {
+        // These tests arrange account state before exercising engine startup.
+        // Verification now starts YouTube playback automatically; defer that
+        // side effect here so each test controls its own connection attempt.
+        let engine_busy = worker.engine_busy;
+        worker.engine_busy = true;
         worker.api.set_state(source, SessionState::Authorizing);
         worker.on_web_verified(
             source,
@@ -9580,6 +9250,7 @@ mod authorization_tests {
                 ..Default::default()
             },
         );
+        worker.engine_busy = engine_busy;
     }
 
     #[test]
@@ -9679,6 +9350,7 @@ mod authorization_tests {
         runtime.block_on(async {
             let fetched = || async {
                 Ok(crate::player::Rootlist {
+                    uris: Vec::new(),
                     entries: vec![crate::player::RootlistEntry::Playlist(
                         "spotify:playlist:shared".into(),
                     )],
@@ -9833,41 +9505,24 @@ mod session_tests {
         }
         let background_session = tokio::sync::Semaphore::new(4);
         let _held_session = background_session.acquire_many(4).await.unwrap();
-        let (response, expired) = tokio::time::timeout(
-            Duration::from_secs(1),
-            handle(
-                &api,
-                &crate::made_for_you::MadeForYou::new(crate::http::Http::default()),
-                &crate::new_releases::NewReleases::new(crate::http::Http::default()),
-                &crate::sonos::Controller::default(),
-                None,
-                &background_session,
-                ApiRequest::TopArtists { generation: 7 },
-            ),
-        )
-        .await
-        .expect("a personal background read must reach its own client");
-        assert!(matches!(
-            response,
-            ApiResponse::TopArtists {
-                generation: 7,
-                result: Err(ApiError::NotSignedIn)
-            }
-        ));
-        assert!(expired.is_empty());
+        let personal = api.client_for(Operation::UserData).await.unwrap();
+        let permit = tokio::time::timeout(Duration::from_secs(1), personal.background_permit())
+            .await
+            .expect("personal reads must not wait for shared or session permits");
+        assert!(permit.is_some());
     }
 
     /// Related artists are read over the session first, and a session error
     /// keeps the Web API fallback.
     #[test]
-    fn related_artists_can_bypass_the_shared_web_api() {
+    fn related_artists_use_web_api_after_session_removal() {
         let api = ApiGateway::new(reqwest::Client::new(), Arc::new(NetActivity::default()));
         let request = ApiRequest::RelatedArtists {
             id: "artist1".into(),
         };
         assert!(
-            api.session_serves(operation_for(&api, &request)),
-            "a playback session must serve related artists before Shared quota"
+            !api.session_serves(operation_for(&api, &request)),
+            "the removed playback session cannot serve catalogue reads"
         );
         assert!(
             session_read(&request).is_some(),
@@ -10209,10 +9864,9 @@ mod tests {
 
     #[tokio::test]
     async fn connect_shuffle_play_waits_for_shuffle_before_starting_playback() {
-        let request = PlayRequest::context("spotify:playlist:abc");
-        let shuffle = crate::sonos::command_body(RemoteAction::Shuffle, None, 0, true, "").unwrap();
-        let play =
-            crate::sonos::command_body(RemoteAction::Play, Some(&request), 0, false, "").unwrap();
+        let shuffle =
+            serde_json::json!({"command":{"endpoint":"set_shuffling_context","value":true}});
+        let play = serde_json::json!({"command":{"endpoint":"play"}});
         let sent = std::sync::Mutex::new(Vec::new());
         let shuffled = tokio::sync::Notify::new();
         let sending = shuffle_then_play(shuffle.clone(), play.clone(), |body| {
@@ -10244,10 +9898,8 @@ mod tests {
 
     #[tokio::test]
     async fn connect_shuffle_play_preserves_errors_and_skips_play_when_shuffle_fails() {
-        let request = PlayRequest::context("spotify:playlist:abc");
-        let shuffle = crate::sonos::command_body(RemoteAction::Shuffle, None, 0, true, "").unwrap();
-        let play =
-            crate::sonos::command_body(RemoteAction::Play, Some(&request), 0, false, "").unwrap();
+        let shuffle = serde_json::json!({"command":{"endpoint":"set_shuffling_context"}});
+        let play = serde_json::json!({"command":{"endpoint":"play"}});
         for failed_endpoint in ["set_shuffling_context", "play"] {
             let mut sent = Vec::new();
             let result = shuffle_then_play(shuffle.clone(), play.clone(), |body| {
@@ -10313,7 +9965,10 @@ mod tests {
         let _entered = runtime.enter();
         super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
         worker.network_reachable = false;
-        worker.resume = Some(PlaybackResume::Track(crate::player::LoadSpec::default()));
+        worker.resume = Some(PlaybackResume::Track {
+            uri: "spotify:track:test".into(),
+            position_ms: 0,
+        });
         worker.reconnect_engine();
         assert!(worker.resume.is_some());
         assert!(worker.waiting_for_network);
@@ -10330,10 +9985,13 @@ mod tests {
         let (runtime, mut worker, events) = super::authorization_tests::worker("network-restored");
         let _entered = runtime.enter();
         super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
-        worker.playback_grant = Some(Credentials::with_password("alice", "grant"));
+        worker.playback_grant = Some(legacy_credentials("alice", "grant"));
         worker.network_reachable = false;
         worker.waiting_for_network = true;
-        worker.resume = Some(PlaybackResume::Track(crate::player::LoadSpec::default()));
+        worker.resume = Some(PlaybackResume::Track {
+            uri: "spotify:track:test".into(),
+            position_ms: 0,
+        });
 
         let (commands, receiver) = mpsc::unbounded_channel();
         commands.send(Command::NetworkStatus(true)).unwrap();
@@ -10355,7 +10013,10 @@ mod tests {
         let _entered = runtime.enter();
         super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
         worker.engine_attempt = 2;
-        worker.resume = Some(PlaybackResume::Track(crate::player::LoadSpec::default()));
+        worker.resume = Some(PlaybackResume::Track {
+            uri: "spotify:track:test".into(),
+            position_ms: 0,
+        });
         let session_generation = worker.album_type_lookup.session_generation;
 
         worker.on_engine_connected(session_generation, None, Some("stale failure".into()), 1);
@@ -10374,7 +10035,10 @@ mod tests {
         let _entered = runtime.enter();
         super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
         worker.waiting_for_network = true;
-        worker.resume = Some(PlaybackResume::Track(crate::player::LoadSpec::default()));
+        worker.resume = Some(PlaybackResume::Track {
+            uri: "spotify:track:test".into(),
+            position_ms: 0,
+        });
 
         let (commands, receiver) = mpsc::unbounded_channel();
         commands
@@ -10396,7 +10060,10 @@ mod tests {
         super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
         worker.network_reachable = false;
         worker.engine_attempt = 1;
-        worker.resume = Some(PlaybackResume::Track(crate::player::LoadSpec::default()));
+        worker.resume = Some(PlaybackResume::Track {
+            uri: "spotify:track:test".into(),
+            position_ms: 0,
+        });
         let session_generation = worker.album_type_lookup.session_generation;
 
         worker.on_engine_connected(session_generation, None, Some("timed out".into()), 1);
@@ -10420,7 +10087,7 @@ mod tests {
         assert!(worker.pending_playback_grant.is_none());
 
         worker.network_reachable = false;
-        let creds = Credentials::with_password("alice", "streaming-token");
+        let creds = legacy_credentials("alice", "streaming-token");
         worker.connect_engine(creds);
         assert!(worker.pending_playback_grant.is_some());
 
@@ -10456,7 +10123,7 @@ mod tests {
         let _entered = runtime.enter();
         super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
         worker.network_reachable = true;
-        let creds = Credentials::with_password("alice", "bad-token");
+        let creds = legacy_credentials("alice", "bad-token");
         worker.connect_engine(creds);
         assert!(worker.pending_playback_grant.is_some());
 
@@ -10479,18 +10146,18 @@ mod tests {
     }
 
     #[test]
-    fn test_reauthorization_during_outage_prefers_new_credentials_over_older_grant() {
+    fn recovery_starts_youtube_without_reusing_legacy_spotify_credentials() {
         let (runtime, mut worker, events) =
             super::authorization_tests::worker("reauth-during-outage");
         let _entered = runtime.enter();
         super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
 
         // Existing older playback grant
-        worker.playback_grant = Some(Credentials::with_password("alice", "stale-grant"));
+        worker.playback_grant = Some(legacy_credentials("alice", "stale-grant"));
 
         // User reauthorizes with new credentials while offline
         worker.network_reachable = false;
-        let new_creds = Credentials::with_password("alice", "fresh-token");
+        let new_creds = legacy_credentials("alice", "fresh-token");
         worker.connect_engine(new_creds.clone());
 
         // Attempt fails while offline
@@ -10508,7 +10175,14 @@ mod tests {
         runtime.block_on(worker.run(receiver));
 
         assert!(!worker.waiting_for_network);
-        assert_eq!(worker.pending_playback_grant, Some(new_creds));
+        assert!(
+            worker
+                .pending_playback_grant
+                .as_ref()
+                .unwrap()
+                .auth_data
+                .is_empty()
+        );
         assert!(
             events
                 .try_iter()
@@ -10523,9 +10197,12 @@ mod tests {
         let _entered = runtime.enter();
         super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
 
-        worker.playback_grant = Some(Credentials::with_password("alice", "grant"));
+        worker.playback_grant = Some(legacy_credentials("alice", "grant"));
         worker.network_reachable = false;
-        worker.resume = Some(PlaybackResume::Track(crate::player::LoadSpec::default()));
+        worker.resume = Some(PlaybackResume::Track {
+            uri: "spotify:track:test".into(),
+            position_ms: 0,
+        });
 
         worker.resume_engine();
 
@@ -10545,7 +10222,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resume_engine_without_credentials_does_not_emit_waiting_for_network() {
+    fn youtube_engine_waits_for_network_without_a_spotify_playback_grant() {
         let (runtime, mut worker, events) = super::authorization_tests::worker("offline-no-grant");
         let _entered = runtime.enter();
         super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
@@ -10556,11 +10233,11 @@ mod tests {
 
         worker.resume_engine();
 
-        assert!(!worker.waiting_for_network);
+        assert!(worker.waiting_for_network);
         assert!(
             events
                 .try_iter()
-                .all(|event| !matches!(event, Event::Playback(LocalPlayback::WaitingForNetwork)))
+                .any(|event| matches!(event, Event::Playback(LocalPlayback::WaitingForNetwork)))
         );
     }
 
@@ -10571,9 +10248,12 @@ mod tests {
         let _entered = runtime.enter();
         super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
 
-        worker.playback_grant = Some(Credentials::with_password("alice", "grant"));
+        worker.playback_grant = Some(legacy_credentials("alice", "grant"));
         worker.engine_attempt = 1;
-        worker.resume = Some(PlaybackResume::Track(crate::player::LoadSpec::default()));
+        worker.resume = Some(PlaybackResume::Track {
+            uri: "spotify:track:test".into(),
+            position_ms: 0,
+        });
         let session_generation = worker.album_type_lookup.session_generation;
 
         // Connection was in flight when outage occurred
@@ -10619,9 +10299,12 @@ mod tests {
         let _entered = runtime.enter();
         super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
 
-        worker.playback_grant = Some(Credentials::with_password("alice", "grant"));
+        worker.playback_grant = Some(legacy_credentials("alice", "grant"));
         worker.engine_attempt = 1;
-        worker.resume = Some(PlaybackResume::Track(crate::player::LoadSpec::default()));
+        worker.resume = Some(PlaybackResume::Track {
+            uri: "spotify:track:test".into(),
+            position_ms: 0,
+        });
         let session_generation = worker.album_type_lookup.session_generation;
 
         // Waiting for network flagged from an outage

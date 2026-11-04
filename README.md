@@ -33,7 +33,9 @@ Version 0.4.19 accepts closely similar recording titles, with exact titles ranke
 
 Version 0.4.20 shares lyrics data between frames instead of copying timed words, reuses visualizer buffers, and records visual history only for Vivy. Release builds use full LTO and Setup uses stronger compression. The complete Auto Sync model and runtime remain included; network-dependent search and playback times still vary.
 
-Version 0.4.28 connects YouTube through the official Google account chooser in your default browser. Connect YouTube is directly below Spotify on the welcome screen and on Home after Spotify sign-in. Connecting there explains and starts unlisted Spotify playlist copies in the background. Anyone with an unlisted copy’s link can view it. Recording matches and independent Spotify/YouTube additions keep their existing durable queues. Google app verification and API quotas still apply. Existing browser-session connections remain readable, but new connections no longer ask for DevTools, header files or cookies.
+Version 0.4.41 adds downloadable in-app mod packages. Choose Install in Mods, then Reload now or Later. Animation and visualizer logic is loaded from verified WebAssembly packages; account access and playback remain native host services. No separate program is installed for each mod. Lyrics providers remain included. See [optional mods](mods/README.md) for the package format, limitations and credits.
+
+The Windows app opens a dedicated YouTube sign-in window. Use Connect YouTube below Spotify or on Home, sign in with Google, then load your playlists. Connecting after Spotify sign-in explains and starts unlisted playlist copies; anyone with their link can view them. The native player and independent Spotify/YouTube addition queues remain. This unofficial connection uses a separate local WebView2 profile, without a Vibefy Google Cloud client or tester list. Google may still restrict sign-in, expire sessions or limit requests. Microsoft Edge WebView2 Runtime is required. Existing protected connections remain readable.
 
 JuiceVault connects independently and currently exposes public playlists through its documented API. Selected provider playlists can be saved as local Home collections. Connections are protected locally. Browser-session imports from versions 0.4.25–0.4.27 remain readable for compatibility; the old import instructions are no longer part of the connection interface.
 
@@ -65,3 +67,7 @@ By **Spinti**, based on **Spotifast by Carmine Paolino and contributors**. Full 
 Not affiliated with Spotify, YouTube, SoundCloud or Spicetify. Use only content you are permitted to access.
 
 [Report a bug](https://github.com/Spinti1/Vibefy/issues) · [Security](SECURITY.md) · [Support Spinti](https://buymeacoffee.com/spinti)
+
+Desktop setup connects Spotify first, then YouTube, followed by a selectable playlist transfer with progress and an optional skip. Selected playlists are copied as unlisted, with matched songs appended to their existing linked copies. YouTube library playlists are available on Home; linked Spotify copies appear once. Service rate limits and unmatched recordings remain visible.
+
+Home ends with **Hidden playlists**. Right-click a playlist to hide or restore it locally; this does not change service privacy. Playlist menus offer Spotify editing/removal where permitted and removal of imported local copies. Opening Visualizers preserves the window size; use the separate fullscreen control to expand it.

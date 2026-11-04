@@ -314,3 +314,24 @@ fn missing_featured_artist_is_not_an_automatic_recording_match() {
     );
     assert!(playlist_mirror::choose_recording(&source, &[candidate]).is_none());
 }
+
+#[test]
+fn selected_playlists_do_not_expand_to_other_library_entries() {
+    let selected = vec!["first".into(), "second".into()];
+    assert!(playlist_mirror::selected_playlist(Some(&selected), "first"));
+    assert!(!playlist_mirror::selected_playlist(
+        Some(&selected),
+        "third"
+    ));
+    assert!(!playlist_mirror::selected_playlist(Some(&[]), "first"));
+    assert!(playlist_mirror::selected_playlist(None, "first"));
+}
+#[test]
+fn captured_redacted_unlisted_header_retains_the_owner_marker() {
+    let value =
+        serde_json::from_str(include_str!("fixtures/youtube-editable-unlisted.json")).unwrap();
+    assert_eq!(
+        music_session::playlist_details(&value),
+        (true, "Vibefy mirror: fixture".into())
+    );
+}

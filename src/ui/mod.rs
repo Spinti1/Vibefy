@@ -13,10 +13,12 @@ pub mod library;
 pub(crate) mod listen_together;
 pub mod login;
 mod lyrics;
+mod mod_host;
 mod mods;
 pub mod music_accounts;
 pub mod music_search;
 pub mod new_releases;
+mod onboarding;
 pub mod player_bar;
 mod playlist_mirror;
 mod prerelease;
@@ -45,13 +47,21 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let ctx = &ctx;
     keys::handle(app, ctx);
-    let signed_in = (app.is_connected() && app.user.is_some())
-        || app.music_accounts.iter().any(|state| state.connected);
+    let signed_in = app.is_connected() && app.user.is_some();
     let connecting = matches!(app.auth, AuthStatus::Connecting | AuthStatus::Starting)
         || (app.is_connected() && app.user.is_none());
     if !signed_in {
         player_bar::end_tint_session(ctx);
         login::show(app, ui, connecting);
+        update::show(app, ctx);
+        toasts(app, ctx, 20.0);
+        caption_buttons(ui, &app.palette, app.locale);
+        fastframe_titlebar::resize(ui);
+        return;
+    }
+    if onboarding::required(app, ctx) {
+        player_bar::end_tint_session(ctx);
+        onboarding::show(app, ui);
         update::show(app, ctx);
         toasts(app, ctx, 20.0);
         caption_buttons(ui, &app.palette, app.locale);
@@ -71,7 +81,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         );
     }
     player_bar::show(app, ui);
+    if app.show_queue_panel && (app.addons.fullscreen || app.spicy.open) {
+        queue::side_panel(app, ui);
+    }
     if app.addons.fullscreen {
+        if !ctx.input(|i| i.viewport().fullscreen.unwrap_or(false)) && app.settings.sidebar_visible
+        {
+            sidebar::show(app, ui);
+        }
         addon_visuals::fullscreen(app, ui);
     } else if app.spicy.open {
         spicy_lyrics::show(app, ui);
@@ -95,6 +112,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     keep_room_for_panels(app, ctx);
     devices::popup(app, ctx);
     dialogs::show(app, ctx);
+    mods::reload_prompt(app, ctx);
     update::show(app, ctx);
     widgets::drag_ghost(ctx, &app.palette, app.locale);
     toasts(app, ctx, theme::PLAYER_BAR_HEIGHT + 16.0);
@@ -302,6 +320,8 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                 page,
                 Page::Home
                     | Page::Search
+                    | Page::MusicBrowse(_)
+                    | Page::JuiceVault
                     | Page::SoundCloud
                     | Page::Mods
                     | Page::Settings
@@ -353,7 +373,8 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                                 Page::Home => home::show(app, ui),
                                 Page::TopSongs => collection::top_songs(app, ui),
                                 Page::NewReleases => new_releases::page(app, ui),
-                                Page::Search => music_search::show(app, ui),
+                                Page::Search | Page::MusicBrowse(_) => music_search::show(app, ui),
+                                Page::JuiceVault => mods::juicevault(app, ui),
                                 Page::SoundCloud => mods::soundcloud(app, ui),
                                 Page::Mods => mods::show(app, ui),
                                 Page::LocalCollection(source) => {

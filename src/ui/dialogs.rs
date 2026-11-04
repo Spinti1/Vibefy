@@ -130,6 +130,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                         )
                         .wrap(),
                     );
+                    if app.mirror.lists.iter().any(|l| l.spotify_id == id && !l.youtube_id.is_empty()) {
+                        ui.label("This affects Spotify only. Your YouTube copy remains available.");
+                    }
                     ui.add_space(20.0);
                     buttons(ui, |ui| {
                         if theme::pill_button(

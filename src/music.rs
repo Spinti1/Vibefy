@@ -95,6 +95,7 @@ pub struct State {
     pub error: Option<String>,
     pub source_key: String,
     pub page_title: String,
+    pub pages: std::collections::HashMap<String, (String, Results)>,
     cache: VecDeque<(String, Filter, Instant, Results)>,
 }
 impl State {
@@ -201,6 +202,25 @@ impl Client {
         );
         Ok(value)
     }
+    /// Exact-video lyrics lookup using the existing anonymous Music client.
+    pub async fn lyrics(&self, video: &str) -> Result<Option<crate::lyrics::Lyrics>> {
+        ensure!(
+            crate::addons::valid_video_id(video),
+            "Invalid YouTube recording"
+        );
+        let lookup = async {
+            let page = self.request("next", json!({"videoId":video})).await?;
+            let Some(id) = lyrics_browse_id(&page) else {
+                return Ok(None);
+            };
+            let page = self.request("browse", json!({"browseId":id})).await?;
+            Ok(parse_music_lyrics(&page))
+        };
+        tokio::time::timeout(Duration::from_secs(8), lookup)
+            .await
+            .context("YouTube Music lyrics timed out")?
+    }
+
     pub async fn search(
         &self,
         query: &str,
@@ -244,7 +264,12 @@ impl Client {
             body["continuation"] = token.into();
         }
         tokio::time::timeout(Duration::from_secs(8), async {
-            parse_browse(&self.request("browse", body).await?)
+            let page = self.request("browse", body).await?;
+            if id.starts_with("UC") || id.starts_with("MPLA") {
+                parse_artist(&page)
+            } else {
+                parse_browse(&page)
+            }
         })
         .await
         .context("Music page timed out. Try again.")?
@@ -500,6 +525,43 @@ pub fn parse(value: &Value, filter: Filter) -> Result<Results> {
 pub fn parse_browse(value: &Value) -> Result<Results> {
     parse_rows(value, Filter::All, false, false)
 }
+/// Artist pages include recommendation carousels. They are not the artist's discography.
+pub fn parse_artist(value: &Value) -> Result<Results> {
+    fn prune(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                if let Some(shelf) = map.get("musicCarouselShelfRenderer") {
+                    let heading =
+                        text(&shelf["header"]["musicCarouselShelfBasicHeaderRenderer"]["title"])
+                            .to_lowercase();
+                    if [
+                        "fans might also like",
+                        "similar artists",
+                        "related",
+                        "recommended",
+                    ]
+                    .iter()
+                    .any(|s| heading.contains(s))
+                    {
+                        map.remove("musicCarouselShelfRenderer");
+                    }
+                }
+                for child in map.values_mut() {
+                    prune(child);
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(prune),
+            _ => {}
+        }
+    }
+    let mut page = value.clone();
+    prune(&mut page);
+    let mut result = parse_rows(&page, Filter::All, true, false)?;
+    result
+        .entries
+        .retain(|entry| matches!(entry.kind, Kind::Song | Kind::Album));
+    Ok(result)
+}
 /// Explicit account imports preserve user-added recordings and duplicate rows.
 /// Public search and browse retain the catalogue-only policy.
 pub fn parse_library_browse(value: &Value) -> Result<Results> {
@@ -677,4 +739,45 @@ pub fn matching_artwork(track: &LocalTrack, results: &Results) -> Option<String>
                 .then(|| entry.image.clone())
                 .flatten()
         })
+}
+
+fn lyrics_browse_id(value: &Value) -> Option<String> {
+    match value {
+        Value::Object(map) => {
+            if let Some(tab) = map.get("tabRenderer") {
+                if tab["unselectable"] == true {
+                    return None;
+                }
+                if let Some(id) = tab
+                    .pointer("/endpoint/browseEndpoint/browseId")
+                    .and_then(Value::as_str)
+                    .filter(|s| s.starts_with("MPLY") && s.len() < 256)
+                {
+                    return Some(id.into());
+                }
+            }
+            map.values().find_map(lyrics_browse_id)
+        }
+        Value::Array(rows) => rows.iter().find_map(lyrics_browse_id),
+        _ => None,
+    }
+}
+pub fn parse_music_lyrics(value: &Value) -> Option<crate::lyrics::Lyrics> {
+    let shelf = find(value, "musicDescriptionShelfRenderer")?;
+    let content = text(&shelf["description"]);
+    let lines: Vec<_> = content
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .take(2000)
+        .map(|s| crate::lyrics::Line {
+            at_ms: None,
+            text: s.to_owned(),
+        })
+        .collect();
+    (!lines.is_empty()).then_some(crate::lyrics::Lyrics {
+        lines,
+        synced: false,
+        instrumental: false,
+    })
 }
