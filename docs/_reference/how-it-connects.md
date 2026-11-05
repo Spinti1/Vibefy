@@ -13,7 +13,9 @@ either provider is optional; Spotify access remains necessary for private Spotif
 imports and operations requiring its account. Guest playback uses the existing
 YouTube engine. The mobile web beta is separate.
 
-Home offers Create playlist, Import YouTube playlist and Import Spotify playlist.
+Home offers Create playlist and Import Spotify playlist. Since 0.4.50 YouTube
+playlists open directly from the connected library shelf, without a separate
+YouTube import button.
 Playlist imports copy metadata without modifying the original. Reimporting the
 same URL refreshes one local copy. Spotify pagination is complete and its snapshot
 is checked again before saving. The public yt-dlp YouTube import is bounded to

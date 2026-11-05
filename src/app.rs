@@ -14999,7 +14999,6 @@ mod tests {
                 }
                 for label in [
                     "Create playlist",
-                    "Import YouTube playlist",
                     "Import Spotify playlist",
                     "Vibefy playlists",
                 ] {
@@ -15008,6 +15007,7 @@ mod tests {
                         "missing {label} at {width}: {rendered}"
                     );
                 }
+                assert!(!rendered.contains("Import YouTube playlist"));
                 assert!(!rendered.contains("Step 1"));
                 assert!(!rendered.contains("Bring your playlists along"));
             }

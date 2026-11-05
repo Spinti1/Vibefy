@@ -14,12 +14,11 @@ pub fn home(app: &mut App, ui: &mut egui::Ui) {
     egui::Frame::new().fill(p.panel).stroke(egui::Stroke::new(1.0,p.outline)).corner_radius(14).inner_margin(18.0).show(ui,|ui| {
         theme::text(ui,"Your music, your playlists",theme::semibold(20.0),p.text);
         ui.add_space(4.0);
-        ui.label(egui::RichText::new("Create a playlist or bring one from another service.").color(p.secondary));
+        ui.label(egui::RichText::new("Create a playlist or import one from Spotify. Your YouTube playlists appear below after connecting.").color(p.secondary));
         ui.add_space(12.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing=egui::vec2(10.0,10.0);
             if theme::soft_button(ui,&p,Some(Icon::Plus),"Create playlist",true).clicked(){send(app,Edit::Show(Dialog::New{name:String::new(),backup:app.music_accounts[0].connected}));}
-            if theme::soft_button(ui,&p,Some(Icon::ListPlus),"Import YouTube playlist",false).clicked(){send(app,Edit::Show(Dialog::Import{youtube:true,url:String::new(),backup:false}));}
             if theme::soft_button(ui,&p,Some(Icon::ListPlus),"Import Spotify playlist",false).clicked(){send(app,Edit::Show(Dialog::Import{youtube:false,url:String::new(),backup:false}));}
         });
         ui.add_space(12.0);

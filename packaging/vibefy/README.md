@@ -29,3 +29,7 @@ new installer will immediately avoid SmartScreen. Store distribution is a
 separate option. Do not disable SmartScreen or Defender to distribute Vibefy.
 
 Microsoft reference: https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation
+
+## Development disk cleanup
+
+Rust compilation and test artifacts are local developer files; they are not installed for users. After building and installing the current version, run `packaging/vibefy/clean-build-artifacts.ps1` to retain the production executable and newest Setup while removing old installers, debug artifacts, release intermediates and obsolete scratch binaries. Preview with `-WhatIf`. The script refuses active builds and linked artifact trees, and never visits application data or credentials. A later build regenerates its dependencies and will take longer.

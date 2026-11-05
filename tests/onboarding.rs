@@ -58,11 +58,7 @@ fn home_import_controls_are_visible_without_mandatory_transfer_in_small_window()
     app.settings.welcome_completed = true;
     app.auth = AuthStatus::SignedOut;
     let tree = render_sized(&ctx, &mut app, 820.0, 640.0);
-    for label in [
-        "Create playlist",
-        "Import YouTube playlist",
-        "Import Spotify playlist",
-    ] {
+    for label in ["Create playlist", "Import Spotify playlist"] {
         let bounds = button(&tree, label).bounds().unwrap();
         assert!(
             bounds.y1 <= 640.0 && bounds.x1 <= 820.0,
@@ -180,7 +176,12 @@ fn connected_accounts_open_home_without_the_old_transfer_wizard() {
         }]);
     let tree = render(&ctx, &mut app);
     button(&tree, "Create playlist");
-    button(&tree, "Import YouTube playlist");
+    assert!(
+        !tree
+            .nodes
+            .iter()
+            .any(|(_, n)| n.label() == Some("Import YouTube playlist"))
+    );
     assert!(
         !tree
             .nodes
