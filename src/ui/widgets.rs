@@ -1027,7 +1027,8 @@ fn item_menu_at(
     }
     super::personal_library::song_menu(ui, app, std::slice::from_ref(item), context);
     if uri.starts_with("vibefy:") {
-        if let PlayableItem::Track(track) = item
+        if app.is_connected()
+            && let PlayableItem::Track(track) = item
             && menu_item(
                 ui,
                 &palette,

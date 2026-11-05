@@ -1,11 +1,6 @@
 //! Local playlist metadata and account-scoped YouTube backups. No audio is stored here.
 use crate::{
-    addons::Collection,
-    api::{ApiGateway, Operation, models::PlayableItem},
-    http::Http,
-    music_accounts,
-    music_session::Session,
-    player::LocalTrack,
+    addons::Collection, http::Http, music_accounts, music_session::Session, player::LocalTrack,
     settings::ProxyConfig,
 };
 use anyhow::{Context, Result, ensure};
@@ -14,7 +9,6 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, HashSet},
     path::{Path, PathBuf},
-    sync::Arc,
 };
 
 pub const MAX_LISTS: usize = 200;
@@ -71,7 +65,12 @@ pub fn spotify_id(text: &str) -> Option<String> {
         {
             return None;
         }
-        url.path().strip_prefix("/playlist/")?.to_owned()
+        let parts: Vec<_> = url.path_segments()?.collect();
+        match parts.as_slice() {
+            ["playlist", id] => (*id).to_owned(),
+            [locale, "playlist", id] if locale.starts_with("intl-") => (*id).to_owned(),
+            _ => return None,
+        }
     };
     (id.len() == 22 && id.bytes().all(|b| b.is_ascii_alphanumeric())).then_some(id)
 }
@@ -204,7 +203,6 @@ pub struct ContextData {
     pub config: PathBuf,
     pub proxy: ProxyConfig,
     pub http: Http,
-    pub api: Arc<ApiGateway>,
 }
 
 pub async fn execute(task: Task, context: ContextData) -> Result<Output> {
@@ -292,58 +290,9 @@ pub async fn execute(task: Task, context: ContextData) -> Result<Output> {
         } => {
             let id =
                 spotify_id(&url).ok_or_else(|| anyhow::anyhow!("Paste a Spotify playlist link"))?;
-            let header = context
-                .api
-                .client_for(Operation::PlaylistMetadata(
-                    context.api.playlist_access(&id),
-                ))
-                .await?
-                .playlist(&id)
-                .await?;
-            context.api.observe_playlist(&header);
-            let client = context
-                .api
-                .client_for(Operation::PlaylistItems(context.api.playlist_access(&id)))
-                .await?;
-            let mut offset = 0;
-            let mut tracks = Vec::new();
-            let mut seen = HashSet::new();
-            loop {
-                (context.progress)(format!("Importing Spotify songs · {} loaded", tracks.len()));
-                let page = client.playlist_items(&id, offset, 50).await?;
-                for row in &page.items {
-                    if let Some(PlayableItem::Track(track)) = row.playable() {
-                        if !track.is_local {
-                            tracks.push(crate::playlist_tools::local_track(track));
-                        }
-                    }
-                }
-                ensure!(tracks.len() <= MAX_TRACKS, "Playlist exceeds 20,000 songs");
-                match page.next_offset() {
-                    Some(next) if next > offset && seen.insert(next) => offset = next,
-                    Some(_) => anyhow::bail!("Spotify returned a repeated page; retry the import"),
-                    None => break,
-                }
-            }
-            let after = context
-                .api
-                .client_for(Operation::PlaylistMetadata(
-                    context.api.playlist_access(&id),
-                ))
-                .await?
-                .playlist(&id)
-                .await?;
-            ensure!(
-                header.snapshot_id.is_none() || after.snapshot_id == header.snapshot_id,
-                "Playlist changed during import; please retry"
-            );
-            Ok(Output::Imported(Collection {
-                title: header.name,
-                source: format!("https://open.spotify.com/playlist/{id}"),
-                tracks,
-                image: crate::api::models::pick_image(&header.images, 640).map(str::to_owned),
-                owner: Some("Imported from Spotify".into()),
-            }))
+            Ok(Output::Imported(
+                crate::public_spotify::import(&id, &*context.progress).await?,
+            ))
         }
         Task::Account => {
             let session = music_accounts::youtube_session(&context.config, &context.proxy).await?;

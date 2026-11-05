@@ -8,17 +8,29 @@ nav_order: 1
 
 ## Optional accounts and playlist backups (0.4.48)
 
-The desktop welcome screen offers Spotify, YouTube and Continue as guest. Connecting
-either provider is optional; Spotify access remains necessary for private Spotify
-imports and operations requiring its account. Guest playback uses the existing
+Since 0.4.51 the desktop welcome screen offers YouTube and Continue as guest.
+Spotify connection controls and automatic grant restoration are removed. Stored
+credentials are left untouched but are not loaded. Guest playback uses the existing
 YouTube engine. The mobile web beta is separate.
 
 Home offers Create playlist and Import Spotify playlist. Since 0.4.50 YouTube
 playlists open directly from the connected library shelf, without a separate
 YouTube import button.
 Playlist imports copy metadata without modifying the original. Reimporting the
-same URL refreshes one local copy. Spotify pagination is complete and its snapshot
-is checked again before saving. The public yt-dlp YouTube import is bounded to
+same URL refreshes one local copy. Spotify imports require a public playlist;
+private playlists and Liked Songs are not supported. A fresh direct client reads
+the public embed page without cookies or account tokens, keeps its anonymous
+public-session token in memory, then reads the public web player’s registered
+queryPlaylist operation sequentially in 100-entry pages. The endpoint and query
+are pinned to the observed public client, not a supported Spotify Web API contract.
+Schema or access changes fail visibly, with no authentication fallback. Responses
+are capped at 8 MB; redirects, invalid identities, repeated offsets, truncated
+previews and size changes are rejected. For multiple pages the first page is
+rechecked before saving, but this public schema does not expose an atomic snapshot.
+Order and repeated songs are preserved. Unavailable/unsupported rows are counted
+and reported. Explicit rate-limit waits are shared across public imports; an
+unsuccessful import leaves the old local copy intact. No credentials are written
+and the source Spotify playlist is never modified. The public yt-dlp YouTube import is bounded to
 500 rows; authenticated Music imports retain the existing 20,000-song/page bounds.
 
 Vibefy playlists are identified by random local IDs. They support naming, adding

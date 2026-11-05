@@ -2202,7 +2202,6 @@ impl Worker {
             config: self.dirs.config.clone(),
             proxy: self.engine_config.proxy.clone(),
             http: self.http.clone(),
-            api: self.api.clone(),
         };
         let events = self.events.clone();
         let waker = self.waker.clone();
@@ -2770,8 +2769,9 @@ impl Worker {
                     config,
                     client_id,
                 } => {
-                    let _ = (request, config);
-                    self.sign_in(client_id);
+                    let _ = (request, config, client_id);
+                    self.emit(Event::Auth(AuthStatus::SignedOut));
+                    self.emit(Event::Error("Spotify sign-in has been removed. Import a public playlist from Home instead.".into()));
                 }
                 Command::CancelSignIn => {
                     self.authorization_attempt += 1;
@@ -2804,7 +2804,10 @@ impl Worker {
                         log::warn!("unable to remove the playlist caches: writer unavailable");
                     }
                 }
-                Command::AuthorizePlayback => self.authorize_playback(),
+                Command::AuthorizePlayback => {
+                    self.guest = true;
+                    self.resume_engine();
+                }
                 Command::RestartEngine(mut config) => {
                     // Audio settings must not revert a proxy change whose UI
                     // acknowledgement was still in flight when this was clicked.
@@ -3422,8 +3425,8 @@ impl Worker {
                     },
                     result,
                 ),
-                Command::ConfigurePersonalWebApp(client_id) => {
-                    self.configure_personal_web_app(client_id)
+                Command::ConfigurePersonalWebApp(_) => {
+                    self.emit(Event::Error("Spotify account connections are no longer supported. Import a public playlist from Home.".into()));
                 }
             }
         }
@@ -3441,7 +3444,8 @@ impl Worker {
     // ---- Web API sign-in --------------------------------------------------
 
     fn restore_session(&mut self) {
-        self.restore_spotify_grants();
+        // Spotify connections are retired. Leave stored grants untouched, but never load them.
+        self.emit(Event::Auth(AuthStatus::SignedOut));
     }
 
     fn restore_spotify_grants(&mut self) {

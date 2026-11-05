@@ -64,6 +64,7 @@ pub mod playlist_tools;
 mod playlist_visibility;
 pub mod power;
 pub mod prerelease;
+pub mod public_spotify;
 pub mod recording_match;
 pub mod resample;
 pub mod search;

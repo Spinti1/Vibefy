@@ -1,6 +1,6 @@
 # Vibefy
 
-A desktop music player for Spotify and YouTube libraries, with lyrics and optional mods.
+A desktop music player with YouTube libraries, public Spotify playlist imports, lyrics and optional mods.
 Built in Rust, based on [Spotifast](https://github.com/crmne/spotifast).
 
 [Download for Windows](https://github.com/Spinti1/Vibefy/releases/latest) · [Website](https://usevibefy.online) · [Report a bug](https://github.com/Spinti1/Vibefy/issues) · [Credits](CREDITS.md)
@@ -11,7 +11,7 @@ Built in Rust, based on [Spotifast](https://github.com/crmne/spotifast).
 
 ## Features
 
-- **Library:** optional Spotify/YouTube connections, local Vibefy playlists, playlist imports and optional unlisted YouTube backups. Export/import metadata backups without storing audio.
+- **Library:** optional YouTube connection, local Vibefy playlists, public Spotify playlist imports without signing in and optional unlisted YouTube backups. Export/import metadata backups without storing audio.
 - **Playback:** YouTube Music search, queue controls and a ten-band equalizer.
 - **Lyrics:** synchronized or plain lyrics from available providers, with background controls.
 - **Visualizers:** 16 built-in effects from Vivy, Backmusic and SoundVisualizer, selected directly in the player.

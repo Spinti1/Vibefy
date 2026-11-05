@@ -716,6 +716,9 @@ fn paint_expanded_art(app: &mut App, ui: &mut egui::Ui, rect: Rect) {
 /// Ownership filtering is flat, like text search, so matching playlists in
 /// collapsed folders remain reachable. Liked Songs belongs to the account.
 fn playlist_rows(app: &App, sort: LibrarySort, needle: &str, entries: &mut Vec<Entry>) {
+    if app.user_id().is_none() {
+        return;
+    }
     let liked = liked_entry(app);
     if needle.is_empty() || liked.name.to_lowercase().contains(needle) {
         entries.push(liked);

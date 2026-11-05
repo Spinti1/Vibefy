@@ -417,10 +417,7 @@ fn slow_banner(app: &mut App, ui: &mut egui::Ui) {
             "Search remains available. Your Spotify library can finish loading when Spotify accepts requests again.",
         ),
         [
-            (
-                gettext(locale, "Developer setup (optional)"),
-                Action::OpenPersonalAppSetup,
-            ),
+            (gettext(locale, "Home"), Action::Open(Page::Home)),
             (
                 // Translators: a button that opens a page explaining why
                 // the banner it sits in appeared.

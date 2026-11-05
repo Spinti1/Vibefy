@@ -998,7 +998,7 @@ impl App {
         let backend = Backend::spawn(
             dirs.clone(),
             engine_config,
-            settings.web_client_id.clone(),
+            None, // Retired Spotify client settings are retained for compatibility, never used.
             waker.clone(),
             options.restore_sign_in,
         );

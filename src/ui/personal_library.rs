@@ -209,9 +209,8 @@ pub fn dialog(app: &mut App, ctx: &egui::Context) {
             }
             Dialog::Import{youtube,url,backup}=>{
                 theme::text(ui,if *youtube {"Import YouTube playlist"} else {"Import Spotify playlist"},theme::bold(24.0),p.text);
-                ui.label(if *youtube {"Paste a public or unlisted playlist link. Connect YouTube for private playlists. Public imports support up to 500 songs."} else {"Paste a Spotify playlist link. The playlist is copied into Vibefy; its original stays unchanged. Spotify may require connecting your account."});
+                ui.label(if *youtube {"Paste a public or unlisted playlist link. Connect YouTube for private playlists. Public imports support up to 500 songs."} else {"Public Spotify playlists only. Make the playlist public in Spotify and paste its link. No Spotify login is needed. Private playlists and Liked Songs cannot be imported. The original playlist stays unchanged."});
                 ui.add(egui::TextEdit::singleline(url).hint_text("Playlist link").char_limit(1000).desired_width(f32::INFINITY));
-                if !*youtube && !app.is_connected() && theme::pill_button(ui,&p,"Connect Spotify",false).clicked(){app.actions.push(Action::SignIn);}
                 backup_option(app,ui,backup);
                 let busy=app.personal.tasks.values().any(|p|!p.backup);
                 if ui.add_enabled(!busy && !url.trim().is_empty(),egui::Button::new("Import playlist").min_size(egui::vec2(160.0,36.0))).clicked(){action=Some(Edit::Import{youtube:*youtube,url:url.clone(),backup:*backup});}

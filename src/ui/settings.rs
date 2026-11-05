@@ -2,7 +2,6 @@
 
 use egui::{Align, CornerRadius, Frame, Layout, Margin, Stroke, Vec2};
 
-use crate::api::models::pick_image;
 use crate::app::App;
 use crate::i18n::{gettext, ngettext, pgettext};
 use crate::model::{Action, Dialog};
@@ -388,73 +387,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let mut changed = false;
     let mut any_visible = false;
     let open_folder = gettext(locale, "Open folder");
-
-    let account = gettext(locale, "Account");
-    let sign_out = gettext(locale, "Sign out");
-    let account_rows = [RowText::new(sign_out.clone(), account.clone())];
-    if section_matches(&needle, &account, &account_rows) {
-        any_visible = true;
-        section(ui, &palette, &account, |ui| {
-            if app.user.is_none() {
-                theme::text(ui, "Spotify", theme::semibold(15.0), palette.text);
-                if theme::pill_button(ui, &palette, "Connect Spotify", false).clicked() {
-                    app.actions.push(Action::SignIn);
-                }
-                return;
-            }
-            if row_matches(&needle, &format!("{sign_out} {account}"), "") {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 14.0;
-                    let avatar = app.user.as_ref().and_then(|user| {
-                        pick_image(&user.images, app.art_px(56.0)).map(str::to_string)
-                    });
-                    widgets::cover(ui, &palette, avatar.as_deref(), 56.0, 28.0, Icon::User);
-                    ui.vertical(|ui| {
-                        let name = app
-                            .user
-                            .as_ref()
-                            .map(|user| user.name().to_string())
-                            .unwrap_or_default();
-                        theme::text(ui, name, theme::semibold(16.0), palette.text);
-                        let product = app
-                            .user
-                            .as_ref()
-                            .and_then(|user| user.product.clone())
-                            .map(|product| match product.as_str() {
-                                "premium" => {
-                                    "Spotify Premium (YouTube playback active)".to_string()
-                                }
-                                "free" | "open" => {
-                                    gettext(locale, "Spotify Free (YouTube playback active)")
-                                        .into_owned()
-                                }
-                                other => other.to_string(),
-                            })
-                            .unwrap_or_default();
-                        theme::text(ui, product, theme::regular(13.0), palette.secondary);
-                        if let Some(username) =
-                            app.local.connected.then(|| app.local.username.clone())
-                            && !username.is_empty()
-                        {
-                            theme::text(
-                                ui,
-                                // Translators: {username} is the Spotify account's user name.
-                                gettext(locale, "Connected as {username}")
-                                    .replace("{username}", &username),
-                                theme::regular(12.0),
-                                palette.dim,
-                            );
-                        }
-                    });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if theme::pill_button(ui, &palette, &sign_out, false).clicked() {
-                            app.actions.push(Action::SignOut);
-                        }
-                    });
-                });
-            }
-        });
-    }
 
     if needle.is_empty() || "connected accounts google youtube juicevault login".contains(&needle) {
         any_visible = true;

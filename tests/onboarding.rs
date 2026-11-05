@@ -115,7 +115,7 @@ fn button<'a>(tree: &'a egui::accesskit::TreeUpdate, label: &str) -> &'a egui::a
         .1
 }
 #[test]
-fn optional_account_buttons_share_size_and_center_and_offer_skip() {
+fn welcome_offers_youtube_and_skip_without_spotify_connection() {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     theme::install(&ctx);
@@ -124,12 +124,13 @@ fn optional_account_buttons_share_size_and_center_and_offer_skip() {
     app.music_accounts[0].connected = false;
     let tree = render(&ctx, &mut app);
     button(&tree, "Skip · Continue as guest");
-    let first = button(&tree, "Connect Spotify").bounds().unwrap();
-    let second = button(&tree, "Connect YouTube").bounds().unwrap();
-    assert_eq!(first.x1 - first.x0, second.x1 - second.x0);
-    assert_eq!(first.y1 - first.y0, second.y1 - second.y0);
-    assert!(((first.x1 + first.x0) - (second.x1 + second.x0)).abs() < 1.0);
-    assert!(first.y1 <= second.y0);
+    let youtube = button(&tree, "Connect YouTube").bounds().unwrap();
+    assert!(youtube.x0 >= 0.0 && youtube.x1 <= 1000.0);
+    assert!(!tree.nodes.iter().any(|(_, n)| n.label().is_some_and(
+        |s| s.contains("Connect Spotify")
+            || s.contains("Client ID")
+            || s.contains("Set up your Spotify app")
+    )));
 }
 #[test]
 fn spotify_connection_opens_home_without_requiring_youtube() {
