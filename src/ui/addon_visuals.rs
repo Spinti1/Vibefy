@@ -172,8 +172,8 @@ fn fullscreen_controls(app: &mut App, ui: &mut egui::Ui, mode: Id) {
                         ui.add(egui::Slider::new(&mut config.fps, 15..=60).text("Animation FPS"));
                         ui.small("Lower FPS reduces graphics work.");
                         ui.checkbox(&mut config.show_title, "Song title and artist");
+                        ui.checkbox(&mut config.show_cover, "Album cover");
                         if mode == Id::Backmusic {
-                            ui.checkbox(&mut config.show_cover, "Album cover");
                             ui.checkbox(&mut config.particles, "Particles");
                         }
                         ui.separator();

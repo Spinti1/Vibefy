@@ -66,6 +66,29 @@ mod release_update_tests {
         }
     }
     #[test]
+    fn cover_and_colour_regression_all_effects_draw_one_optional_cover_inside_the_view() {
+        for (width, height) in [(1200., 760.), (320., 240.), (80., 60.)] {
+            for effect in EFFECTS {
+                let mut input = input(width, height);
+                input[13] = effect.style as f32;
+                input[16] = 1.;
+                let commands = render(effect.id, &input);
+                let covers: Vec<_> = commands.iter().filter(|c| c.kind == 7).collect();
+                assert_eq!(covers.len(), 1, "{}", effect.label);
+                assert_eq!(
+                    commands.last().unwrap().kind,
+                    7,
+                    "cover must be above the effect"
+                );
+                let [x, y, size, ..] = covers[0].values;
+                assert!(size > 0. && x - size / 2. >= 0. && y - size / 2. >= 0.);
+                assert!(x + size / 2. <= width && y + size / 2. <= height);
+                input[16] = 0.;
+                assert!(render(effect.id, &input).iter().all(|c| c.kind != 7));
+            }
+        }
+    }
+    #[test]
     fn builtin_visualizers_migrate_old_mod_settings_and_keep_optional_mods() {
         let mut p = Preferences::default();
         p.require_packages = true;
@@ -219,6 +242,20 @@ pub fn render(id: Id, input: &[f32]) -> Vec<Draw> {
         Id::SoundVisualizer => frame.render_sound(x, y, w, h),
         _ => {}
     }
+    if id.is_visualizer() && frame.n(16) > 0. {
+        let dim = w.min(h);
+        let (cx, cy, size) = if id == Id::Backmusic {
+            (x + w / 2., y + h / 2. - 20., dim * 0.22 * 1.15)
+        } else {
+            let size = (dim * 0.22).clamp(48., 160.).min(dim * 0.5);
+            (x + w - size / 2. - 20., y + size / 2. + 56., size)
+        };
+        // Append once, after the effect/particles, so the image stays visible.
+        let size = size.min(dim * 0.5);
+        let cx = cx.clamp(x + size / 2., x + w - size / 2.);
+        let cy = cy.clamp(y + size / 2., y + h - size / 2.);
+        frame.draw(7, [cx, cy, size, 12., 0., 0., 0., 0.]);
+    }
     frame.output
 }
 struct Frame<'a> {
@@ -316,9 +353,6 @@ impl Frame<'_> {
                     ],
                 );
             }
-        }
-        if self.n(16) > 0. {
-            self.draw(7, [cx, cy, radius * 1.15, 12., 0., 0., 0., 0.]);
         }
         if self.n(15) > 0. {
             for i in 0..48 {

@@ -4,7 +4,7 @@ use crate::{
     app::App,
     theme::{self, Icon},
 };
-use egui::{Color32, Rect, Stroke, Vec2, pos2, vec2};
+use egui::{Color32, Rect, Vec2, pos2, vec2};
 pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32)]) {
     let visual = id.is_visualizer();
     if !visual && !app.settings.addons.active(id) {
@@ -72,18 +72,25 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
         .unwrap_or(app.palette.accent)
         .gamma_multiply(config.brightness.clamp(0.2, 1.));
     let mut points = Vec::new();
-    let mut stroke = Stroke::new(1., tint);
+    let mut stroke: egui::epaint::PathStroke = (1., tint).into();
     for cmd in commands {
         let [a, b, c, d, e, f, g, _] = cmd.values;
         match cmd.kind {
             0 => {
                 points.clear();
-                stroke = Stroke::new(a.clamp(0.1, 10.), tint.gamma_multiply(b.clamp(0., 1.)));
+                stroke = if visual {
+                    super::visualizer_style::stroke(rect, a.clamp(0.1, 10.), config.brightness, b)
+                } else {
+                    (a.clamp(0.1, 10.), tint.gamma_multiply(b.clamp(0., 1.))).into()
+                };
             }
             1 => points.push(pos2(a, b)),
             2 => {
                 if points.len() > 1 {
-                    painter.add(egui::Shape::line(std::mem::take(&mut points), stroke));
+                    painter.add(egui::Shape::line(
+                        std::mem::take(&mut points),
+                        stroke.clone(),
+                    ));
                 }
             }
             3 => {
@@ -96,6 +103,13 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
                         Color32::from_rgb(0, 153, 255),
                         Color32::from_rgb(102, 51, 255),
                     ][(g as usize).min(5)]
+                } else if visual {
+                    super::visualizer_style::color_at(
+                        rect,
+                        pos2(a + c / 2., b + d / 2.),
+                        config.brightness,
+                        1.,
+                    )
                 } else {
                     tint
                 };
@@ -109,7 +123,11 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
                 painter.circle_filled(
                     pos2(a, b),
                     c.clamp(0., 100.),
-                    tint.gamma_multiply(d.clamp(0., 1.)),
+                    if visual {
+                        super::visualizer_style::color_at(rect, pos2(a, b), config.brightness, d)
+                    } else {
+                        tint.gamma_multiply(d.clamp(0., 1.))
+                    },
                 );
             }
             5 => {
@@ -162,10 +180,25 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
             ),
             7 => {
                 if let Some(now) = app.now_playing() {
-                    super::widgets::paint_cover(
+                    let source_cover = app
+                        .local
+                        .track
+                        .as_ref()
+                        .filter(|track| track.uri == now.uri)
+                        .and_then(|track| track.cover_url.as_deref());
+                    let (requested, thumbnail) = super::visualizer_style::artwork(
+                        now.art_url.as_deref(),
+                        now.art_small.as_deref(),
+                        source_cover,
+                    );
+                    super::widgets::paint_cover_with_thumbnail(
                         ui,
                         &app.palette,
-                        now.art_url.as_deref(),
+                        super::widgets::CoverSources {
+                            requested,
+                            thumbnail,
+                            ..Default::default()
+                        },
                         Rect::from_center_size(pos2(a, b), Vec2::splat(c.clamp(0., 4096.))),
                         d.clamp(0., 100.),
                         Icon::Music,

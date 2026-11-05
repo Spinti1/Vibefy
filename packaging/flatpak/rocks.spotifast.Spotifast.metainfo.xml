@@ -50,6 +50,7 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.4.46" date="2026-11-05"><description><p>Fix visualizer artwork and add multi-colour rendering.</p></description></release>
     <release version="0.4.45" date="2026-11-05"><description><p>Sixteen built-in visualizer effects in one selector, with preserved settings.</p></description></release>
     <release version="0.4.44" date="2026-11-05"><description><p>Optional 2D visualizers, shared cloud Jam sessions, audio edition selection and linked playlist deletion.</p></description></release>
     <release version="0.4.43" date="2026-11-05"><description><p>Continue playback past unavailable recordings and distinguish connection errors.</p></description></release>

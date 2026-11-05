@@ -32,6 +32,7 @@ mod spicy_lyrics;
 pub mod topbar;
 mod track_peek;
 mod update;
+mod visualizer_style;
 pub mod widgets;
 pub mod winamp;
 
