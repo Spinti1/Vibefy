@@ -6,6 +6,9 @@ use crate::{
 };
 
 impl App {
+    pub fn source_collection(&self, source: &str) -> Option<&crate::addons::Collection> {
+        self.addons.collections.iter().find(|c| c.source == source)
+    }
     pub fn library_access(&self) -> bool {
         self.settings.welcome_completed
             || (self.is_connected() && self.user.is_some())
@@ -52,6 +55,15 @@ impl App {
             self.settings.welcome_completed = true;
             self.settings_dirty = true;
             self.backend.send(Command::GuestPlayback(true));
+            if !self.settings.retired_transfers_recovered {
+                self.personal_request(
+                    Task::RecoverLegacy,
+                    None,
+                    false,
+                    String::new(),
+                    "Restoring saved playlist snapshots…",
+                );
+            }
         }
         let observed = self.music_accounts[0]
             .connected
@@ -88,7 +100,7 @@ impl App {
                 self.settings.playlist_backups.get(&c.source) == Some(&scope)
                     && self.personal.backups.get(&c.source).is_none_or(|r| {
                         (r.message.is_none()
-                            || (r.retry_at > 0 && crate::playlist_mirror::now() >= r.retry_at))
+                            || (r.retry_at > 0 && crate::playlist_tools::now() >= r.retry_at))
                             && self.personal.current.get(&c.source) != Some(&r.fingerprint)
                     })
             })
@@ -120,7 +132,7 @@ impl App {
                 self.open(Page::Home);
             }
             Edit::Create { name, backup } => {
-                if !crate::playlist_mirror::valid_title(&name) {
+                if !crate::playlist_tools::valid_title(&name) {
                     self.personal.message = Some("Enter a playlist name (1–100 characters)".into());
                     return;
                 }
@@ -144,7 +156,7 @@ impl App {
                 }
             }
             Edit::Rename { source, name } => {
-                if !crate::playlist_mirror::valid_title(&name) {
+                if !crate::playlist_tools::valid_title(&name) {
                     return;
                 }
                 if let Some(list) = self
@@ -308,6 +320,18 @@ impl App {
             return;
         }
         match result {
+            Ok(Output::LegacyRecovered(collections)) => {
+                match crate::playlist_recovery::merge(&mut self.addons.collections, collections) {
+                    Ok(count) => {
+                        // Queue the library before its completion flag on the same file writer.
+                        self.personal_changed();
+                        self.settings.retired_transfers_recovered = true;
+                        self.settings_dirty = true;
+                        if count > 0 { self.personal.message = Some(format!("Recovered {count} saved playlists. Spotify and YouTube playlists are now independent.")); }
+                    }
+                    Err(error) => self.personal.message = Some(format!("Playlist recovery: {error}. Original files were kept; recovery can be retried after restarting.")),
+                }
+            }
             Ok(Output::Recovered{collection,scope,report})=>{
                 if pending.epoch!=self.music_accounts_serial[0] || !self.music_accounts[0].connected {return;}
                 let source=collection.source.clone();

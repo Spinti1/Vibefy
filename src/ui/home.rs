@@ -23,11 +23,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(12.0);
     super::personal_library::home(app, ui);
     let all = quick_access_tiles(app);
-    for (group, title) in [(4, "Vibefy playlists"), (0, "Linked"), (1, "Spotify")] {
+    for (group, title) in [(4, "Vibefy playlists"), (1, "Spotify")] {
         if group == 1 && app.user_id().is_none() {
-            continue;
-        }
-        if group == 0 && app.mirror.lists.is_empty() {
             continue;
         }
         ui.label(
@@ -39,15 +36,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         let tiles: Vec<_> = all
             .iter()
             .filter(|tile| {
-                tile_group(app, tile) == group
+                tile_group(tile) == group
                     && !tile.uri.as_deref().is_some_and(|s| app.playlist_hidden(s))
             })
             .cloned()
             .collect();
         if tiles.is_empty() {
-            ui.small(if group == 0 {
-                "Your linked Spotify and YouTube playlists appear here."
-            } else if group == 4 {
+            ui.small(if group == 4 {
                 "Create a playlist above, then add songs from search using their right-click menu."
             } else {
                 "Your Spotify playlists appear here."
@@ -56,9 +51,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         quick_access(app, ui, &tiles);
         ui.add_space(20.0);
     }
-    youtube_playlists(app, ui);
+    youtube_playlists(app, ui, &all);
     if app.settings.addons.active(crate::addons::Id::JuiceVault) {
-        juice_playlists(app, ui);
+        juice_playlists(app, ui, &all);
     }
     ui.add_space(16.0);
 
@@ -72,7 +67,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         podcasts(app, ui);
         top_artists(app, ui);
     }
-    hidden_playlists(app, ui);
+    hidden_playlists(app, ui, &all);
 }
 
 #[derive(Clone)]
@@ -88,17 +83,13 @@ struct Tile {
     song: Option<crate::api::models::Track>,
 }
 
-/// Linked copies remain in the Spotify shelf; native YouTube lists get their own shelf.
-fn youtube_playlists(app: &mut App, ui: &mut egui::Ui) {
-    let linked: std::collections::HashSet<_> = app
-        .mirror
-        .lists
+fn youtube_playlists(app: &mut App, ui: &mut egui::Ui, all: &[Tile]) {
+    let backed_up: std::collections::HashSet<_> = app
+        .addons
+        .collections
         .iter()
-        .filter(|l| {
-            !l.youtube_id.is_empty()
-                && app.is_saved(&format!("spotify:playlist:{}", l.spotify_id)) != Some(false)
-        })
-        .map(|l| l.youtube_id.as_str())
+        .filter_map(|c| app.personal.backups.get(&c.source))
+        .map(|b| b.remote.clone())
         .collect();
     let mut seen = std::collections::HashSet::new();
     let playlists: Vec<_> = app.music_accounts[0]
@@ -106,16 +97,7 @@ fn youtube_playlists(app: &mut App, ui: &mut egui::Ui) {
         .iter()
         .filter(|p| {
             let id = p.id.strip_prefix("VL").unwrap_or(&p.id);
-            !linked.contains(id)
-                && !app.personal.backups.values().any(|r| {
-                    r.remote == id
-                        && app.addons.collections.iter().any(|c| {
-                            app.personal
-                                .backups
-                                .get(&c.source)
-                                .is_some_and(|b| b.remote == id)
-                        })
-                })
+            !backed_up.contains(id)
                 && !app.playlist_hidden(&format!("https://www.youtube.com/playlist?list={id}"))
                 && seen.insert(id.to_owned())
         })
@@ -129,11 +111,10 @@ fn youtube_playlists(app: &mut App, ui: &mut egui::Ui) {
             .color(app.palette.text),
     );
     ui.add_space(10.0);
-    let saved: Vec<_> = quick_access_tiles(app)
-        .into_iter()
-        .filter(|t| {
-            tile_group(app, t) == 2 && !t.uri.as_deref().is_some_and(|s| app.playlist_hidden(s))
-        })
+    let saved: Vec<_> = all
+        .iter()
+        .filter(|t| tile_group(t) == 2 && !t.uri.as_deref().is_some_and(|s| app.playlist_hidden(s)))
+        .cloned()
         .collect();
     quick_access(app, ui, &saved);
     if playlists.is_empty() && saved.is_empty() {
@@ -219,17 +200,8 @@ fn youtube_playlists(app: &mut App, ui: &mut egui::Ui) {
     }
 }
 
-fn tile_group(app: &App, tile: &Tile) -> u8 {
+fn tile_group(tile: &Tile) -> u8 {
     match &tile.page {
-        Page::LocalCollection(source)
-            if app
-                .mirror
-                .lists
-                .iter()
-                .any(|p| !p.youtube_id.is_empty() && &p.collection.source == source) =>
-        {
-            0
-        }
         Page::Playlist(_) | Page::LikedSongs => 1,
         Page::LocalCollection(source) if source.starts_with("https://api.juicevault.xyz/") => 3,
         Page::LocalCollection(source) if crate::addons::playlist_url(source).is_ok() => 2,
@@ -237,7 +209,7 @@ fn tile_group(app: &App, tile: &Tile) -> u8 {
     }
 }
 
-fn juice_playlists(app: &mut App, ui: &mut egui::Ui) {
+fn juice_playlists(app: &mut App, ui: &mut egui::Ui, all: &[Tile]) {
     use crate::music_accounts::{Action as AccountAction, Provider};
     ui.add_space(20.0);
     ui.label(
@@ -257,10 +229,10 @@ fn juice_playlists(app: &mut App, ui: &mut egui::Ui) {
         })
         .cloned()
         .collect();
-    let saved: Vec<_> = quick_access_tiles(app)
-        .into_iter()
+    let saved: Vec<_> = all
+        .iter()
         .filter(|t| {
-            tile_group(app, t) == 3
+            tile_group(t) == 3
                 && !t.uri.as_deref().is_some_and(|s| app.playlist_hidden(s))
                 && !native.iter().any(|p| {
                     t.page
@@ -270,6 +242,7 @@ fn juice_playlists(app: &mut App, ui: &mut egui::Ui) {
                         ))
                 })
         })
+        .cloned()
         .collect();
     quick_access(app, ui, &saved);
     if native.is_empty() && saved.is_empty() {
@@ -358,19 +331,13 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
         song: None,
     };
     let playlist_tile = |playlist: &Playlist| {
-        let linked = app
-            .mirror
-            .lists
-            .iter()
-            .find(|list| list.spotify_id == playlist.id && !list.youtube_id.is_empty());
+        let imported_source = format!("https://open.spotify.com/playlist/{}", playlist.id);
         let imported = app
             .addons
             .collections
             .iter()
-            .find(|c| c.source == format!("https://open.spotify.com/playlist/{}", playlist.id));
-        let local_source = linked
-            .map(|l| l.collection.source.clone())
-            .or_else(|| imported.map(|c| c.source.clone()));
+            .find(|c| c.source == imported_source);
+        let local_source = imported.map(|c| c.source.clone());
         Tile {
             image: pick_image(&playlist.images, tile_art).map(str::to_string),
             name: playlist.name.clone(),
@@ -393,23 +360,13 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
         Vec::new()
     };
     let mut seen = std::collections::HashSet::from([Page::LikedSongs]);
-    for saved in app
-        .mirror
-        .lists
-        .iter()
-        .filter(|list| {
-            !list.youtube_id.is_empty()
-                && app.is_saved(&format!("spotify:playlist:{}", list.spotify_id)) != Some(false)
-        })
-        .map(|list| &list.collection)
-        .chain(app.addons.collections.iter().rev().filter(|saved| {
-            !app.music_accounts[0].connected
-                || !app.music_accounts[0].playlists.iter().any(|p| {
-                    let id = p.id.strip_prefix("VL").unwrap_or(&p.id);
-                    saved.source == format!("https://www.youtube.com/playlist?list={id}")
-                })
-        }))
-    {
+    for saved in app.addons.collections.iter().rev().filter(|saved| {
+        !app.music_accounts[0].connected
+            || !app.music_accounts[0].playlists.iter().any(|p| {
+                let id = p.id.strip_prefix("VL").unwrap_or(&p.id);
+                saved.source == format!("https://www.youtube.com/playlist?list={id}")
+            })
+    }) {
         let page = Page::LocalCollection(saved.source.clone());
         if seen.insert(page.clone()) {
             tiles.push(Tile {
@@ -1436,56 +1393,6 @@ fn source_menu(app: &mut App, ui: &mut egui::Ui, source: &str, name: &str) {
         super::personal_library::menu(app, ui, source, name);
         return;
     }
-    let linked = app
-        .mirror
-        .lists
-        .iter()
-        .find(|l| l.collection.source == source)
-        .map(|l| l.spotify_id.clone());
-    if let Some(id) = linked {
-        let playlist = app.known_playlist(&id).cloned();
-        if let Some(playlist) = playlist {
-            let owned = app.user_id().is_some_and(|id| playlist.owned_by(id));
-            if !owned
-                && widgets::menu_item(
-                    ui,
-                    &app.palette,
-                    Some(Icon::Trash),
-                    "Delete from Spotify and YouTube",
-                )
-            {
-                app.actions.push(Action::ShowDialog(
-                    crate::model::Dialog::ConfirmDeletePlaylist {
-                        id: id.clone(),
-                        name: name.into(),
-                        owned: false,
-                    },
-                ));
-            }
-            widgets::context_menu_items(ui, app, &playlist.uri, name, owned.then_some(&playlist));
-            ui.small("Linked playlist deletion removes it from both platforms.");
-            return;
-        }
-        widgets::playlist_visibility_menu(ui, app, source);
-        if widgets::menu_item(ui, &app.palette, Some(Icon::Play), "Open playlist") {
-            open_tile(app, &Page::LocalCollection(source.into()));
-        }
-        if widgets::menu_item(
-            ui,
-            &app.palette,
-            Some(Icon::Trash),
-            "Delete from Spotify and YouTube",
-        ) {
-            app.actions.push(Action::ShowDialog(
-                crate::model::Dialog::ConfirmDeletePlaylist {
-                    id,
-                    name: name.into(),
-                    owned: false,
-                },
-            ));
-        }
-        return;
-    }
     ui.set_min_width(200.0);
     widgets::playlist_visibility_menu(ui, app, source);
     if widgets::menu_item(ui, &app.palette, Some(Icon::Play), "Open playlist") {
@@ -1523,10 +1430,11 @@ fn source_menu(app: &mut App, ui: &mut egui::Ui, source: &str, name: &str) {
         ui.ctx().copy_text(source.into());
     }
 }
-fn hidden_playlists(app: &mut App, ui: &mut egui::Ui) {
-    let mut tiles: Vec<_> = quick_access_tiles(app)
-        .into_iter()
+fn hidden_playlists(app: &mut App, ui: &mut egui::Ui, all: &[Tile]) {
+    let mut tiles: Vec<_> = all
+        .iter()
         .filter(|t| t.uri.as_deref().is_some_and(|s| app.playlist_hidden(s)))
+        .cloned()
         .collect();
     for index in 0..2 {
         if index == 1 && !app.settings.addons.active(crate::addons::Id::JuiceVault) {
@@ -1542,11 +1450,9 @@ fn hidden_playlists(app: &mut App, ui: &mut egui::Ui) {
                 format!("https://api.juicevault.xyz/user/playlists/{}", p.id)
             };
             if app.playlist_hidden(&source)
-                && !tiles.iter().any(|t| {
-                    t.uri.as_deref().is_some_and(|s| {
-                        app.playlist_visibility_key(s) == app.playlist_visibility_key(&source)
-                    })
-                })
+                && !tiles
+                    .iter()
+                    .any(|t| t.uri.as_deref().is_some_and(|s| s == source))
             {
                 tiles.push(Tile {
                     image: p.image.clone(),

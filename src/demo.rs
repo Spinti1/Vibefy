@@ -374,7 +374,6 @@ pub fn populate(app: &mut App) {
     // Demo screens represent an account that has already finished setup.
     // No real account or browser session is read or created.
     app.music_accounts[0].connected = true;
-    app.mirror.setup_complete = true;
     // A demo never reads the real login registration; it shows it off.
     app.autostart = Some(fastframe_autostart::State::Off);
     app.auth = AuthStatus::Connected {

@@ -366,7 +366,7 @@ pub async fn execute(
             let mut playlists = session.playlists(proxy).await?;
             let removed_source = if let Action::Delete(id) = &action {
                 let raw = id.strip_prefix("VL").unwrap_or(id);
-                session.delete(proxy, raw, None).await?;
+                session.delete(proxy, raw).await?;
                 playlists.retain(|p| p.id.strip_prefix("VL").unwrap_or(&p.id) != raw);
                 Some(format!("https://www.youtube.com/playlist?list={raw}"))
             } else {

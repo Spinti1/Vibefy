@@ -650,7 +650,7 @@ mod release_update_tests {
             ..source.clone()
         };
         assert_eq!(
-            crate::playlist_mirror::choose_recording(&source, &[clean, explicit.clone()])
+            crate::playlist_tools::choose_recording(&source, &[clean, explicit.clone()])
                 .unwrap()
                 .uri,
             explicit.uri

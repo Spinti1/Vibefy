@@ -46,9 +46,16 @@ Deleting a local copy keeps the remote original and backup; the confirmation say
 so explicitly. Account-specific remote deletion remains a separate operation.
 
 The old mandatory connection/transfer screens and optional YouTube-import mod
-are removed. Existing linked playlist journals stay readable for legacy playlist
-operations, but automatic catalogue-wide mirroring is paused. New imports and
-backups are explicit, per-playlist actions.
+are removed. In 0.4.49 the Linked shelf and old transfer service are also removed,
+including its review state, periodic work and dual-platform mutation queues.
+Existing local transfer snapshots are recovered once in a background file task,
+without connecting either account or changing remote playlists. Finished copies
+appear as ordinary YouTube playlists; unfinished snapshots remain local editable
+Vibefy playlists. Deleted or pending-deletion entries are not restored, newer local
+copies are not overwritten, and original journal files are retained. Their old
+pending rename/add/delete operations are no longer executed. Spotify and YouTube
+lists can now be managed independently. Explicit YouTube backups retain their
+own account-scoped association and recovery safeguards.
 
 ## YouTube session window (0.4.29)
 
@@ -1188,7 +1195,7 @@ existing files, other preferences, credentials and installed mods still load.
 Home groups linked copies once, followed by Spotify, YouTube and the enabled JuiceVault add-on library. JuiceVault account controls are in Mods below WaveLink. Native login follows the first-party app contract: a login token with its server-issued grant, username/password submission, then a verified account profile and authenticated playlists. Passwords are not persisted or printed by Debug. Tokens are protected using the existing system credential store; requests carrying credentials disable redirects and retries. Expired access tokens refresh once, without repeated login attempts. Public-profile access stores only the requested username. A private playlist import sends the protected bearer token to the exact JuiceVault API host.
 JuiceVault search uses the documented archive-wide music search and ranks close title matches locally. A no-match result remains empty. The additional YouTube Music lyrics adapter uses the existing anonymous catalogue client and the exact video ID, with an eight-second deadline. It supplies plain text; existing timed sources retain priority. YTubic was a provider reference only, and no GPL implementation was copied.
 
-## Linked playlist names (0.4.34)
+## Historical linked playlist names (0.4.34; removed in 0.4.49)
 
 Rename playlist on a Linked collection, or edit its Spotify name, queues a
 per-account-pair name intent in the existing private journal. The backend checks
@@ -1257,7 +1264,7 @@ A random 12-character code grants listener access; a separate random 256-bit hos
 
 ## Confirmed playlist deletion (0.4.44)
 
-Deleting a Linked tile queues both removal from the Spotify library (the operation Spotify exposes) and deletion of its marked YouTube copy. A durable per-account intent records each acknowledgement separately and retries after service cooldowns. Tombstones prevent stale Spotify pages from recreating the deleted copy. YouTube deletion checks an editable playlist header and, for linked copies, the pairing marker before writing. Owned ordinary YouTube playlists also offer Delete from YouTube with confirmation. Saved collections can still be removed locally. JuiceVault's public API excludes account mutations; no undocumented delete endpoint is guessed.
+Before 0.4.49, deleting a Linked tile queued both removal from the Spotify library (the operation Spotify exposes) and deletion of its marked YouTube copy. A durable per-account intent records each acknowledgement separately and retries after service cooldowns. Tombstones prevent stale Spotify pages from recreating the deleted copy. YouTube deletion checks an editable playlist header and, for linked copies, the pairing marker before writing. Owned ordinary YouTube playlists also offer Delete from YouTube with confirmation. Saved collections can still be removed locally. JuiceVault's public API excludes account mutations; no undocumented delete endpoint is guessed.
 
 ## Audio edition selection (0.4.44)
 

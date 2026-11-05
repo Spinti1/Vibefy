@@ -62,44 +62,6 @@ fn playlist_section(value: &Value) -> Result<&Value> {
 pub fn parse_playlist_page(value: &Value) -> Result<crate::music::Results> {
     crate::music::parse_library_browse(&json!({"contents":playlist_section(value)?}))
 }
-/// Membership includes unavailable rows. Availability must never cause re-adds.
-pub fn playlist_video_ids(value: &Value) -> Result<Vec<String>> {
-    fn walk(value: &Value, ids: &mut Vec<String>, depth: usize) {
-        if depth > 60 {
-            return;
-        }
-        if let Some(row) = value.get("musicResponsiveListItemRenderer") {
-            let id = row
-                .pointer("/playlistItemData/videoId")
-                .and_then(Value::as_str)
-                .or_else(|| {
-                    row.pointer("/navigationEndpoint/watchEndpoint/videoId")
-                        .and_then(Value::as_str)
-                });
-            if let Some(id) = id.filter(|id| crate::addons::valid_video_id(id)) {
-                ids.push(id.to_owned());
-            }
-            return;
-        }
-        match value {
-            Value::Object(map) => {
-                for child in map.values() {
-                    walk(child, ids, depth + 1);
-                }
-            }
-            Value::Array(list) => {
-                for child in list {
-                    walk(child, ids, depth + 1);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut ids = Vec::new();
-    walk(playlist_section(value)?, &mut ids, 0);
-    Ok(ids)
-}
-
 pub fn playlist_details(value: &Value) -> (bool, String) {
     let Some(header) = find_section(value, "musicEditablePlaylistDetailHeaderRenderer", 0) else {
         return (false, String::new());
@@ -174,8 +136,8 @@ pub fn append_confirmed(value: &Value, expected: &[String]) -> bool {
         })
         .collect();
     ids.len() == expected.len()
-        && crate::playlist_mirror::counts(ids)
-            == crate::playlist_mirror::counts(expected.iter().cloned())
+        && crate::playlist_tools::counts(ids)
+            == crate::playlist_tools::counts(expected.iter().cloned())
 }
 
 pub fn parse_saved_playlists_page(value: &Value) -> Result<crate::music::Results> {
@@ -428,7 +390,7 @@ impl Session {
             if response.status == 429 {
                 return Err(Failure::RateLimited(retry_after(
                     response.retry_after.as_deref(),
-                    crate::playlist_mirror::now(),
+                    crate::playlist_tools::now(),
                 ))
                 .into());
             }
@@ -495,7 +457,7 @@ impl Session {
                     .headers()
                     .get(reqwest::header::RETRY_AFTER)
                     .and_then(|v| v.to_str().ok()),
-                crate::playlist_mirror::now(),
+                crate::playlist_tools::now(),
             );
             return Err(Failure::RateLimited(seconds).into());
         }
@@ -585,7 +547,7 @@ impl Session {
     }
     /// A user-confirmed deletion. The editable header protects saved playlists
     /// owned by somebody else. The server authorizes the write again.
-    pub async fn delete(&self, proxy: &ProxyConfig, id: &str, marker: Option<&str>) -> Result<()> {
+    pub async fn delete(&self, proxy: &ProxyConfig, id: &str) -> Result<()> {
         ensure!(
             self.google.is_none(),
             "Reconnect YouTube before deleting playlists"
@@ -613,13 +575,6 @@ impl Session {
             find_section(&value, "musicEditablePlaylistDetailHeaderRenderer", 0).is_some(),
             "Only the owner can delete this YouTube playlist"
         );
-        if let Some(marker) = marker {
-            let (private, description) = playlist_details(&value);
-            ensure!(
-                private && description.contains(marker),
-                "YouTube copy is no longer identified as this linked playlist"
-            );
-        }
         let response = self
             .post(
                 &Self::client(proxy)?,
@@ -640,7 +595,7 @@ impl Session {
             "Reconnect YouTube using Connect YouTube before renaming playlists"
         );
         ensure!(
-            valid_playlist_id(id) && crate::playlist_mirror::valid_title(title),
+            valid_playlist_id(id) && crate::playlist_tools::valid_title(title),
             "Invalid playlist name"
         );
         let value = self.post(&Self::client(proxy)?, "browse/edit_playlist",
@@ -831,41 +786,6 @@ impl Session {
             }
         }
         anyhow::bail!("Playlist exceeded the page limit")
-    }
-    pub async fn membership(
-        &self,
-        proxy: &ProxyConfig,
-        id: &str,
-    ) -> Result<std::collections::BTreeMap<String, usize>> {
-        if let Some(google) = &self.google {
-            return google.membership(proxy, id).await;
-        }
-        ensure!(valid_playlist_id(id), "Invalid Music playlist identity");
-        let client = Self::client(proxy)?;
-        let mut next = None;
-        let mut pages = HashSet::new();
-        let mut ids = Vec::new();
-        for _ in 0..400 {
-            let value = self
-                .request(&client, next.as_deref(), &format!("VL{id}"))
-                .await?;
-            ids.extend(playlist_video_ids(&value)?);
-            ensure!(
-                ids.len() <= 20_000,
-                "This Music playlist exceeds 20,000 entries"
-            );
-            match parse_playlist_page(&value)?.continuation {
-                Some(token) => {
-                    ensure!(
-                        pages.insert(token.clone()),
-                        "Music returned a repeated playlist page"
-                    );
-                    next = Some(token);
-                }
-                None => return Ok(crate::playlist_mirror::counts(ids)),
-            }
-        }
-        anyhow::bail!("This Music playlist exceeded the supported page limit")
     }
     pub async fn import(
         &self,

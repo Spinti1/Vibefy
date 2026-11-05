@@ -706,7 +706,7 @@ mod native {
     ) -> Result<Value> {
         let (sapisid, _) = ready(browser, job, state, false)?;
         use sha1::{Digest, Sha1};
-        let timestamp = crate::playlist_mirror::now();
+        let timestamp = crate::playlist_tools::now();
         let hash = Sha1::digest(format!("{timestamp} {sapisid} {ORIGIN}").as_bytes());
         let authorization = format!("SAPISIDHASH {timestamp}_{hash:x}");
         let id = nonce();

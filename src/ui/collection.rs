@@ -4917,69 +4917,6 @@ pub fn source_playlist(app: &mut App, ui: &mut egui::Ui, source: &str) {
             round: false,
         },
     );
-    if let Some(linked) = app
-        .mirror
-        .lists
-        .iter()
-        .find(|list| list.collection.source == source)
-    {
-        let rename_id = egui::Id::new(("rename-linked", &linked.spotify_id));
-        let mut draft = ui.data(|d| d.get_temp::<String>(rename_id));
-        if draft.is_none()
-            && theme::pill_button(ui, &app.palette, "Rename playlist", false).clicked()
-        {
-            draft = Some(linked.collection.title.clone());
-        }
-        let mut submitted = false;
-        if let Some(name) = &mut draft {
-            ui.label("Rename on Spotify and YouTube. Temporary service limits are retried automatically.");
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(name).char_limit(100));
-                if ui
-                    .add_enabled(
-                        crate::playlist_mirror::valid_title(name),
-                        egui::Button::new("Save name"),
-                    )
-                    .clicked()
-                {
-                    app.backend.send(crate::backend::Command::Mirror {
-                        serial: app.mirror_serial,
-                        action: crate::playlist_mirror::Action::Rename {
-                            id: linked.spotify_id.clone(),
-                            title: name.clone(),
-                        },
-                    });
-                    submitted = true;
-                }
-            });
-            if ui.button("Close").clicked() {
-                draft = None;
-            }
-        }
-        if submitted {
-            draft = None;
-        }
-        ui.data_mut(|d| {
-            if let Some(draft) = draft {
-                d.insert_temp(rename_id, draft);
-            } else {
-                d.remove::<String>(rename_id);
-            }
-        });
-        let message = if let Some(issue) = &linked.issue {
-            Some(format!("Playlist sync: {issue}"))
-        } else if linked.missing > 0 {
-            Some(format!(
-                "{} songs could not be matched automatically.",
-                linked.missing
-            ))
-        } else {
-            None
-        };
-        if let Some(message) = message {
-            ui.label(message);
-        }
-    }
     super::personal_library::controls(app, ui, source);
     let filter_id = egui::Id::new(("source-playlist-filter", &page));
     let mut filter = ui

@@ -64,9 +64,6 @@ fn player_fixture() -> App {
         ..Default::default()
     });
     app.music_accounts[0].connected = true;
-    app.mirror.ready = true;
-    app.mirror.setup_complete = true;
-    app.mirror.pair = "example".into();
     app.local.connected = true;
     app.local.playback = player::Playback::Playing;
     app.local.queue_tracks = vec![

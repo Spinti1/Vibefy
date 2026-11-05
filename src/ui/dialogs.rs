@@ -140,9 +140,6 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                         )
                         .wrap(),
                     );
-                    if app.mirror.lists.iter().any(|l| l.spotify_id == id && !l.youtube_id.is_empty()) {
-                        ui.label("This also permanently deletes the linked YouTube copy. Spotify removes the playlist from your library. Pending work is retried if a service is temporarily unavailable.");
-                    }
                     ui.add_space(20.0);
                     buttons(ui, |ui| {
                         if theme::pill_button(

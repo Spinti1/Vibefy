@@ -1,10 +1,5 @@
 use serde_json::json;
-use spotifast::{
-    api::models::{ArtistRef, Track},
-    music_session,
-    player::LocalTrack,
-    playlist_mirror::{self, Decision, Intent},
-};
+use spotifast::{api::models::ArtistRef, music_session, player::LocalTrack, playlist_tools};
 
 fn song(uri: &str, title: &str, artist: &str, duration: u32, album: &str) -> LocalTrack {
     LocalTrack {
@@ -19,18 +14,6 @@ fn song(uri: &str, title: &str, artist: &str, duration: u32, album: &str) -> Loc
         album: album.into(),
         ..Default::default()
     }
-}
-#[test]
-fn account_pairs_are_isolated_and_stable() {
-    let a = playlist_mirror::pair_key("spotify-a", "@music-a");
-    assert_eq!(a, playlist_mirror::pair_key("spotify-a", "@music-a"));
-    assert_ne!(a, playlist_mirror::pair_key("spotify-b", "@music-a"));
-    assert_ne!(a, playlist_mirror::pair_key("spotify-a", "@music-b"));
-    assert_ne!(
-        playlist_mirror::pair_key("ab", "c"),
-        playlist_mirror::pair_key("a", "bc")
-    );
-    assert!(a.len() == 64 && a.bytes().all(|b| b.is_ascii_hexdigit()));
 }
 #[test]
 fn copies_are_always_created_unlisted_and_keep_the_recovery_marker() {
@@ -66,39 +49,6 @@ fn privacy_and_marker_come_only_from_the_editable_playlist_header() {
         assert_eq!(allowed, matches!(visibility, "UNLISTED" | "PRIVATE"));
         assert_eq!(description, "Vibefy mirror: x");
     }
-}
-#[test]
-fn repeated_songs_preserve_multiplicity_without_replaying_existing_entries() {
-    let desired = vec!["a".into(), "b".into(), "a".into(), "c".into()];
-    let existing = playlist_mirror::counts(vec!["a".into(), "c".into(), "extra-user-song".into()]);
-    assert_eq!(
-        playlist_mirror::missing_ids(&desired, &existing),
-        vec!["b", "a"]
-    );
-    assert!(
-        playlist_mirror::missing_ids(&desired, &playlist_mirror::counts(desired.clone()))
-            .is_empty()
-    );
-}
-#[test]
-fn interrupted_writes_need_positive_confirmation_of_every_occurrence() {
-    let mut intent = Intent {
-        creating: false,
-        expected: playlist_mirror::counts(vec!["a".into(), "a".into(), "b".into()]),
-    };
-    assert!(!playlist_mirror::intent_confirmed(
-        &intent,
-        &playlist_mirror::counts(vec!["a".into(), "b".into()])
-    ));
-    assert!(playlist_mirror::intent_confirmed(
-        &intent,
-        &playlist_mirror::counts(vec!["a".into(), "a".into(), "b".into(), "extra".into()])
-    ));
-    intent.creating = true;
-    assert!(!playlist_mirror::intent_confirmed(
-        &intent,
-        &intent.expected
-    ));
 }
 #[test]
 fn partial_or_unrelated_server_acknowledgements_do_not_settle_a_batch() {
@@ -148,7 +98,7 @@ fn matching_rejects_other_artists_versions_and_missing_durations() {
         "Human",
     );
     assert_eq!(
-        playlist_mirror::choose_recording(&source, &[good.clone()])
+        playlist_tools::choose_recording(&source, &[good.clone()])
             .unwrap()
             .uri,
         good.uri
@@ -164,7 +114,7 @@ fn matching_rejects_other_artists_versions_and_missing_durations() {
     let wrong_duration = song(&good.uri, "Painkiller", "Three Days Grace", 190000, "Human");
     let no_duration = song(&good.uri, "Painkiller", "Three Days Grace", 0, "Human");
     for candidate in [wrong_artist, wrong_version, wrong_duration, no_duration] {
-        assert!(playlist_mirror::choose_recording(&source, &[candidate]).is_none());
+        assert!(playlist_tools::choose_recording(&source, &[candidate]).is_none());
     }
 }
 #[test]
@@ -190,101 +140,14 @@ fn ambiguous_releases_require_review_but_equivalent_catalogue_ids_are_usable() {
         180000,
         "Release B",
     );
-    assert!(playlist_mirror::choose_recording(&source, &[first.clone(), second.clone()]).is_none());
+    assert!(playlist_tools::choose_recording(&source, &[first.clone(), second.clone()]).is_none());
     second.album = first.album.clone();
-    assert!(playlist_mirror::choose_recording(&source, &[first, second]).is_some());
+    assert!(playlist_tools::choose_recording(&source, &[first, second]).is_some());
 }
 #[test]
-fn recording_cache_recovers_completed_records_and_ignores_a_torn_tail() {
-    let source = song(
-        "spotify:track:0123456789012345678901",
-        "Example",
-        "Artist",
-        180000,
-        "Album",
-    );
-    let decision = Decision {
-        source: source.clone(),
-        chosen: None,
-        candidates: vec![],
-        checked_at: 123,
-    };
-    let mut bytes = serde_json::to_vec(&decision).unwrap();
-    bytes.push(b'\n');
-    bytes.extend_from_slice(b"{\"source\":");
-    let cache = playlist_mirror::recover_decisions(&bytes).unwrap();
-    assert_eq!(cache.len(), 1);
-    assert_eq!(cache[&source.uri].checked_at, 123);
-    assert!(playlist_mirror::recover_decisions(b"{invalid}\n").is_err());
-}
-#[tokio::test]
-async fn durable_dual_destination_requests_are_idempotent_and_scoped_to_the_pair() {
-    let root = std::env::temp_dir().join(format!(
-        "vibefy-mirror-test-{}-{}",
-        std::process::id(),
-        playlist_mirror::now()
-    ));
-    let pair = playlist_mirror::pair_key("spotify-a", "youtube-a");
-    let other = playlist_mirror::pair_key("spotify-a", "youtube-b");
-    let track = Track {
-        uri: "spotify:track:0123456789012345678901".into(),
-        name: "Example".into(),
-        ..Default::default()
-    };
-    let playlist = "ABCDEFGHIJKLMNOPQRSTUV".to_owned();
-    playlist_mirror::enqueue(&root, &pair, playlist.clone(), vec![track.clone()])
-        .await
-        .unwrap();
-    playlist_mirror::enqueue(&root, &pair, playlist.clone(), vec![track.clone()])
-        .await
-        .unwrap();
-    assert_eq!(
-        std::fs::read_dir(root.join("inbox").join(&pair))
-            .unwrap()
-            .count(),
-        1
-    );
-    playlist_mirror::enqueue(&root, &other, playlist.clone(), vec![track])
-        .await
-        .unwrap();
-    assert_eq!(
-        std::fs::read_dir(root.join("inbox").join(&other))
-            .unwrap()
-            .count(),
-        1
-    );
-    assert!(
-        playlist_mirror::enqueue(&root, "../bad", playlist.clone(), vec![])
-            .await
-            .is_err()
-    );
-    assert!(
-        playlist_mirror::enqueue(&root, &pair, "../../escape".into(), vec![])
-            .await
-            .is_err()
-    );
-    assert!(
-        root.canonicalize()
-            .unwrap()
-            .starts_with(std::env::temp_dir().canonicalize().unwrap())
-    );
-    assert!(
-        root.file_name()
-            .unwrap()
-            .to_string_lossy()
-            .starts_with("vibefy-mirror-test-")
-    );
-    std::fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
-fn unavailable_playlist_rows_are_counted_but_recommendations_are_not() {
+fn unavailable_playlist_rows_and_recommendations_are_excluded_from_imports() {
     let row = |id: &str| json!({"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":id},"musicItemRendererDisplayPolicy":"MUSIC_ITEM_RENDERER_DISPLAY_POLICY_GREY_OUT"}});
     let page = json!({"contents":[{"musicPlaylistShelfRenderer":{"contents":[row("abcdefghijk"),row("abcdefghijk")]}},{"musicShelfRenderer":{"contents":[row("zyxwvutsrqp")]}}]});
-    assert_eq!(
-        music_session::playlist_video_ids(&page).unwrap(),
-        vec!["abcdefghijk", "abcdefghijk"]
-    );
     assert!(
         music_session::parse_playlist_page(&page)
             .unwrap()
@@ -312,20 +175,9 @@ fn missing_featured_artist_is_not_an_automatic_recording_match() {
         180000,
         "Album",
     );
-    assert!(playlist_mirror::choose_recording(&source, &[candidate]).is_none());
+    assert!(playlist_tools::choose_recording(&source, &[candidate]).is_none());
 }
 
-#[test]
-fn selected_playlists_do_not_expand_to_other_library_entries() {
-    let selected = vec!["first".into(), "second".into()];
-    assert!(playlist_mirror::selected_playlist(Some(&selected), "first"));
-    assert!(!playlist_mirror::selected_playlist(
-        Some(&selected),
-        "third"
-    ));
-    assert!(!playlist_mirror::selected_playlist(Some(&[]), "first"));
-    assert!(playlist_mirror::selected_playlist(None, "first"));
-}
 #[test]
 fn captured_redacted_unlisted_header_retains_the_owner_marker() {
     let value =
@@ -334,4 +186,12 @@ fn captured_redacted_unlisted_header_retains_the_owner_marker() {
         music_session::playlist_details(&value),
         (true, "Vibefy mirror: fixture".into())
     );
+}
+
+#[test]
+fn playlist_names_accept_unicode_but_reject_empty_controls_and_overflow() {
+    assert!(playlist_tools::valid_title("Muzică 2026"));
+    assert!(!playlist_tools::valid_title("  "));
+    assert!(!playlist_tools::valid_title("bad\nname"));
+    assert!(!playlist_tools::valid_title(&"a".repeat(101)));
 }

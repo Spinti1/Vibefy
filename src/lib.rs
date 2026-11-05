@@ -40,7 +40,6 @@ pub mod mac_notch;
 #[cfg(target_os = "macos")]
 pub mod mac_touchbar_crash_guard;
 pub mod made_for_you;
-mod mirror_app;
 pub mod mod_animation;
 pub mod mod_packages;
 pub mod mod_tempo;
@@ -59,8 +58,9 @@ pub mod personal_library;
 pub mod peek;
 pub mod player;
 pub mod playlist_cover;
-pub mod playlist_mirror;
 pub mod playlist_outbox;
+mod playlist_recovery;
+pub mod playlist_tools;
 mod playlist_visibility;
 pub mod power;
 pub mod prerelease;

@@ -172,8 +172,6 @@ fn connected_accounts_open_home_without_the_old_transfer_wizard() {
         ..Default::default()
     });
     app.music_accounts[0].connected = true;
-    app.mirror.ready = true;
-    app.mirror.pair = "example-pair".into();
     app.library.playlists =
         spotifast::model::Loadable::Loaded(vec![spotifast::api::models::Playlist {
             id: "0123456789012345678901".into(),

@@ -167,6 +167,7 @@ pub struct Report {
     pub message: Option<String>,
 }
 pub enum Output {
+    LegacyRecovered(Vec<Collection>),
     Imported(Collection),
     Recovered {
         collection: Collection,
@@ -186,6 +187,7 @@ pub enum Output {
 }
 #[derive(Clone)]
 pub enum Task {
+    RecoverLegacy,
     Import {
         youtube: bool,
         url: String,
@@ -207,6 +209,13 @@ pub struct ContextData {
 
 pub async fn execute(task: Task, context: ContextData) -> Result<Output> {
     match task {
+        Task::RecoverLegacy => {
+            let root = context.root;
+            Ok(Output::LegacyRecovered(
+                tokio::task::spawn_blocking(move || crate::playlist_recovery::read(&root))
+                    .await??,
+            ))
+        }
         Task::Import { youtube: true, url } => {
             let normalized = crate::addons::playlist_url(&url)?;
             let id = normalized.split("list=").nth(1).unwrap_or_default();
@@ -305,7 +314,7 @@ pub async fn execute(task: Task, context: ContextData) -> Result<Output> {
                 for row in &page.items {
                     if let Some(PlayableItem::Track(track)) = row.playable() {
                         if !track.is_local {
-                            tracks.push(crate::playlist_mirror::local_track(track));
+                            tracks.push(crate::playlist_tools::local_track(track));
                         }
                     }
                 }
@@ -434,12 +443,12 @@ async fn backup(collection: Collection, scope: &str, context: ContextData) -> Re
         "Backup identity does not match"
     );
     ensure!(
-        crate::playlist_mirror::now() >= journal.retry_at,
+        crate::playlist_tools::now() >= journal.retry_at,
         "YouTube is limiting requests. Your local playlist is safe; try again later."
     );
     let result = sync(&session, &context, &collection, &path, &mut journal).await;
     if let Err(error) = result {
-        record_failure(&mut journal, &error, crate::playlist_mirror::now());
+        record_failure(&mut journal, &error, crate::playlist_tools::now());
         write(&path, &journal).await?;
     }
     Ok(Output::Backed {
@@ -583,7 +592,7 @@ async fn sync(
                 .filter_map(|e| e.track)
                 .take(8)
                 .collect::<Vec<_>>();
-            if let Some(chosen) = crate::playlist_mirror::choose_recording(track, &candidates) {
+            if let Some(chosen) = crate::playlist_tools::choose_recording(track, &candidates) {
                 journal.matches.insert(track.uri.clone(), chosen);
                 write(path, journal).await?;
             }

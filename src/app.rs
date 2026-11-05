@@ -316,11 +316,6 @@ pub struct App {
     pub addons: crate::addons::Runtime,
     pub music_accounts: [crate::music_accounts::State; 2],
     pub music_accounts_serial: [u64; 2],
-    pub mirror: crate::playlist_mirror::View,
-    pub mirror_serial: u64,
-    pub mirror_observed: Option<(String, u64)>,
-    pub mirror_retry_confirm: bool,
-    pub mirror_review_query: String,
     pub dirs: AppDirs,
     pub settings: Settings,
     applied_proxy: crate::settings::ProxyConfig,
@@ -1233,11 +1228,6 @@ impl App {
             personal: Default::default(),
             music_accounts: Default::default(),
             music_accounts_serial: [0; 2],
-            mirror: Default::default(),
-            mirror_serial: 0,
-            mirror_observed: None,
-            mirror_retry_confirm: false,
-            mirror_review_query: String::new(),
             addons: crate::addons::Runtime {
                 collections: addon_collections,
                 ..Default::default()
@@ -2198,7 +2188,6 @@ impl App {
             .addons
             .collections
             .iter()
-            .chain(self.mirror.lists.iter().map(|list| &list.collection))
             .flat_map(|c| &c.tracks)
             .find(|t| t.uri == uri)
         {
@@ -2921,23 +2910,6 @@ impl App {
                             self.addons.tempo_cache.clear();
                         }
                         self.addons.tempo_cache.insert(recording, bpm);
-                    }
-                }
-                Event::Mirror { serial, view } => {
-                    if serial == self.mirror_serial
-                        && self.music_accounts[0].connected
-                        && self
-                            .user_id()
-                            .is_some_and(|id| view.account.is_empty() || id == view.account)
-                    {
-                        self.mirror = view;
-                        self.addons.collections_revision =
-                            self.addons.collections_revision.wrapping_add(1);
-                    }
-                }
-                Event::MirrorProgress { serial, message } => {
-                    if serial == self.mirror_serial {
-                        self.mirror.message = message;
                     }
                 }
                 Event::Personal { request, result } => self.receive_personal(request, result),
@@ -3974,7 +3946,6 @@ impl App {
                 .addons
                 .collections
                 .iter()
-                .chain(self.mirror.lists.iter().map(|list| &list.collection))
                 .find(|list| list.source == source)
                 .map(|list| list.title.clone())
                 .unwrap_or_else(|| gettext(self.locale, "Playlist").into_owned());
@@ -4493,16 +4464,7 @@ impl App {
         }
         self.spicy.result = Loadable::Loading;
         let local_file = self.local_file(&now.uri).map(std::path::Path::to_path_buf);
-        let lookup_uri = self.mirror.lists.iter().find_map(|list| {
-            list.collection
-                .tracks
-                .iter()
-                .position(|track| track.uri == now.uri)
-                .and_then(|index| list.source_uris.get(index))
-                .cloned()
-        });
         self.backend.send(Command::SpicyLyrics {
-            lookup_uri,
             request: Box::new(LyricsRequest {
                 uri: now.uri,
                 query: crate::lyrics::Query {
@@ -4568,7 +4530,6 @@ impl App {
     }
 
     fn tick(&mut self, ctx: &egui::Context) {
-        self.tick_playlist_mirror();
         self.tick_peek(ctx);
         if !self.cache_busy
             && self
@@ -9222,16 +9183,6 @@ impl App {
     // ---- navigation ------------------------------------------------------------
 
     pub fn open(&mut self, page: Page) {
-        let page = if let Page::Playlist(id) = &page {
-            self.mirror
-                .lists
-                .iter()
-                .find(|list| &list.spotify_id == id && !list.youtube_id.is_empty())
-                .map(|list| Page::LocalCollection(list.collection.source.clone()))
-                .unwrap_or(page)
-        } else {
-            page
-        };
         if let Page::LocalCollection(source) = &page {
             self.start_source_artwork(source);
         }
@@ -11557,38 +11508,6 @@ impl App {
             }
         }
 
-        if self.mirror.enabled
-            && self.mirror.setup_complete
-            && crate::playlist_mirror::selected_playlist(
-                self.mirror.selected.as_deref(),
-                &playlist_id,
-            )
-            && self.mirror.ready
-            && self
-                .mirror
-                .lists
-                .iter()
-                .any(|list| list.spotify_id == playlist_id)
-        {
-            let tracks = items
-                .iter()
-                .filter_map(|item| {
-                    if let PlayableItem::Track(track) = item {
-                        Some(track.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
-            if !tracks.is_empty() {
-                self.backend.send(Command::MirrorAddition {
-                    serial: self.mirror_serial,
-                    pair: self.mirror.pair.clone(),
-                    playlist: playlist_id.clone(),
-                    tracks,
-                });
-            }
-        }
         self.prepare_playlist_mutation(&playlist_id);
         let added = items.len().try_into().unwrap_or(u32::MAX);
         let added_by = self.user_id().map(|id| UserRef {
@@ -11982,12 +11901,10 @@ impl App {
                 offset_uri,
                 offset_index,
             } => {
-                if !self.play_mirror_context(&uri, offset_uri.as_deref(), offset_index) {
-                    let mut request = PlayRequest::context(uri);
-                    request.offset_uri = offset_uri;
-                    request.offset_position = offset_index;
-                    self.play_request(request, false);
-                }
+                let mut request = PlayRequest::context(uri);
+                request.offset_uri = offset_uri;
+                request.offset_position = offset_index;
+                self.play_request(request, false);
             }
             // Answered by the search's response, which plays the match.
             // Taking the serial here, not when the command arrives, keeps
@@ -12557,24 +12474,7 @@ impl App {
                 public,
             } => {
                 self.dialog = None;
-                let mut changes = self.changed_playlist_details(&id, name, description, public);
-                if self.mirror.ready
-                    && self
-                        .mirror
-                        .lists
-                        .iter()
-                        .any(|l| l.spotify_id == id && !l.youtube_id.is_empty())
-                {
-                    if let Some(title) = changes.name.take() {
-                        self.backend.send(Command::Mirror {
-                            serial: self.mirror_serial,
-                            action: crate::playlist_mirror::Action::Rename {
-                                id: id.clone(),
-                                title,
-                            },
-                        });
-                    }
-                }
+                let changes = self.changed_playlist_details(&id, name, description, public);
                 if changes.kept_description {
                     self.toast_error(gettext(
                         self.locale,
@@ -12596,7 +12496,7 @@ impl App {
             }
             Action::SetPlaylistHidden { source, hidden } => {
                 let owner = self.user_id().unwrap_or("local").to_owned();
-                let key = self.playlist_visibility_key(&source);
+                let key = source;
                 let entries = self.settings.hidden_playlists.entry(owner).or_default();
                 if hidden {
                     entries.insert(key);
@@ -12626,12 +12526,6 @@ impl App {
             }
             Action::DeletePlaylist(id) => {
                 self.dialog = None;
-                if self.mirror.lists.iter().any(|l| l.spotify_id == id)
-                    && self.music_accounts[0].busy
-                {
-                    self.toast("Wait for the current YouTube account operation, then try again");
-                    return;
-                }
                 let uri = format!("spotify:playlist:{id}");
                 self.saved.insert(uri.clone(), false);
                 self.edit_playlists(PlaylistEdit {
@@ -12639,21 +12533,8 @@ impl App {
                     added: None,
                     settled_by: None,
                 });
-                if let Some(linked) = self.mirror.lists.iter().find(|l| l.spotify_id == id) {
-                    let youtube_id = linked.youtube_id.clone();
-                    self.backend.send(Command::Mirror {
-                        serial: self.mirror_serial,
-                        action: crate::playlist_mirror::Action::Delete(id.clone()),
-                    });
-                    self.mirror.lists.retain(|l| l.spotify_id != id);
-                    self.music_accounts[0]
-                        .playlists
-                        .retain(|p| p.id.strip_prefix("VL").unwrap_or(&p.id) != youtube_id);
-                    self.toast("Removal queued for Spotify and YouTube");
-                } else {
-                    self.backend
-                        .api(ApiRequest::FollowPlaylist { id, follow: false });
-                }
+                self.backend
+                    .api(ApiRequest::FollowPlaylist { id, follow: false });
             }
             Action::Transfer(device_id) => {
                 // The listener chose where to play instead.
@@ -15031,6 +14912,39 @@ mod tests {
         );
         assert!(app.personal.backups.is_empty());
         assert!(app.personal.tasks.is_empty());
+    }
+    #[test]
+    fn retired_transfer_recovery_is_persisted_without_enabling_a_remote_backup() {
+        use crate::personal_library::{Output, Pending};
+        let mut app = test_app("retired-transfer-recovery");
+        app.backend.set_offline(true);
+        app.offline = true;
+        app.personal.tasks.insert(
+            8,
+            Pending {
+                source: None,
+                backup: false,
+                fingerprint: String::new(),
+                epoch: 0,
+                message: String::new(),
+            },
+        );
+        let source = "https://www.youtube.com/playlist?list=PLexample12345";
+        app.receive_personal(
+            8,
+            Ok(Output::LegacyRecovered(vec![crate::addons::Collection {
+                title: "Recovered playlist".into(),
+                source: source.into(),
+                ..Default::default()
+            }])),
+        );
+        assert!(app.source_collection(source).is_some());
+        assert!(app.settings.retired_transfers_recovered);
+        assert!(app.settings.playlist_backups.is_empty());
+        assert!(app.personal.tasks.is_empty());
+        let restored: crate::settings::Settings =
+            serde_json::from_str(&app.settings.encode().unwrap()).unwrap();
+        assert!(restored.retired_transfers_recovered);
     }
     #[test]
     fn personal_library_home_renders_import_controls_without_any_account() {

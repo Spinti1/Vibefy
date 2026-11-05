@@ -122,7 +122,7 @@ pub fn song_menu(
         .iter()
         .filter_map(|i| {
             if let crate::api::models::PlayableItem::Track(t) = i {
-                Some(crate::playlist_mirror::local_track(t))
+                Some(crate::playlist_tools::local_track(t))
             } else {
                 None
             }
@@ -206,7 +206,7 @@ pub fn dialog(app: &mut App, ctx: &egui::Context) {
                 ui.label("Give your playlist a name. You can add songs from their right-click menu.");
                 ui.add(egui::TextEdit::singleline(name).hint_text("Playlist name").char_limit(100).desired_width(f32::INFINITY));
                 backup_option(app,ui,backup);
-                if ui.add_enabled(crate::playlist_mirror::valid_title(name),egui::Button::new("Create playlist").min_size(egui::vec2(160.0,36.0))).clicked(){action=Some(Edit::Create{name:name.clone(),backup:*backup});}
+                if ui.add_enabled(crate::playlist_tools::valid_title(name),egui::Button::new("Create playlist").min_size(egui::vec2(160.0,36.0))).clicked(){action=Some(Edit::Create{name:name.clone(),backup:*backup});}
             }
             Dialog::Import{youtube,url,backup}=>{
                 theme::text(ui,if *youtube {"Import YouTube playlist"} else {"Import Spotify playlist"},theme::bold(24.0),p.text);
@@ -222,7 +222,7 @@ pub fn dialog(app: &mut App, ctx: &egui::Context) {
                 theme::text(ui,"Rename playlist",theme::bold(24.0),p.text);
                 ui.add(egui::TextEdit::singleline(name).char_limit(100).desired_width(f32::INFINITY));
                 ui.small("If this playlist has a YouTube backup, its name will be updated there too.");
-                if ui.add_enabled(crate::playlist_mirror::valid_title(name),egui::Button::new("Save name")).clicked(){action=Some(Edit::Rename{source:source.clone(),name:name.clone()});}
+                if ui.add_enabled(crate::playlist_tools::valid_title(name),egui::Button::new("Save name")).clicked(){action=Some(Edit::Rename{source:source.clone(),name:name.clone()});}
             }
             Dialog::Delete(source)=>{
                 theme::text(ui,"Remove local playlist?",theme::bold(24.0),p.text);

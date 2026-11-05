@@ -239,7 +239,7 @@ impl Session {
     }
     async fn access(&self, client: &reqwest::Client) -> Result<String> {
         let mut access = self.access.lock().await;
-        if access.expires_at <= crate::playlist_mirror::now().saturating_add(90) {
+        if access.expires_at <= crate::playlist_tools::now().saturating_add(90) {
             let value = token(
                 client,
                 &[
@@ -299,7 +299,7 @@ impl Session {
                 .headers()
                 .get("retry-after")
                 .and_then(|h| h.to_str().ok()),
-            crate::playlist_mirror::now(),
+            crate::playlist_tools::now(),
         );
         if status.as_u16() == 429 {
             return Err(Failure::RateLimited(retry).into());
@@ -459,16 +459,6 @@ impl Session {
         )
         .await
     }
-    pub async fn membership(
-        &self,
-        proxy: &ProxyConfig,
-        id: &str,
-    ) -> Result<BTreeMap<String, usize>> {
-        let items = self.items(proxy, id).await?;
-        Ok(crate::playlist_mirror::counts(
-            items.iter().filter_map(|v| video_id(v).map(str::to_owned)),
-        ))
-    }
     /// One mutation per durable intent. A quota/connection failure never hides
     /// earlier successful inserts inside an apparently rejected batch.
     pub async fn append(&self, proxy: &ProxyConfig, id: &str, videos: &[String]) -> Result<bool> {
@@ -545,7 +535,7 @@ fn access_from(value: &Value) -> Result<Access> {
         .ok_or_else(|| anyhow::anyhow!("Google did not return an access token"))?;
     Ok(Access {
         token: token.into(),
-        expires_at: crate::playlist_mirror::now()
+        expires_at: crate::playlist_tools::now()
             .saturating_add(value["expires_in"].as_u64().unwrap_or(3600).min(86400)),
     })
 }

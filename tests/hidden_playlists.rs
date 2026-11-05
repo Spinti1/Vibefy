@@ -29,9 +29,6 @@ fn fixture() -> spotifast::app::App {
         ..Default::default()
     });
     app.music_accounts[0].connected = true;
-    app.mirror.ready = true;
-    app.mirror.setup_complete = true;
-    app.mirror.pair = "example".into();
     app.settings.addons.installed.insert(addons::Id::Vivy);
     app.home.recently_played = Loadable::Loaded(vec![]);
     app.home.top_artists = Loadable::Loaded(vec![]);
@@ -137,30 +134,15 @@ fn visibility_round_trips_and_is_scoped_to_account() {
     assert!(!app.playlist_hidden("spotify:playlist:secret"));
 }
 #[test]
-fn linked_visibility_uses_one_identity_for_both_services() {
+fn playlist_visibility_is_independent_between_platforms() {
     let mut app = fixture();
-    app.mirror
-        .lists
-        .push(std::sync::Arc::new(spotifast::playlist_mirror::ListView {
-            spotify_id: "secret".into(),
-            youtube_id: "PLexample".into(),
-            source_uris: vec![],
-            missing: 0,
-            copied: 0,
-            uncertain: false,
-            issue: None,
-            collection: addons::Collection {
-                source: "linked:example".into(),
-                ..Default::default()
-            },
-        }));
     app.settings
         .hidden_playlists
         .entry("example".into())
         .or_default()
         .insert("spotify:playlist:secret".into());
-    assert!(app.playlist_hidden("linked:example"));
-    assert!(app.playlist_hidden("https://www.youtube.com/playlist?list=PLexample"));
+    assert!(app.playlist_hidden("spotify:playlist:secret"));
+    assert!(!app.playlist_hidden("https://www.youtube.com/playlist?list=PLexample"));
 }
 #[test]
 fn visualizer_button_preserves_window_mode_and_fullscreen_is_separate() {

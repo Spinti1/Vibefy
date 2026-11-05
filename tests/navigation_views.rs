@@ -40,9 +40,6 @@ fn connected() -> App {
         ..Default::default()
     });
     app.music_accounts[0].connected = true;
-    app.mirror.ready = true;
-    app.mirror.setup_complete = true;
-    app.mirror.pair = "example".into();
     app.offline = true;
     app
 }

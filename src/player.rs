@@ -1118,7 +1118,7 @@ async fn resolve_track_audio_inner(
         let url =
             crate::addons::direct_url(&track.uri).context("Unsupported external track address")?;
         let legacy_key = hex(&Sha1::digest(track.uri.as_bytes()));
-        // Linked playlists and Spotify resolution refer to the same recording.
+        // Imported playlists and Spotify resolution refer to the same recording.
         // Share its cached bytes instead of downloading it once per URI spelling.
         let key = track
             .uri
