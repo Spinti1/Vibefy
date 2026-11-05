@@ -14939,12 +14939,12 @@ mod tests {
             }])),
         );
         assert!(app.source_collection(source).is_some());
-        assert!(app.settings.retired_transfers_recovered);
+        assert!(app.settings.playlist_snapshot_recovery_v1);
         assert!(app.settings.playlist_backups.is_empty());
         assert!(app.personal.tasks.is_empty());
         let restored: crate::settings::Settings =
             serde_json::from_str(&app.settings.encode().unwrap()).unwrap();
-        assert!(restored.retired_transfers_recovered);
+        assert!(restored.playlist_snapshot_recovery_v1);
     }
     #[test]
     fn personal_library_home_renders_import_controls_without_any_account() {

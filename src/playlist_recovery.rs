@@ -28,8 +28,15 @@ struct SavedList {
     deleting: Option<serde_json::Value>,
 }
 
-pub(super) fn read(root: &Path) -> Result<Vec<Collection>> {
-    let dir = root.join("playlist-mirror");
+pub(super) fn read(backup_root: &Path) -> Result<Vec<Collection>> {
+    // ContextData.root is the backup directory, not the application state directory.
+    ensure!(
+        backup_root
+            .file_name()
+            .is_some_and(|name| name == "personal-backups"),
+        "Unexpected playlist recovery location"
+    );
+    let dir = backup_root.with_file_name("playlist-mirror");
     let entries = match std::fs::read_dir(&dir) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -183,7 +190,11 @@ mod tests {
                 .unwrap();
         let path = dir.join(format!("{}.json", "a".repeat(64)));
         std::fs::write(&path, &bytes).unwrap();
-        let recovered = read(&root).unwrap();
+        assert!(
+            read(&root).is_err(),
+            "A wrong context path must not mark recovery complete"
+        );
+        let recovered = read(&root.join("personal-backups")).unwrap();
         assert_eq!(recovered.len(), 2);
         assert!(recovered.iter().all(|c| {
             c.tracks.len() == 3

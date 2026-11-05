@@ -223,7 +223,7 @@ pub struct Settings {
     /// Welcome was completed by connecting an account or continuing locally.
     pub welcome_completed: bool,
     /// One-time local snapshot recovery after retiring cross-platform transfers.
-    pub retired_transfers_recovered: bool,
+    pub playlist_snapshot_recovery_v1: bool,
     pub playlist_backups: std::collections::BTreeMap<String, String>,
     /// Hidden Home playlists, scoped to the signed-in Spotify account.
     pub hidden_playlists: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
@@ -449,7 +449,7 @@ impl Default for Settings {
         Self {
             hidden_playlists: Default::default(),
             welcome_completed: false,
-            retired_transfers_recovered: false,
+            playlist_snapshot_recovery_v1: false,
             playlist_backups: Default::default(),
             device_name: "Vibefy".to_string(),
             addons: crate::addons::Preferences::default(),

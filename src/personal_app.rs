@@ -55,7 +55,7 @@ impl App {
             self.settings.welcome_completed = true;
             self.settings_dirty = true;
             self.backend.send(Command::GuestPlayback(true));
-            if !self.settings.retired_transfers_recovered {
+            if !self.settings.playlist_snapshot_recovery_v1 {
                 self.personal_request(
                     Task::RecoverLegacy,
                     None,
@@ -325,7 +325,7 @@ impl App {
                     Ok(count) => {
                         // Queue the library before its completion flag on the same file writer.
                         self.personal_changed();
-                        self.settings.retired_transfers_recovered = true;
+                        self.settings.playlist_snapshot_recovery_v1 = true;
                         self.settings_dirty = true;
                         if count > 0 { self.personal.message = Some(format!("Recovered {count} saved playlists. Spotify and YouTube playlists are now independent.")); }
                     }
