@@ -37,7 +37,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             .iter()
             .filter(|tile| {
                 tile_group(tile) == group
-                    && !tile.uri.as_deref().is_some_and(|s| app.playlist_hidden(s))
+                    && !tile.uri.as_deref().is_some_and(|s| {
+                        app.playlist_hidden(s) || crate::music_accounts::excluded_playlist_source(s)
+                    })
             })
             .cloned()
             .collect();
@@ -97,7 +99,8 @@ fn youtube_playlists(app: &mut App, ui: &mut egui::Ui, all: &[Tile]) {
         .iter()
         .filter(|p| {
             let id = p.id.strip_prefix("VL").unwrap_or(&p.id);
-            !backed_up.contains(id)
+            !crate::music_accounts::excluded_youtube_playlist(&p.id)
+                && !backed_up.contains(id)
                 && !app.playlist_hidden(&format!("https://www.youtube.com/playlist?list={id}"))
                 && seen.insert(id.to_owned())
         })
@@ -113,7 +116,12 @@ fn youtube_playlists(app: &mut App, ui: &mut egui::Ui, all: &[Tile]) {
     ui.add_space(10.0);
     let saved: Vec<_> = all
         .iter()
-        .filter(|t| tile_group(t) == 2 && !t.uri.as_deref().is_some_and(|s| app.playlist_hidden(s)))
+        .filter(|t| {
+            tile_group(t) == 2
+                && !t.uri.as_deref().is_some_and(|s| {
+                    app.playlist_hidden(s) || crate::music_accounts::excluded_playlist_source(s)
+                })
+        })
         .cloned()
         .collect();
     quick_access(app, ui, &saved);
@@ -452,6 +460,12 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
             tiles.push(tile);
         }
     }
+    tiles.retain(|tile| {
+        !tile
+            .uri
+            .as_deref()
+            .is_some_and(crate::music_accounts::excluded_playlist_source)
+    });
     tiles
 }
 
@@ -1350,7 +1364,7 @@ mod tests {
     }
 }
 
-fn open_tile(app: &mut App, page: &Page) {
+pub(crate) fn open_tile(app: &mut App, page: &Page) {
     if let Page::LocalCollection(source) = page {
         if app.source_collection(source).is_none() {
             for index in 0..2 {
@@ -1386,7 +1400,7 @@ fn open_tile(app: &mut App, page: &Page) {
     }
     app.actions.push(Action::Open(page.clone()));
 }
-fn source_menu(app: &mut App, ui: &mut egui::Ui, source: &str, name: &str) {
+pub(crate) fn source_menu(app: &mut App, ui: &mut egui::Ui, source: &str, name: &str) {
     if crate::personal_library::owned(source)
         || source.starts_with("https://open.spotify.com/playlist/")
     {
@@ -1441,6 +1455,9 @@ fn hidden_playlists(app: &mut App, ui: &mut egui::Ui, all: &[Tile]) {
             continue;
         }
         for p in &app.music_accounts[index].playlists {
+            if index == 0 && crate::music_accounts::excluded_youtube_playlist(&p.id) {
+                continue;
+            }
             let source = if index == 0 {
                 format!(
                     "https://www.youtube.com/playlist?list={}",

@@ -23,7 +23,7 @@ pub(super) fn send(app: &mut App, provider: Provider, action: Action) {
         serial: app.music_accounts_serial[index],
     });
 }
-fn cancel(app: &mut App, provider: Provider) {
+pub(super) fn cancel(app: &mut App, provider: Provider) {
     let index = provider as usize;
     app.music_accounts_serial[index] = app.music_accounts_serial[index].wrapping_add(1);
     let auth_pending = std::mem::take(&mut app.music_accounts[index].auth_pending);

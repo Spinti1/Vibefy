@@ -98,6 +98,7 @@ fn search(ctx: &egui::Context, app: &mut App, query: &str) -> u64 {
 fn complete_search_is_instant_on_return_and_rejects_old_responses() {
     use spotifast::music::{Entry, Filter, Kind, Results};
     let result = |name: &str| Results {
+        profile: None,
         entries: vec![Entry {
             id: name.into(),
             kind: Kind::Song,

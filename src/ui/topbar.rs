@@ -702,9 +702,6 @@ fn searches(app: &mut App, ui: &mut egui::Ui, search_width: f32, soundcloud: boo
     let palette = app.palette;
     let id = egui::Id::new("global-search");
     let before = app.search.query.clone();
-    let selected = egui::TextEdit::load_state(ui.ctx(), id)
-        .and_then(|state| state.cursor.char_range())
-        .is_some_and(|range| !range.is_empty());
     let response = super::widgets::search_field(
         ui,
         &palette,
@@ -724,20 +721,23 @@ fn searches(app: &mut App, ui: &mut egui::Ui, search_width: f32, soundcloud: boo
     if response.gained_focus() && !cleared && !matches!(app.page(), Page::Search) {
         app.actions.push(Action::Open(Page::Search));
     }
-    if app.search.query != before {
-        // Typing over a selection, or emptying the field, starts a
-        // new query rather than editing the last one.
-        if selected || app.search.query.is_empty() {
-            app.actions.push(Action::EndSearchRun);
-        }
-        app.search.typed_at = Some(std::time::Instant::now());
-        if !cleared && !matches!(app.page(), Page::Search) {
-            app.actions.push(Action::Open(Page::Search));
-        }
+    if cleared {
+        app.actions.push(Action::Search(String::new()));
     }
-    if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-        let query = app.search.query.clone();
-        app.actions.push(Action::Search(query));
+    // The magnifying glass is a submit control, separate from the text edit.
+    let submit_rect = egui::Rect::from_min_size(
+        response.rect.min - egui::vec2(34.0, 0.0),
+        egui::vec2(32.0, response.rect.height()),
+    );
+    let submit = ui.interact(submit_rect, id.with("submit"), egui::Sense::click());
+    submit.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Search"));
+    if submit
+        .on_hover_text("Search (Enter)")
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
+        || (response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)))
+    {
+        app.actions.push(Action::Search(app.search.query.clone()));
     }
     if response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
         response.surrender_focus();

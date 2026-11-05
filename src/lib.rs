@@ -54,6 +54,7 @@ mod oauth_transport;
 pub mod opener;
 pub mod paths;
 pub mod personal_library;
+pub mod playlist_backup;
 
 pub mod peek;
 pub mod player;

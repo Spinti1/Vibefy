@@ -1283,3 +1283,32 @@ Before 0.4.49, deleting a Linked tile queued both removal from the Spotify libra
 ## Audio edition selection (0.4.44)
 
 Candidate titles, music credits and album labels are checked for clean/censored/radio-edit editions. Explicit/uncensored labels improve the score among identified recordings, while artist, title and duration checks remain. Old matches with a known clean title and known clean linked catalogue choices are rechecked. Unlabelled censorship cannot be inferred reliably from metadata. Official-audio and Topic searches run first; a fully inspected, verified artist official-audio recording within three seconds of the expected duration can start without the remaining fallback queries. Artist videos and uncertain uploads still require the broader comparison. Queued tracks retain known metadata so the engine avoids an unnecessary metadata fetch.
+
+## Playlist backup files and guest library (0.4.52)
+
+Home offers Export backup and Import backup for all playlists saved on this device,
+including playlists created as a guest. Export writes a versioned `vibefy-playlists`
+JSON document. It contains playlist names/identities, ordered song identities,
+titles, credited artists, albums, durations and artwork URLs. It never includes
+audio files, embedded artwork, cache paths or account credentials. Keep the file
+somewhere safe; streaming still requires an available source and a connection.
+
+Import accepts both this format and the earlier array-based JSON backups. Song
+order and repeated entries are preserved. Existing identical playlists are skipped;
+conflicting snapshots become separate local playlists, with stable restore
+identities so importing the same snapshot again does not create duplicates.
+Validation and the combined 200-playlist/20 MB library limit are checked before
+changing the library. Unsupported versions, invalid song links and oversized files
+fail without partially replacing existing data.
+
+The native Library displays saved metadata and optional account playlists directly.
+It does not wait for Spotify library endpoints. Source/name filters, recent/name
+sorting and grid/list views work without Spotify sign-in. YouTube's SE podcast-only
+queue is excluded from music library views; the remote queue is never deleted.
+
+Global search submits only with Enter, its search icon, a recent search or another
+explicit search action. Typing has no debounce request or history write. Search
+filters and late responses do not record unfinished text. Public Music artist pages
+load independently of Spotify authentication and keep their visited-page cache for
+Back/Forward navigation. Header details use the catalogue response, not invented
+Spotify statistics.

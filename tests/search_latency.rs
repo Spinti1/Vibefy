@@ -108,6 +108,7 @@ fn frame(ctx: &egui::Context, app: &mut App) -> Vec<String> {
 fn music_result(title: &str) -> spotifast::music::Results {
     use spotifast::music::{Entry, Kind, Results};
     Results {
+        profile: None,
         entries: vec![Entry {
             id: title.into(),
             kind: Kind::Song,

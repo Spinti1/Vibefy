@@ -1467,7 +1467,20 @@ pub(crate) fn artist_links(
         }
         if let Some(id) = &artist.id {
             if theme::link(ui, &artist.name, font.clone(), color).clicked() {
-                app.actions.push(Action::Open(Page::Artist(id.clone())));
+                if (id.starts_with("UC") || id.starts_with("MPLA"))
+                    && crate::music::valid_browse_id(id)
+                {
+                    app.actions.push(Action::MusicBrowse(id.clone()));
+                } else if app.is_connected() {
+                    app.actions.push(Action::Open(Page::Artist(id.clone())));
+                } else {
+                    app.actions.push(Action::Search(artist.name.clone()));
+                }
+                clicked = true;
+            }
+        } else if !app.is_connected() {
+            if theme::link(ui, &artist.name, font.clone(), color).clicked() {
+                app.actions.push(Action::Search(artist.name.clone()));
                 clicked = true;
             }
         } else {

@@ -345,8 +345,10 @@ impl App {
                 if self.save_source_collection(collection) {self.personal.dialog=None;self.open(Page::LocalCollection(source.clone()));self.personal.message=Some("Playlist imported and saved on this device".into());if pending.fingerprint=="backup" && pending.epoch==self.music_accounts_serial[0] {self.apply_personal(Edit::Backup(source));}}
             }
             Ok(Output::Restored(lists))=>{
-                let mut count=0;for collection in lists {if self.save_source_collection(collection){count+=1;}}
-                self.personal.message=Some(format!("Restored {count} playlists"));self.open(Page::Home);
+                match crate::playlist_backup::merge(&mut self.addons.collections, lists) {
+                    Ok(count) => { self.personal_changed(); self.personal.message=Some(format!("Restored {count} playlists. Existing playlists were kept; identical backups were skipped.")); self.open(Page::Home); }
+                    Err(error) => self.personal.message=Some(error.to_string()),
+                }
             }
             Ok(Output::Exported)=>self.personal.message=Some("Playlist backup exported. It contains metadata only, without music or account credentials.".into()),
             Ok(Output::Account{scope,reports})=>{self.personal.scope=Some(scope);self.personal.backups=reports;}

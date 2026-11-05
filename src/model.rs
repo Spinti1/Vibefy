@@ -845,17 +845,6 @@ pub struct SearchState {
     pub playlists_pending: bool,
     pub error: Option<String>,
     pub filter: SearchFilter,
-    pub typed_at: Option<Instant>,
-    /// Counts runs of typing in the search field. A run ends when the field
-    /// is emptied, its selected text is typed over, or the query is
-    /// submitted.
-    pub edit_run: u64,
-    /// The run the committed query came from, and whether it is still being
-    /// typed. None for a recent search or a link.
-    pub committed_run: Option<(u64, bool)>,
-    /// The Recent searches entry a run recorded. A pause while typing commits
-    /// a prefix; the next query of the same run replaces it.
-    pub typed_entry: Option<(u64, String)>,
     pub focus_requested: bool,
 }
 
@@ -1408,7 +1397,6 @@ pub enum Action {
     SourceArtwork(String),
     /// The search field was emptied or its selection typed over, so the
     /// next query starts a new run of typing.
-    EndSearchRun,
     ForgetSearch(String),
     SetSearchFilter(SearchFilter),
     LoadSearchExtras,

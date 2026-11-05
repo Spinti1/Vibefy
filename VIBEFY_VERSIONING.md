@@ -1,8 +1,8 @@
 # Vibefy releases
 
-Current source version: **0.4.51**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
+Current source version: **0.4.52**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
 
-For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.52), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
+For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.53), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
 
 0.4.4: About and Mods credits, clearer buttons, cache management and 2 GB advisory, performance improvements.
 
@@ -101,3 +101,5 @@ For each future user-requested functional update, increment the Vibefy patch ver
 0.4.50: Remove the redundant YouTube import button from Home. Connected YouTube playlists still open from their existing shelf. Provide bounded build-artifact cleanup for development disk use.
 
 0.4.51: Remove Spotify connection controls and automatic Spotify grant restoration. Import public Spotify playlists anonymously from their public web data, with validated sequential pagination and complete-list checks. YouTube connections and local playlists remain available.
+
+0.4.52: Redesigned playlist dialogs; versioned metadata-only guest backups with non-destructive restore and legacy-file compatibility; explicit search submission/history; public artist browsing without Spotify authentication and artist headers; native local/YouTube library with working source filters, sort and grid/list, removal of the podcast-only saved queue.

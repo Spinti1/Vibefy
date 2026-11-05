@@ -154,7 +154,11 @@ pub fn parse_saved_playlists_page(value: &Value) -> Result<crate::music::Results
                 "Cannot open the signed-in Music playlist library; reconnect the session"
             )
         })?;
-    crate::music::parse_library_browse(&json!({"contents": section}))
+    let mut results = crate::music::parse_library_browse(&json!({"contents": section}))?;
+    results
+        .entries
+        .retain(|e| !crate::music_accounts::excluded_youtube_playlist(&e.id));
+    Ok(results)
 }
 
 // Deliberately no Debug: these fields authorize a browser session.

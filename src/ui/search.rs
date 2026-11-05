@@ -14,7 +14,7 @@ use super::widgets::{self, TrackRow};
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
-    if app.search.committed.is_empty() && app.search.typed_at.is_none() {
+    if app.search.committed.is_empty() {
         recent(app, ui);
         return;
     }

@@ -2253,7 +2253,7 @@ impl Worker {
                                 .await
                                 .ok_or_else(|| anyhow::anyhow!("File selection cancelled"))?;
                             if let Some(lists) = export {
-                                let bytes = serde_json::to_vec_pretty(&lists)?;
+                                let bytes = crate::playlist_backup::encode(&lists)?;
                                 let path = file.path().to_owned();
                                 tokio::task::spawn_blocking(move || {
                                     fastframe_file::write_private(&path, bytes)

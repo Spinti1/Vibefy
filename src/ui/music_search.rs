@@ -11,18 +11,13 @@ use crate::{
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let p = app.palette;
     ui.add_space(8.0);
-    theme::text(
-        ui,
-        if app.search.music.page_title.is_empty() {
-            "Search"
-        } else {
-            &app.search.music.page_title
-        },
-        theme::bold(28.0),
-        p.text,
-    );
-    ui.add_space(12.0);
     let browsing = matches!(app.page(), crate::model::Page::MusicBrowse(_));
+    if browsing {
+        browse_header(app, ui);
+    } else {
+        theme::text(ui, "Search", theme::bold(28.0), p.text);
+    }
+    ui.add_space(12.0);
     if !browsing {
         let options: Vec<_> = Filter::ALL.iter().map(|f| (*f, f.label())).collect();
         if let Some(f) = widgets::chips(ui, &p, &options, app.search.music.filter) {
@@ -104,7 +99,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         }
     });
     ui.add_space(14.0);
-    let all = state.filter == Filter::All && state.page_title.is_empty();
+    let all = !browsing && state.filter == Filter::All && state.page_title.is_empty();
     let top = entries
         .iter()
         .find(|e| {
@@ -175,6 +170,91 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         actions.push(Action::MusicMore);
     }
     app.actions.extend(actions);
+}
+fn browse_header(app: &App, ui: &mut egui::Ui) {
+    let p = app.palette;
+    let profile = app.search.music.results.profile.as_ref();
+    let artist = matches!(app.page(),crate::model::Page::MusicBrowse(id) if id.starts_with("UC")||id.starts_with("MPLA"));
+    let name = profile
+        .map(|p| p.title.as_str())
+        .unwrap_or(&app.search.music.page_title);
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(
+            ui.available_width(),
+            if ui.available_width() < 520.0 {
+                174.0
+            } else {
+                206.0
+            },
+        ),
+        egui::Sense::hover(),
+    );
+    let top = super::blend(p.panel, p.accent, if p.dark { 0.18 } else { 0.08 });
+    ui.painter().rect_filled(rect, 16.0, top);
+    let side = if rect.width() < 520.0 { 110.0 } else { 146.0 };
+    let art = egui::Rect::from_min_size(
+        rect.min + egui::vec2(20.0, (rect.height() - side) / 2.0),
+        egui::Vec2::splat(side),
+    );
+    widgets::paint_cover(
+        ui,
+        &p,
+        profile.and_then(|p| p.image.as_deref()),
+        art,
+        if artist { side / 2.0 } else { 10.0 },
+        if artist { Icon::User } else { Icon::Disc },
+        Some(app.backend.art()),
+    );
+    let x = art.right() + 22.0;
+    let right = rect.right() - 20.0;
+    let painter = ui.painter().with_clip_rect(rect.shrink(16.0));
+    crate::bidi::paint_line(
+        &painter,
+        x,
+        right,
+        rect.top() + 48.0,
+        if artist { "ARTIST" } else { "MUSIC LIBRARY" },
+        theme::semibold(11.0),
+        p.secondary,
+    );
+    crate::bidi::paint_line(
+        &painter,
+        x,
+        right,
+        rect.top() + 92.0,
+        name,
+        theme::bold(if rect.width() < 650.0 { 28.0 } else { 44.0 }),
+        p.text,
+    );
+    if let Some(profile) = profile {
+        crate::bidi::paint_line(
+            &painter,
+            x,
+            right,
+            rect.top() + 129.0,
+            &profile.subtitle,
+            theme::regular(12.5),
+            p.secondary,
+        );
+        if rect.height() > 180.0 {
+            crate::bidi::paint_line(
+                &painter,
+                x,
+                right,
+                rect.top() + 163.0,
+                &profile.description,
+                theme::regular(12.0),
+                p.secondary,
+            );
+        }
+    }
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Label,
+            true,
+            format!("{} {name}", if artist { "Artist" } else { "Music page" }),
+        )
+    });
 }
 fn playable(app: &App) -> Vec<crate::player::LocalTrack> {
     app.search
@@ -407,9 +487,39 @@ fn song_row(app: &App, ui: &mut egui::Ui, e: &Entry, actions: &mut Vec<Action>) 
         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Play {}", e.title))
     });
     source_menu(app, &response, e, actions);
-    if response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
+    let mut artist_clicked = false;
+    if let Some(artist) = e.track.as_ref().and_then(|t| t.artists.first()) {
+        let area = egui::Rect::from_min_max(
+            egui::pos2(rect.left() + 58.0, rect.top() + 26.0),
+            egui::pos2(rect.right() - 48.0, rect.bottom()),
+        );
+        let link = ui.interact(area, response.id.with("artist"), egui::Sense::click());
+        link.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                true,
+                format!("Open artist {}", artist.name),
+            )
+        });
+        artist_clicked = link
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked();
+        if artist_clicked {
+            if let Some(id) = artist
+                .id
+                .as_ref()
+                .filter(|id| id.starts_with("UC") || id.starts_with("MPLA"))
+            {
+                actions.push(Action::MusicBrowse(id.clone()));
+            } else {
+                actions.push(Action::Search(artist.name.clone()));
+            }
+        }
+    }
+    if !artist_clicked
+        && response
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .clicked()
     {
         activate(app, e, actions);
     }
@@ -417,14 +527,44 @@ fn song_row(app: &App, ui: &mut egui::Ui, e: &Entry, actions: &mut Vec<Action>) 
 fn source_menu(app: &App, response: &egui::Response, e: &Entry, actions: &mut Vec<Action>) {
     if let Some(t) = &e.track {
         response.context_menu(|ui| {
-            if ui.button("Add to Spotify playlist…").clicked() {
-                if let crate::api::models::PlayableItem::Track(source) = t.to_playable_item() {
-                    actions.push(Action::FindSpotifyTrack {
-                        query: format!("{} {}", source.name, source.artist_names()),
-                        source,
-                    });
+            ui.menu_button("Add to Vibefy playlist", |ui| {
+                for c in app
+                    .addons
+                    .collections
+                    .iter()
+                    .filter(|c| crate::personal_library::owned(&c.source))
+                {
+                    if ui.button(&c.title).clicked() {
+                        actions.push(Action::Personal(crate::personal_library::Action::Add {
+                            source: c.source.clone(),
+                            tracks: vec![t.clone()],
+                        }));
+                        ui.close();
+                    }
                 }
-                ui.close();
+                if ui.button("Create playlist…").clicked() {
+                    actions.push(Action::Personal(
+                        crate::personal_library::Action::CreateFrom(vec![t.clone()]),
+                    ));
+                    ui.close();
+                }
+            });
+            for artist in &t.artists {
+                if ui
+                    .button(format!("View artist · {}", artist.name))
+                    .clicked()
+                {
+                    if let Some(id) = artist
+                        .id
+                        .as_ref()
+                        .filter(|id| id.starts_with("UC") || id.starts_with("MPLA"))
+                    {
+                        actions.push(Action::MusicBrowse(id.clone()));
+                    } else {
+                        actions.push(Action::Search(artist.name.clone()));
+                    }
+                    ui.close();
+                }
             }
             if app.settings.addons.active(Id::TrackPeek) && ui.button("Preview audio").clicked() {
                 actions.push(Action::PreviewTrack(t.clone()));

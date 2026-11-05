@@ -3,7 +3,7 @@ use crate::{
     addons::Collection, http::Http, music_accounts, music_session::Session, player::LocalTrack,
     settings::ProxyConfig,
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -576,37 +576,7 @@ async fn sync(
 }
 
 pub fn decode_backup(bytes: &[u8]) -> Result<Vec<Collection>> {
-    ensure!(bytes.len() <= 20_000_000, "Backup exceeds 20 MB");
-    let mut lists: Vec<Collection> =
-        serde_json::from_slice(bytes).context("Choose a Vibefy playlist backup JSON file")?;
-    ensure!(
-        lists.len() <= MAX_LISTS && lists.iter().all(validate),
-        "Backup contains unsupported playlist data"
-    );
-    for list in &mut lists {
-        if list
-            .image
-            .as_deref()
-            .is_some_and(|url| !crate::addons::safe_art_url(url))
-        {
-            list.image = None;
-        }
-        for track in &mut list.tracks {
-            for image in [
-                &mut track.cover_url,
-                &mut track.art_url,
-                &mut track.art_small_url,
-            ] {
-                if image
-                    .as_deref()
-                    .is_some_and(|url| !crate::addons::safe_art_url(url))
-                {
-                    *image = None;
-                }
-            }
-        }
-    }
-    Ok(lists)
+    crate::playlist_backup::decode(bytes)
 }
 
 #[cfg(test)]

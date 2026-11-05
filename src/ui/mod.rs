@@ -11,6 +11,7 @@ pub mod home;
 mod keys;
 pub mod library;
 pub(crate) mod listen_together;
+mod local_library;
 pub mod login;
 mod lyrics;
 mod mod_host;

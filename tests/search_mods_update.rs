@@ -116,6 +116,7 @@ fn search_uses_generic_branding_prominent_artist_and_no_video_filter() {
         Filter::All,
         false,
         Ok(Results {
+            profile: None,
             entries: vec![Entry {
                 id: "UCartist".into(),
                 kind: Kind::Artist,
@@ -256,6 +257,7 @@ fn native_browse_load_more_continues_without_replacing_or_reordering_songs() {
         "UCartist".into(),
         false,
         Ok(Results {
+            profile: None,
             entries: vec![row("abcdefghijk")],
             continuation: Some("NEXT".into()),
         }),
@@ -271,6 +273,7 @@ fn native_browse_load_more_continues_without_replacing_or_reordering_songs() {
         "UCartist".into(),
         true,
         Ok(Results {
+            profile: None,
             entries: vec![row("bbbbbbbbbbb"), row("abcdefghijk")],
             continuation: None,
         }),
@@ -334,6 +337,7 @@ fn spotify_assistance_reuses_exact_cached_recording_art_without_replacing_source
         Filter::All,
         false,
         Ok(Results {
+            profile: None,
             entries: vec![Entry {
                 id: "iEtJQmv7-LY".into(),
                 kind: Kind::Song,

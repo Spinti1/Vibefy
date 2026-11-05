@@ -994,6 +994,11 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
     );
     ui.add_space(10.0);
 
+    if !app.is_connected() {
+        super::local_library::show(app, ui);
+        return;
+    }
+
     let filter_id = egui::Id::new("sidebar-filter");
     let mut filter = ui
         .data(|data| data.get_temp::<Filter>(filter_id))

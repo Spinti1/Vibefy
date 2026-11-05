@@ -15,7 +15,6 @@ impl App {
         }
         self.search.serial = self.search.serial.wrapping_add(1);
         self.search.committed = query.clone();
-        self.search.committed_run = None;
         self.search.error = None;
         self.search.playlists_pending = false;
         self.search.catalogue_pending = false;
@@ -93,9 +92,6 @@ impl App {
                 self.search.results_serial = serial;
                 let results = self.search.music.results.clone();
                 self.search.music.remember(&query, filter, &results);
-                if !results.entries.is_empty() {
-                    self.remember_search(&query);
-                }
             }
             Err(error) => self.search.music.error = Some(error),
         }
@@ -221,7 +217,7 @@ impl App {
             .unwrap_or_else(|| (id.clone(), Results::default()));
         self.search.music.page_title = title;
         self.search.music.source_key = source;
-        self.search.music.loading = results.entries.is_empty();
+        self.search.music.loading = results.entries.is_empty() && results.profile.is_none();
         self.search.music.loading_more = false;
         self.search.music.error = None;
         self.search.music.results = results;
@@ -249,6 +245,9 @@ impl App {
         self.search.music.loading_more = false;
         match result {
             Ok(results) => {
+                if let Some(profile) = &results.profile {
+                    self.search.music.page_title = profile.title.clone();
+                }
                 if more {
                     self.search.music.results.entries.extend(results.entries);
                     self.search.music.results.entries.truncate(500);

@@ -67,6 +67,7 @@ fn music_artist_album_back_forward_preserves_real_pages() {
     app.search.committed = "Example artist".into();
     let album = entry("MPREexample", "Example album", Kind::Album);
     app.search.music.results = Results {
+        profile: None,
         entries: vec![entry("UCexample", "Example artist", Kind::Artist)],
         continuation: None,
     };
@@ -75,6 +76,7 @@ fn music_artist_album_back_forward_preserves_real_pages() {
         (
             "Example artist".into(),
             Results {
+                profile: None,
                 entries: vec![album.clone()],
                 continuation: None,
             },
@@ -85,6 +87,7 @@ fn music_artist_album_back_forward_preserves_real_pages() {
         (
             "Example album".into(),
             Results {
+                profile: None,
                 entries: vec![album],
                 continuation: None,
             },

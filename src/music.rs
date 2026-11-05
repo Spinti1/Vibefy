@@ -81,7 +81,15 @@ pub struct Entry {
     pub spotify_note: Option<String>,
 }
 #[derive(Clone, Debug, Default)]
+pub struct Profile {
+    pub title: String,
+    pub subtitle: String,
+    pub description: String,
+    pub image: Option<String>,
+}
+#[derive(Clone, Debug, Default)]
 pub struct Results {
+    pub profile: Option<Profile>,
     pub entries: Vec<Entry>,
     pub continuation: Option<String>,
 }
@@ -439,7 +447,8 @@ fn row(value: &Value, _filter: Filter, library: bool) -> Option<Entry> {
             if id.starts_with("UC") || id.starts_with("MPLA") {
                 artists.push(ArtistRef {
                     name: label.chars().take(300).collect(),
-                    ..Default::default()
+                    id: Some(id.clone()),
+                    uri: Some(format!("vibefy:music:{id}")),
                 });
             } else if id.starts_with("MPRE") {
                 album = label.into();
@@ -560,6 +569,20 @@ pub fn parse_artist(value: &Value) -> Result<Results> {
     result
         .entries
         .retain(|entry| matches!(entry.kind, Kind::Song | Kind::Album));
+    if let Some(header) = find(value, "musicImmersiveHeaderRenderer")
+        .or_else(|| find(value, "musicVisualHeaderRenderer"))
+        .or_else(|| find(value, "musicResponsiveHeaderRenderer"))
+    {
+        let title = text(&header["title"]);
+        if !title.is_empty() {
+            result.profile = Some(Profile {
+                title: title.chars().take(500).collect(),
+                subtitle: text(&header["subtitle"]).chars().take(500).collect(),
+                description: text(&header["description"]).chars().take(1500).collect(),
+                image: thumbnail(&header["thumbnail"]),
+            });
+        }
+    }
     Ok(result)
 }
 /// Explicit account imports preserve user-added recordings and duplicate rows.

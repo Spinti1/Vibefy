@@ -51,6 +51,24 @@ pub struct LibraryPlaylist {
     pub title: String,
     pub image: Option<String>,
 }
+/// YouTube's podcast-only saved queue is not a music playlist.
+pub fn excluded_youtube_playlist(id: &str) -> bool {
+    id.strip_prefix("VL").unwrap_or(id) == "SE"
+}
+pub fn excluded_playlist_source(source: &str) -> bool {
+    // Special queues have short IDs and intentionally do not pass the public
+    // playlist import validator. Recognize them in old saved metadata too.
+    reqwest::Url::parse(source).is_ok_and(|url| {
+        url.scheme() == "https"
+            && matches!(
+                url.host_str(),
+                Some("youtube.com" | "www.youtube.com" | "music.youtube.com")
+            )
+            && url
+                .query_pairs()
+                .any(|(key, id)| key == "list" && excluded_youtube_playlist(&id))
+    })
+}
 #[derive(Clone, Default)]
 pub struct Password(pub String);
 impl std::fmt::Debug for Password {

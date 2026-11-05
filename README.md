@@ -11,8 +11,8 @@ Built in Rust, based on [Spotifast](https://github.com/crmne/spotifast).
 
 ## Features
 
-- **Library:** optional YouTube connection, local Vibefy playlists, public Spotify playlist imports without signing in and optional unlisted YouTube backups. Export/import metadata backups without storing audio.
-- **Playback:** YouTube Music search, queue controls and a ten-band equalizer.
+- **Library:** optional YouTube connection, local Vibefy playlists, public Spotify playlist imports without signing in and optional unlisted YouTube backups. Export/import guest and local playlist backups without storing audio.
+- **Playback:** search on Enter or the search button, artist pages, queue controls and a ten-band equalizer.
 - **Lyrics:** synchronized or plain lyrics from available providers, with background controls.
 - **Visualizers:** 16 built-in effects from Vivy, Backmusic and SoundVisualizer, selected directly in the player.
 - **Mods:** optional cats, Track Peek and additional music sources. Install from the in-app catalogue and reload.
