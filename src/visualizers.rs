@@ -81,6 +81,7 @@ mod release_update_tests {
                     "cover must be above the effect"
                 );
                 let [x, y, size, ..] = covers[0].values;
+                assert_eq!(x, width / 2., "every effect uses the centered cover layout");
                 assert!(size > 0. && x - size / 2. >= 0. && y - size / 2. >= 0.);
                 assert!(x + size / 2. <= width && y + size / 2. <= height);
                 input[16] = 0.;
@@ -244,12 +245,7 @@ pub fn render(id: Id, input: &[f32]) -> Vec<Draw> {
     }
     if id.is_visualizer() && frame.n(16) > 0. {
         let dim = w.min(h);
-        let (cx, cy, size) = if id == Id::Backmusic {
-            (x + w / 2., y + h / 2. - 20., dim * 0.22 * 1.15)
-        } else {
-            let size = (dim * 0.22).clamp(48., 160.).min(dim * 0.5);
-            (x + w - size / 2. - 20., y + size / 2. + 56., size)
-        };
+        let (cx, cy, size) = (x + w / 2., y + h / 2. - 20., dim * 0.22 * 1.15);
         // Append once, after the effect/particles, so the image stays visible.
         let size = size.min(dim * 0.5);
         let cx = cx.clamp(x + size / 2., x + w - size / 2.);

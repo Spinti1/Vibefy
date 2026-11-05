@@ -72,6 +72,8 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
         .unwrap_or(app.palette.accent)
         .gamma_multiply(config.brightness.clamp(0.2, 1.));
     let mut points = Vec::new();
+    let colors =
+        super::visualizer_style::Colors::from_art(app.visualizer_art_palette(), app.palette.accent);
     let mut stroke: egui::epaint::PathStroke = (1., tint).into();
     for cmd in commands {
         let [a, b, c, d, e, f, g, _] = cmd.values;
@@ -79,7 +81,13 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
             0 => {
                 points.clear();
                 stroke = if visual {
-                    super::visualizer_style::stroke(rect, a.clamp(0.1, 10.), config.brightness, b)
+                    super::visualizer_style::stroke(
+                        colors,
+                        rect,
+                        a.clamp(0.1, 10.),
+                        config.brightness,
+                        b,
+                    )
                 } else {
                     (a.clamp(0.1, 10.), tint.gamma_multiply(b.clamp(0., 1.))).into()
                 };
@@ -105,6 +113,7 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
                     ][(g as usize).min(5)]
                 } else if visual {
                     super::visualizer_style::color_at(
+                        colors,
                         rect,
                         pos2(a + c / 2., b + d / 2.),
                         config.brightness,
@@ -124,7 +133,13 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
                     pos2(a, b),
                     c.clamp(0., 100.),
                     if visual {
-                        super::visualizer_style::color_at(rect, pos2(a, b), config.brightness, d)
+                        super::visualizer_style::color_at(
+                            colors,
+                            rect,
+                            pos2(a, b),
+                            config.brightness,
+                            d,
+                        )
                     } else {
                         tint.gamma_multiply(d.clamp(0., 1.))
                     },

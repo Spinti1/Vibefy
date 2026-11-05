@@ -2668,9 +2668,18 @@ impl App {
         if !self.settings.accent_from_art {
             return None;
         }
+        self.visualizer_art_palette()
+    }
+
+    /// Visual effects follow the cover independently of the interface accent setting.
+    pub fn visualizer_art_palette(&self) -> Option<&[[u8; 3]]> {
         let now = self.now_playing()?;
-        let url = now.art_small.or(now.art_url)?;
-        self.art_palettes.get(&url).map(Vec::as_slice)
+        now.art_small
+            .iter()
+            .chain(now.art_url.iter())
+            .filter_map(|url| self.art_palettes.get(url))
+            .find(|colors| !colors.is_empty())
+            .map(Vec::as_slice)
     }
 
     pub fn tint_for(&mut self, url: Option<&str>) -> Option<Color32> {

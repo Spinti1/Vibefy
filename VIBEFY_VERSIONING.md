@@ -1,8 +1,8 @@
 # Vibefy releases
 
-Current source version: **0.4.46**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
+Current source version: **0.4.47**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
 
-For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.47), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
+For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.48), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
 
 0.4.4: About and Mods credits, clearer buttons, cache management and 2 GB advisory, performance improvements.
 
@@ -91,3 +91,5 @@ For each future user-requested functional update, increment the Vibefy patch ver
 0.4.45: Built-in native Vivy, Backmusic and SoundVisualizer with all 16 effects in one top-level selector. Remove visualizer packages from Mods and nested style dropdowns; preserve existing per-provider settings. Persist last-song metadata, position and exact playlist occurrence for paused restoration without a network lookup.
 
 0.4.46: Album covers in all 16 native visualizers, a shared cover toggle, source/thumbnail artwork fallback, and spatial multi-colour lines, bars and particles with brightness preserved.
+
+0.4.47: Center covers consistently across all 16 effects and derive line/bar/particle gradients from the playing artwork palette, independently of interface accent preferences. Reuse existing cached background artwork analysis.

@@ -60,6 +60,11 @@ fn audio(app: &mut App, ctx: &egui::Context) {
 pub fn fullscreen(app: &mut App, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     audio(app, &ctx);
+    if let Some(now) = app.now_playing()
+        && let Some(url) = now.art_small.or(now.art_url)
+    {
+        app.tint_for(Some(&url));
+    }
     let mode = app.settings.addons.visualizer.unwrap_or(Id::Vivy);
     let config = app.settings.addons.visual(mode);
     egui::CentralPanel::default()
