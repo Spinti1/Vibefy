@@ -735,6 +735,7 @@ pub struct App {
     pub resume_context: Option<String>,
     pub resume_track: Option<String>,
     pub resume_position_ms: u32,
+    resume_playback: Option<crate::settings::PlaybackCheckpoint>,
     /// Manually queued songs restored with the remembered track.
     pub resume_queue: Vec<String>,
     /// Manually queued songs from this session, oldest first.
@@ -967,6 +968,7 @@ fn link_recording(
 impl App {
     pub fn new(waker: &Waker, dirs: AppDirs, mut settings: Settings, options: AppOptions) -> Self {
         settings.addons.require_packages = options.restore_sign_in;
+        settings.addons.migrate_builtin_visualizers();
         let addon_collections =
             crate::addons::load_collections(&dirs.state.join("mod-collections.json"));
         // The legacy password file has no endpoint of its own. Keep the old
@@ -1298,6 +1300,12 @@ impl App {
             resume_context: session.last_context.clone(),
             resume_track: session.last_track.clone(),
             resume_position_ms: session.last_position_ms,
+            resume_playback: session.last_playback.clone().filter(|saved| {
+                session
+                    .last_track
+                    .as_deref()
+                    .is_some_and(|uri| saved.matches(uri, session.last_context.as_deref()))
+            }),
             resume_queue: session.last_added_queue.clone(),
             manual_queue: Vec::new(),
             pending_queue_adds: Vec::new(),
@@ -1754,7 +1762,11 @@ impl App {
                 return (!assumed.uri.is_empty()).then(|| assumed.uri.clone());
             }
         }
-        remote
+        remote.or_else(|| {
+            self.resume_only()
+                .then(|| self.resume_context.clone())
+                .flatten()
+        })
     }
 
     /// Track shown as current, including a recent unconfirmed play request.
@@ -2275,7 +2287,19 @@ impl App {
             }
         }
 
-        None
+        // Cold starts retain metadata even before the library has loaded.
+        self.resume_playback.as_ref().and_then(|saved| {
+            if saved.current.uri == uri {
+                Some(saved.current.clone())
+            } else {
+                saved
+                    .tracks
+                    .iter()
+                    .chain(&saved.queued)
+                    .find(|track| track.uri == uri)
+                    .cloned()
+            }
+        })
     }
 
     fn convert_to_local_track(
@@ -2485,6 +2509,41 @@ impl App {
     fn resume_preview(&self) -> Option<NowPlaying> {
         let uri = self.resume_track.as_deref()?;
         self.cached_track_preview(uri, self.resume_position_ms)
+            .or_else(|| {
+                let track = self.find_track_metadata(uri)?;
+                Some(NowPlaying {
+                    local: true,
+                    device_name: None,
+                    device_kind: None,
+                    uri: track.uri.clone(),
+                    id: (!track.uri.starts_with("vibefy:"))
+                        .then(|| util::uri_id(uri).map(str::to_string))
+                        .flatten(),
+                    title: track.title.clone(),
+                    subtitle: track.artist_names(),
+                    artists: track.artists.clone(),
+                    album_name: track.album_name.clone(),
+                    album_id: None,
+                    show_id: None,
+                    art_url: track.cover_url.clone().or(track.art_url.clone()),
+                    art_small: track.art_small_url.clone().or(track.cover_url.clone()),
+                    duration_ms: track.duration_ms,
+                    position_ms: if track.duration_ms > 0 {
+                        self.resume_position_ms.min(track.duration_ms)
+                    } else {
+                        self.resume_position_ms
+                    },
+                    playing: false,
+                    loading: false,
+                    shuffle: self.shuffle_wanted,
+                    repeat: self.local_repeat(),
+                    volume_percent: volume_to_percent(self.local.volume),
+                    can_control: true,
+                    can_set_volume: true,
+                    is_episode: track.is_episode,
+                    resuming: true,
+                })
+            })
     }
 
     fn cached_track_preview(&self, uri: &str, position_ms: u32) -> Option<NowPlaying> {
@@ -3880,6 +3939,20 @@ impl App {
     /// whose name has not loaded is still named by kind so it can open.
     pub fn playing_from(&self) -> Option<PlayingFrom> {
         let context = self.playing_context_uri()?;
+        if let Some(source) = context.strip_prefix("local-collection:") {
+            let name = self
+                .addons
+                .collections
+                .iter()
+                .chain(self.mirror.lists.iter().map(|list| &list.collection))
+                .find(|list| list.source == source)
+                .map(|list| list.title.clone())
+                .unwrap_or_else(|| gettext(self.locale, "Playlist").into_owned());
+            return Some(PlayingFrom {
+                name,
+                page: Some(Page::LocalCollection(source.into())),
+            });
+        }
         if context.ends_with(":collection") {
             return Some(PlayingFrom {
                 name: gettext(self.locale, "Liked Songs").into_owned(),
@@ -4128,7 +4201,7 @@ impl App {
                     self.manual_queue.push(uri.clone());
                     // Spotify's queue refuses local files; the engine
                     // queues them itself.
-                    if uri.starts_with(LOCAL_URI_PREFIX) {
+                    if uri.starts_with(LOCAL_URI_PREFIX) || self.resume_playback.is_some() {
                         let command = self
                             .find_track_metadata(&uri)
                             .map(PlayerCommand::AddResolvedToQueue)
@@ -9590,6 +9663,13 @@ impl App {
 
     /// Loaded track URIs for a context, in display order.
     fn context_track_uris(&self, context_uri: &str) -> Option<Vec<String>> {
+        if self.resume_only()
+            && let Some(saved) = &self.resume_playback
+            && saved.context.as_deref() == Some(context_uri)
+            && !saved.tracks.is_empty()
+        {
+            return Some(saved.tracks.iter().map(|t| t.uri.clone()).collect());
+        }
         let uris: Vec<String> = if let Some(id) = context_uri.strip_prefix("spotify:playlist:") {
             let from_page: Vec<String> = self
                 .playlist_pages
@@ -10288,9 +10368,29 @@ impl App {
         let Some(track) = self.resume_track.clone() else {
             return false;
         };
-        let mut request = match self.resume_context.clone() {
-            Some(context) => PlayRequest::context(context).starting_at_uri(track),
-            None => PlayRequest::tracks(vec![track]),
+        let mut request = if let Some(saved) = &self.resume_playback
+            && saved.matches(&track, self.resume_context.as_deref())
+            && !saved.tracks.is_empty()
+        {
+            let mut request =
+                PlayRequest::tracks(saved.tracks.iter().map(|t| t.uri.clone()).collect());
+            request.context_uri = saved.context.clone();
+            request.offset_position = Some(saved.index as u32);
+            // An index preserves a repeated song's exact occurrence.
+            if saved
+                .context
+                .as_deref()
+                .is_some_and(|c| c.starts_with("local-collection:"))
+            {
+                self.addons.active_tracks = saved.tracks.clone();
+                self.addons.active_collection = saved.context.clone();
+            }
+            request
+        } else {
+            match self.resume_context.clone() {
+                Some(context) => PlayRequest::context(context).starting_at_uri(track),
+                None => PlayRequest::tracks(vec![track]),
+            }
         };
         request.position_ms = self.resume_position_ms;
         self.play_request(request, false);
@@ -12876,7 +12976,7 @@ impl App {
                 } else if self
                     .settings
                     .addons
-                    .installed_visualizers()
+                    .available_visualizers()
                     .next()
                     .is_some()
                 {
@@ -14192,6 +14292,22 @@ impl App {
             self.resume_context = self.playing_context_uri();
             self.resume_track = Some(now.uri.clone());
             self.resume_position_ms = now.position_ms;
+            if now.local
+                && self.local.is_active()
+                && self.local.track.as_ref().is_some_and(|t| t.uri == now.uri)
+            {
+                self.resume_playback = crate::settings::PlaybackCheckpoint::capture(
+                    &self.local,
+                    self.resume_context.clone(),
+                    &self.manual_queue,
+                );
+            } else if self
+                .resume_playback
+                .as_ref()
+                .is_some_and(|saved| !saved.matches(&now.uri, self.resume_context.as_deref()))
+            {
+                self.resume_playback = None;
+            }
         }
         if !self.offline {
             let session = SessionState {
@@ -14201,6 +14317,7 @@ impl App {
                 last_context: self.resume_context.clone(),
                 last_track: self.resume_track.clone(),
                 last_position_ms: self.resume_position_ms,
+                last_playback: self.resume_playback.clone(),
                 collapsed_folders: self.collapsed_folders.clone(),
                 rootlist: self.rootlist_cache.clone(),
                 last_added_queue: if self.resume_queue.is_empty() {
@@ -31825,5 +31942,130 @@ impl App {
         result: Result<crate::addons::Collection, String>,
     ) {
         self.receive_addon_result(request, result);
+    }
+}
+
+#[cfg(test)]
+mod release_update_tests {
+    use super::*;
+
+    fn isolated(dirs: AppDirs) -> App {
+        App::new(
+            &Waker::default(),
+            dirs,
+            Settings::default(),
+            AppOptions {
+                restore_sign_in: false,
+                media_controls: false,
+                tray: false,
+                autostart: false,
+            },
+        )
+    }
+
+    #[test]
+    fn checkpoint_excludes_manual_rows_without_removing_playlist_duplicates() {
+        let song = |uri: &str| crate::player::LocalTrack {
+            uri: uri.into(),
+            title: "Example".into(),
+            ..Default::default()
+        };
+        let a = song("spotify:track:a");
+        let b = song("spotify:track:b");
+        let local = LocalState {
+            track: Some(a.clone()),
+            queue_tracks: vec![a.clone(), b.clone(), b.clone(), a.clone()],
+            queue_index: 0,
+            ..Default::default()
+        };
+        let saved = crate::settings::PlaybackCheckpoint::capture(
+            &local,
+            Some("spotify:playlist:example".into()),
+            &[b.uri.clone()],
+        )
+        .unwrap();
+        assert_eq!(saved.queued, vec![b.clone()]);
+        assert_eq!(saved.tracks, vec![a.clone(), b, a]);
+        assert!(saved.matches("spotify:track:a", Some("spotify:playlist:example")));
+    }
+
+    #[test]
+    fn restart_restores_metadata_position_playlist_and_repeated_song_occurrence() {
+        for (uri, context) in [
+            ("spotify:track:example", "spotify:playlist:example"),
+            (
+                "vibefy:youtube:dQw4w9WgXcQ",
+                "local-collection:https://www.youtube.com/playlist?list=PLexample",
+            ),
+        ] {
+            let root =
+                std::env::temp_dir().join(format!("vibefy-playback-{}", rand::random::<u64>()));
+            let dirs = AppDirs {
+                config: root.join("config"),
+                state: root.join("state"),
+                cache: root.join("cache"),
+            };
+            let track = crate::player::LocalTrack {
+                uri: uri.into(),
+                name: "Example song".into(),
+                title: "Example song".into(),
+                album: "Example album".into(),
+                album_name: "Example album".into(),
+                artists: vec![ArtistRef {
+                    name: "Example artist".into(),
+                    ..Default::default()
+                }],
+                cover_url: Some("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg".into()),
+                duration_ms: 180_000,
+                ..Default::default()
+            };
+            let mut middle = track.clone();
+            middle.uri = "vibefy:youtube:9bZkp7q19f0".into();
+            let mut app = isolated(dirs.clone());
+            app.local_ready = true;
+            app.local.connected = true;
+            app.local.playback = Playback::Paused;
+            app.local.track = Some(track.clone());
+            app.local.queue_tracks = vec![track.clone(), middle.clone(), track.clone()];
+            app.local.queue_index = 2;
+            app.local.position_ms = 45_123;
+            app.addons.active_tracks = app.local.queue_tracks.clone();
+            app.addons.active_collection = Some(context.into());
+            app.save_session();
+            assert!(app.flush_files());
+            app.backend.shutdown();
+            drop(app);
+
+            let mut restored = isolated(dirs);
+            let now = restored
+                .now_playing()
+                .expect("metadata needs no network lookup");
+            assert_eq!(now.uri, uri);
+            assert_eq!(now.title, "Example song");
+            assert_eq!(now.subtitle, "Example artist");
+            assert_eq!(now.position_ms, 45_123);
+            assert_eq!(now.art_url, track.cover_url);
+            assert!(!now.playing && !now.loading);
+            assert_eq!(restored.playing_context_uri().as_deref(), Some(context));
+            assert!(restored.playing_from().is_some());
+            assert!(
+                restored.backend.take_player_commands().is_empty(),
+                "restart must not autoplay"
+            );
+            // Closing again without listening must keep the checkpoint.
+            restored.save_session();
+            assert!(restored.flush_files());
+            restored.local_ready = true;
+            restored.local.connected = false;
+            assert!(restored.resume_last());
+            let request = restored.queued_play.as_ref().expect("wait for the engine");
+            assert_eq!(request.context_uri.as_deref(), Some(context));
+            assert_eq!(request.position_ms, 45_123);
+            assert_eq!(request.offset_position, Some(2));
+            assert_eq!(request.uris, vec![uri, middle.uri.as_str(), uri]);
+            restored.backend.shutdown();
+            drop(restored);
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 }

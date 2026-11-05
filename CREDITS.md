@@ -35,7 +35,7 @@ These are native adaptations, not the original extensions running inside Spiceti
 | [wairence / Vivy](https://github.com/wairence/vivy) | Independent live audio visual adaptation; MIT notice retained |
 | [rolandyangg / Backmusic](https://github.com/rolandyangg/backmusic_extension) | Visual inspiration for independent spectrum / rings / particles implementation; unlicensed extension code was not copied |
 | [Grason Chan / Spotify Spice](https://github.com/grasonchan/spotify-spice) | Track Peek inspiration / native adaptation only, no Vinyl; MIT notice retained |
-| [CaYatur / SoundVisualizer](https://github.com/CaYatur/SoundVisualizer) | 12 adapted 2D effect geometries and audio mappings by Çağan Turgut / CaYaDev, revision c3e7fc6bc3fa826e323486256268fa764a317963. MIT notice preserved in assets/mods/LICENSE-SoundVisualizer.txt and the optional package. Canvas bloom, GPU and MilkDrop modes are not included. |
+| [CaYatur / SoundVisualizer](https://github.com/CaYatur/SoundVisualizer) | 12 built-in 2D effect geometries and audio mappings adapted from Çağan Turgut / CaYaDev, revision c3e7fc6bc3fa826e323486256268fa764a317963. MIT notice preserved in assets/mods/LICENSE-SoundVisualizer.txt. Canvas bloom, GPU and MilkDrop modes are not included. |
 | [Kyzenkms / Spicetify Jam](https://github.com/Kyzenkms/spicetify-jam) | Inspiration for independent shared listening; current transport uses a Vibefy Cloudflare relay, not Spotify Jam |
 | [Spicetify contributors](https://github.com/spicetify) | Original extension ecosystem and marketplace references |
 

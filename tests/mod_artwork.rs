@@ -120,13 +120,13 @@ fn visual_settings_migrate_and_remain_independent() {
     assert_eq!(preferences.visual(Id::Backmusic).intensity, 1.8);
     preferences.visual_mut(Id::Backmusic).style = 0;
     assert_eq!(preferences.visual(Id::Vivy).style, 1);
-    assert_eq!(preferences.installed_visualizers().count(), 0);
+    assert_eq!(preferences.available_visualizers().count(), 3);
     preferences.set(Id::Vivy, true);
     preferences.set(Id::Backmusic, true);
     preferences.set(Id::Backmusic, false);
     assert_eq!(
-        preferences.installed_visualizers().collect::<Vec<_>>(),
-        vec![Id::Vivy, Id::Backmusic]
+        preferences.available_visualizers().collect::<Vec<_>>(),
+        vec![Id::Vivy, Id::Backmusic, Id::SoundVisualizer]
     );
     let restored: Preferences =
         serde_json::from_str(&serde_json::to_string(&preferences).unwrap()).unwrap();

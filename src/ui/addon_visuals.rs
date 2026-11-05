@@ -117,6 +117,30 @@ pub fn fullscreen(app: &mut App, ui: &mut egui::Ui) {
     }
 }
 
+fn effect_selector(
+    ui: &mut egui::Ui,
+    preferences: &crate::addons::Preferences,
+) -> (egui::Response, Option<crate::visualizers::Effect>) {
+    let selected = crate::visualizers::selected(preferences);
+    let mut choice = None;
+    let response = egui::ComboBox::from_id_salt("builtin-visualizer-effect")
+        .selected_text(selected.label)
+        .width((ui.available_width() - 100.).clamp(110., 240.))
+        .height(420.)
+        .show_ui(ui, |ui| {
+            for effect in crate::visualizers::EFFECTS {
+                if ui
+                    .selectable_label(effect == selected, effect.label)
+                    .clicked()
+                {
+                    choice = Some(effect);
+                }
+            }
+        })
+        .response;
+    (response, choice)
+}
+
 fn fullscreen_controls(app: &mut App, ui: &mut egui::Ui, mode: Id) {
     ui.add_space(theme::top_bar_height() + 8.0);
     ui.horizontal(|ui| {
@@ -128,53 +152,17 @@ fn fullscreen_controls(app: &mut App, ui: &mut egui::Ui, mode: Id) {
             .show(ui, |ui| {
                 *ui.visuals_mut() = egui::Visuals::dark();
                 ui.horizontal(|ui| {
-                    egui::ComboBox::from_id_salt("fullscreen-view")
-                        .selected_text(mode.name())
-                        .width(130.0)
-                        .show_ui(ui, |ui| {
-                            for id in app.settings.addons.installed_visualizers() {
-                                if ui.selectable_label(mode == id, id.name()).clicked() {
-                                    app.actions
-                                        .push(Action::Addon(Command::ChooseVisualizer(id)));
-                                }
-                            }
-                        });
+                    if let (_, Some(effect)) = effect_selector(ui, &app.settings.addons) {
+                        app.actions.push(Action::Addon(Command::ChooseEffect {
+                            id: effect.id,
+                            style: effect.style,
+                        }));
+                    }
                     ui.menu_button("Settings", |ui| {
                         ui.set_max_width(300.0);
                         let original = app.settings.addons.visual(mode);
                         let mut config = original;
                         ui.strong(mode.name());
-                        ui.horizontal(|ui| {
-                            let styles: &[&str] = if mode == Id::SoundVisualizer {
-                                &[
-                                    "Bars",
-                                    "Center bars",
-                                    "Circular",
-                                    "Wave",
-                                    "Radial wave",
-                                    "Dots",
-                                    "Blocks",
-                                    "Starburst",
-                                    "Helix",
-                                    "Strings",
-                                    "Lissajous",
-                                    "Arcs",
-                                ]
-                            } else if mode == Id::Vivy {
-                                &["Ridgeline", "Drift"]
-                            } else {
-                                &["Rings", "Spectrum"]
-                            };
-                            egui::ComboBox::from_id_salt("visualizer-style")
-                                .selected_text(
-                                    styles[usize::from(config.style).min(styles.len() - 1)],
-                                )
-                                .show_ui(ui, |ui| {
-                                    for (style, label) in styles.iter().enumerate() {
-                                        ui.selectable_value(&mut config.style, style as u8, *label);
-                                    }
-                                });
-                        });
                         ui.add(
                             egui::Slider::new(&mut config.intensity, 0.2..=3.0).text("Intensity"),
                         );
@@ -190,7 +178,10 @@ fn fullscreen_controls(app: &mut App, ui: &mut egui::Ui, mode: Id) {
                         }
                         ui.separator();
                         if ui.button("Restore defaults").clicked() {
-                            config = Default::default();
+                            config = crate::addons::VisualConfig {
+                                style: config.style,
+                                ..Default::default()
+                            };
                         }
                         if config != original {
                             app.actions
@@ -224,4 +215,91 @@ pub fn overlays(app: &mut App, ui: &egui::Ui) {
 }
 pub fn progress(app: &App, ui: &egui::Ui, rect: Rect, fraction: f32) {
     super::mod_host::render(app, ui, Id::Nyan, rect, &[(11, fraction.clamp(0., 1.))]);
+}
+
+#[cfg(test)]
+mod release_update_tests {
+    use super::*;
+    #[test]
+    fn builtin_visualizer_arrow_opens_all_effects_and_click_selects_an_effect() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        let mut p = crate::addons::Preferences::default();
+        let mut selector = Rect::NOTHING;
+        let mut frame = |events: Vec<egui::Event>| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800., 800.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let (response, effect) = effect_selector(ui, &p);
+                    selector = response.rect;
+                    if let Some(effect) = effect {
+                        assert!(crate::visualizers::select(&mut p, effect.id, effect.style));
+                    }
+                },
+            )
+        };
+        frame(vec![]);
+        // Capture the real arrow bounds in a separate draw; all clicks go through egui.
+        let output = frame(vec![]);
+        let tree = output.platform_output.accesskit_update.unwrap();
+        let combo = tree
+            .nodes
+            .iter()
+            .find_map(|(_, n)| {
+                (n.role() == egui::accesskit::Role::ComboBox).then(|| n.bounds().unwrap())
+            })
+            .expect("main effect selector");
+        let arrow = pos2(combo.x1 as f32 - 8., (combo.y0 + combo.y1) as f32 / 2.);
+        let click = |pos| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        frame(click(arrow));
+        let output = frame(vec![]);
+        let tree = output.platform_output.accesskit_update.unwrap();
+        for effect in crate::visualizers::EFFECTS {
+            assert!(
+                tree.nodes
+                    .iter()
+                    .any(|(_, n)| n.value().or(n.label()) == Some(effect.label)),
+                "{} must be in the main list",
+                effect.label
+            );
+        }
+        let target = tree
+            .nodes
+            .iter()
+            .find_map(|(_, n)| {
+                (n.value().or(n.label()) == Some("SoundVisualizer · Arcs"))
+                    .then(|| n.bounds().unwrap())
+            })
+            .unwrap();
+        frame(click(pos2(
+            (target.x0 + target.x1) as f32 / 2.,
+            (target.y0 + target.y1) as f32 / 2.,
+        )));
+        drop(frame);
+        assert_eq!(p.visualizer, Some(Id::SoundVisualizer));
+        assert_eq!(p.visual(Id::SoundVisualizer).style, 11);
+    }
 }

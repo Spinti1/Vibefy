@@ -1,4 +1,4 @@
-//! Renderer for bounded drawing commands returned by installed Wasm mods.
+//! Shared painter for built-in visualizers and optional Wasm drawing commands.
 use crate::{
     addons::Id,
     app::App,
@@ -6,14 +6,15 @@ use crate::{
 };
 use egui::{Color32, Rect, Stroke, Vec2, pos2, vec2};
 pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32)]) {
-    if !app.settings.addons.active(id) {
+    let visual = id.is_visualizer();
+    if !visual && !app.settings.addons.active(id) {
         return;
     }
-    let Some(guest) = app.addons.modules.get(&id) else {
+    let guest = app.addons.modules.get(&id);
+    if !visual && guest.is_none() {
         return;
-    };
+    }
     let config = app.settings.addons.visual(id);
-    let visual = matches!(id, Id::Vivy | Id::Backmusic | Id::SoundVisualizer);
     let mut input = vec![0.; if visual { 512 + 24 * 128 } else { 32 }];
     input[..4].copy_from_slice(&[rect.left(), rect.top(), rect.width(), rect.height()]);
     if let Some(now) = app.now_playing() {
@@ -57,8 +58,13 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
             input[i] = v;
         }
     }
-    let Ok(commands) = guest.render(input) else {
-        return;
+    let commands = if visual {
+        crate::visualizers::render(id, &input)
+    } else {
+        let Ok(commands) = guest.unwrap().render(input) else {
+            return;
+        };
+        commands
     };
     let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
     let tint = app
@@ -108,7 +114,7 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
             }
             5 => {
                 // Each artwork mod owns one sprite set; asset IDs are semantic ABI values.
-                let Some(sprite) = guest.sprites.first() else {
+                let Some(sprite) = guest.and_then(|g| g.sprites.first()) else {
                     continue;
                 };
                 let frame = e.max(0.) as usize % sprite.frames as usize;

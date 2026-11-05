@@ -1,4 +1,4 @@
-//! Built-in, opt-in native adaptations. No downloaded JavaScript is executed.
+//! Optional mod preferences and built-in visualizer configuration.
 use std::collections::BTreeSet;
 use std::time::Duration;
 
@@ -22,20 +22,20 @@ pub enum Id {
     SoundVisualizer,
 }
 
-pub const ALL: [Id; 10] = [
+pub const ALL: [Id; 7] = [
     Id::YouTube,
     Id::WaveLink,
     Id::JuiceVault,
     Id::TrackPeek,
-    Id::Vivy,
-    Id::Backmusic,
-    Id::SoundVisualizer,
     Id::Nyan,
     Id::CatJam,
     Id::Oneko,
 ];
 
 impl Id {
+    pub const fn is_visualizer(self) -> bool {
+        matches!(self, Self::Vivy | Self::Backmusic | Self::SoundVisualizer)
+    }
     pub fn name(self) -> &'static str {
         match self {
             Self::SoundVisualizer => "SoundVisualizer",
@@ -53,7 +53,7 @@ impl Id {
     pub fn description(self) -> &'static str {
         match self {
             Self::SoundVisualizer => {
-                "Twelve native audio-reactive modes adapted from CaYatur SoundVisualizer. Optional download; no additional player or audio capture."
+                "Twelve built-in audio-reactive modes adapted from CaYatur SoundVisualizer, using the existing audio tap."
             }
             Self::Nyan => {
                 "The original Nyan Cat frames animate along a rainbow progress bar at the track's estimated tempo."
@@ -207,20 +207,27 @@ impl Preferences {
             self.vivy.as_mut().unwrap()
         }
     }
-    pub fn installed_visualizers(&self) -> impl Iterator<Item = Id> + '_ {
-        [Id::Vivy, Id::Backmusic, Id::SoundVisualizer]
-            .into_iter()
-            .filter(|id| {
-                self.installed.contains(id)
-                    && (!self.require_packages || self.ready_packages.contains(id))
-            })
+    pub fn available_visualizers(&self) -> impl Iterator<Item = Id> + use<> {
+        [Id::Vivy, Id::Backmusic, Id::SoundVisualizer].into_iter()
+    }
+    pub fn migrate_builtin_visualizers(&mut self) {
+        self.installed.retain(|id| !id.is_visualizer());
+        self.enabled.retain(|id| !id.is_visualizer());
+        self.ready_packages.retain(|id| !id.is_visualizer());
+        if self.visualizer.is_some_and(|id| !id.is_visualizer()) {
+            self.visualizer = None;
+        }
     }
     pub fn active(&self, id: Id) -> bool {
-        self.installed.contains(&id)
-            && self.enabled.contains(&id)
-            && (!self.require_packages || self.ready_packages.contains(&id))
+        id.is_visualizer()
+            || (self.installed.contains(&id)
+                && self.enabled.contains(&id)
+                && (!self.require_packages || self.ready_packages.contains(&id)))
     }
     pub fn set(&mut self, id: Id, enabled: bool) {
+        if id.is_visualizer() {
+            return;
+        }
         if enabled {
             self.installed.insert(id);
             self.enabled.insert(id);
@@ -229,6 +236,9 @@ impl Preferences {
         }
     }
     pub fn uninstall(&mut self, id: Id) {
+        if id.is_visualizer() {
+            return;
+        }
         self.enabled.remove(&id);
         self.installed.remove(&id);
         if self.visualizer == Some(id) {
@@ -288,6 +298,7 @@ pub enum Command {
     DeleteCollection(usize),
     Play { tracks: Vec<LocalTrack>, index: u32 },
     ChooseVisualizer(Id),
+    ChooseEffect { id: Id, style: u8 },
     Fullscreen,
     ConfigureVisual(VisualConfig),
     CatJamScale(f32),

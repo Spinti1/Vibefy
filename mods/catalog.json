@@ -36,27 +36,9 @@
     "sha256": "f15dd1835d4400ce01e3582ed3bb5ca10c1d587af9c747015444cb5f280317fe"
   },
   {
-    "id": "Vivy",
-    "slug": "vivy",
-    "bytes": 15455,
-    "sha256": "5655179c86e582cd9c51f26ab7ff31370446abb931c8f26d1b2639d5e989f2d7"
-  },
-  {
-    "id": "Backmusic",
-    "slug": "backmusic",
-    "bytes": 18044,
-    "sha256": "79a794f86734b8bdb26dec12b5a97259807dfd76796056d8eee3aea0204fccfa"
-  },
-  {
     "id": "TrackPeek",
     "slug": "trackpeek",
     "bytes": 7108,
     "sha256": "95e90b55470f9d22bad2988ca44440a9cba1bc70227408ed1d8ab5dd72a50083"
-  },
-  {
-    "id": "SoundVisualizer",
-    "slug": "soundvisualizer",
-    "bytes": 22039,
-    "sha256": "fc41f7574025469237a56863fee4036136b227c9cbd8afdcdb0226bc9779ed2f"
   }
 ]

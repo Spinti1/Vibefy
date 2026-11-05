@@ -53,6 +53,13 @@ impl App {
                 self.backend.send(Command::AddonCancel);
             }
             AddonCommand::Enable(id, enabled) => {
+                if id.is_visualizer() {
+                    if enabled {
+                        self.settings.addons.visualizer = Some(id);
+                        self.settings_dirty = true;
+                    }
+                    return;
+                }
                 if self.addons.package_busy.contains(&id) {
                     return;
                 }
@@ -66,20 +73,23 @@ impl App {
                     return;
                 }
                 self.settings.addons.set(id, enabled);
-                if enabled && matches!(id, Id::Vivy | Id::Backmusic | Id::SoundVisualizer) {
-                    self.settings.addons.visualizer = Some(id);
-                }
                 if !enabled {
                     self.stop_addon(id, ctx);
                 }
                 self.settings_dirty = true;
             }
             AddonCommand::Uninstall(id) => {
+                if id.is_visualizer() {
+                    return;
+                }
                 if self.addons.package_busy.insert(id) {
                     self.backend.send(Command::RemoveModPackage(id));
                 }
             }
             AddonCommand::FinishUninstall(id) => {
+                if id.is_visualizer() {
+                    return;
+                }
                 self.stop_addon(id, ctx);
                 self.settings.addons.uninstall(id);
                 self.settings.addons.ready_packages.remove(&id);
@@ -143,13 +153,13 @@ impl App {
             AddonCommand::Play { tracks, index } => {
                 self.play_addon_tracks(tracks, index, 0, true);
             }
+            AddonCommand::ChooseEffect { id, style } => {
+                if crate::visualizers::select(&mut self.settings.addons, id, style) {
+                    self.settings_dirty = true;
+                }
+            }
             AddonCommand::ChooseVisualizer(id) => {
-                if self.settings.addons.installed.contains(&id)
-                    && (!self.settings.addons.require_packages
-                        || self.addons.modules.contains_key(&id))
-                    && matches!(id, Id::Vivy | Id::Backmusic | Id::SoundVisualizer)
-                {
-                    self.settings.addons.set(id, true);
+                if id.is_visualizer() {
                     self.settings.addons.visualizer = Some(id);
                     self.settings_dirty = true;
                 }
@@ -161,12 +171,8 @@ impl App {
                     .settings
                     .addons
                     .visualizer
-                    .filter(|id| {
-                        self.settings.addons.installed.contains(id)
-                            && (!self.settings.addons.require_packages
-                                || self.addons.modules.contains_key(id))
-                    })
-                    .or_else(|| self.settings.addons.installed_visualizers().next())
+                    .filter(|id| id.is_visualizer())
+                    .or_else(|| self.settings.addons.available_visualizers().next())
                 {
                     let original_fullscreen = self
                         .lyrics_fullscreen
@@ -174,7 +180,6 @@ impl App {
                     self.leave_lyrics_fullscreen(ctx);
                     self.spicy.open = false;
                     self.settings.addons.visualizer = Some(id);
-                    self.settings.addons.set(id, true);
                     self.settings_dirty = true;
                     self.addons.was_fullscreen = original_fullscreen;
                     self.addons.fullscreen = true;

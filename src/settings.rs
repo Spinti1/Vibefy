@@ -1229,6 +1229,9 @@ pub struct SessionState {
     pub last_context: Option<String>,
     pub last_track: Option<String>,
     pub last_position_ms: u32,
+    /// Metadata and exact playlist occurrence, available before any network lookup.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_playback: Option<PlaybackCheckpoint>,
     /// Manually queued songs to restore with the remembered track.
     ///
     /// Context rows are excluded to prevent duplicates. This replaced the old
@@ -1278,6 +1281,71 @@ pub struct SessionState {
 pub struct WindowMode {
     pub fullscreen: bool,
     pub maximized: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PlaybackCheckpoint {
+    pub current: crate::player::LocalTrack,
+    pub context: Option<String>,
+    pub tracks: Vec<crate::player::LocalTrack>,
+    pub index: usize,
+    pub queued: Vec<crate::player::LocalTrack>,
+}
+
+impl PlaybackCheckpoint {
+    pub fn capture(
+        local: &crate::player::LocalState,
+        context: Option<String>,
+        manual: &[String],
+    ) -> Option<Self> {
+        let current = local.track.clone()?;
+        let mut tracks = if local.queue_tracks.len() <= 20_000 {
+            local.queue_tracks.clone()
+        } else {
+            Vec::new()
+        };
+        let index = if tracks
+            .get(local.queue_index)
+            .is_some_and(|t| t.uri == current.uri)
+        {
+            local.queue_index
+        } else {
+            tracks
+                .iter()
+                .position(|t| t.uri == current.uri)
+                .unwrap_or(0)
+        };
+        // The existing outbox restores manual rows separately. Remove only the
+        // exact manual prefix, leaving repeated playlist occurrences intact.
+        let start = index.saturating_add(1);
+        let end = start.saturating_add(manual.len());
+        let queued = if !manual.is_empty()
+            && tracks
+                .get(start..end)
+                .is_some_and(|rows| rows.iter().map(|t| &t.uri).eq(manual.iter()))
+        {
+            tracks.drain(start..end).collect()
+        } else {
+            Vec::new()
+        };
+        Some(Self {
+            current,
+            context,
+            tracks,
+            index,
+            queued,
+        })
+    }
+
+    pub fn matches(&self, uri: &str, context: Option<&str>) -> bool {
+        self.current.uri == uri
+            && self.context.as_deref() == context
+            && !self.current.title.is_empty()
+            && self.tracks.len() <= 20_000
+            && self.queued.len() <= 20_000
+            && (self.tracks.is_empty() || self.tracks.get(self.index).is_some_and(|t| t.uri == uri))
+    }
 }
 
 impl SessionState {

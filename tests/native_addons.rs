@@ -29,7 +29,7 @@ fn mods_are_opt_in_and_uninstall_does_not_enable_other_mods() {
     preferences.set(Id::Vivy, true);
     preferences.visualizer = Some(Id::Vivy);
     preferences.uninstall(Id::Vivy);
-    assert_eq!(preferences.visualizer, None);
+    assert_eq!(preferences.visualizer, Some(Id::Vivy));
     let restored: Preferences =
         serde_json::from_str(&serde_json::to_string(&preferences).unwrap()).unwrap();
     assert_eq!(preferences, restored);
@@ -344,14 +344,14 @@ mod native_ui {
         assert!(
             tree.nodes
                 .iter()
-                .any(|(_, n)| n.value().or(n.label()) == Some("vivy"))
+                .any(|(_, n)| n.value().or(n.label()) == Some("Vivy · Ridgeline"))
         );
         app.actions
             .push(Action::Addon(addons::Command::ChooseVisualizer(
                 Id::Backmusic,
             )));
         frame(&ctx, &mut app, 760.0);
-        assert_eq!(app.settings.addons.visualizer, Some(Id::Vivy));
+        assert_eq!(app.settings.addons.visualizer, Some(Id::Backmusic));
         app.actions
             .push(Action::Addon(addons::Command::Enable(Id::Backmusic, true)));
         frame(&ctx, &mut app, 760.0);
@@ -375,7 +375,7 @@ mod native_ui {
     }
 
     #[test]
-    fn installed_visualizers_fit_next_to_volume_and_disable_restores_view() {
+    fn builtin_visualizers_fit_next_to_volume_and_close_restores_view() {
         let (ctx, mut app, root) = app();
         app.actions
             .push(Action::Addon(addons::Command::Enable(Id::Vivy, true)));
@@ -424,8 +424,7 @@ mod native_ui {
         app.actions.push(Action::Addon(addons::Command::Fullscreen));
         frame(&ctx, &mut app, 1280.0);
         assert!(app.addons.fullscreen);
-        app.actions
-            .push(Action::Addon(addons::Command::Enable(Id::Vivy, false)));
+        app.actions.push(Action::Addon(addons::Command::Fullscreen));
         frame(&ctx, &mut app, 1280.0);
         assert!(!app.addons.fullscreen);
         app.actions.push(Action::Open(Page::Mods));

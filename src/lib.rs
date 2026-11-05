@@ -87,3 +87,5 @@ pub mod winamp;
 pub mod window;
 pub mod youtube_browser;
 pub mod zeroconf;
+
+pub mod visualizers;

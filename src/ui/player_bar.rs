@@ -970,7 +970,7 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
     let room = ui.max_rect().right() - transport_right - TRANSPORT_GAP;
     let slider_width = (room
         - (5.0
-            + if app.settings.addons.installed_visualizers().next().is_some() {
+            + if app.settings.addons.available_visualizers().next().is_some() {
                 1.0
             } else {
                 0.0
@@ -1094,7 +1094,7 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
                 .collect(),
         });
     }
-    if app.settings.addons.installed_visualizers().next().is_some() {
+    if app.settings.addons.available_visualizers().next().is_some() {
         let button = theme::icon_button(
             ui,
             Icon::AudioLines,
