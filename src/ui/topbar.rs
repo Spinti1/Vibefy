@@ -397,7 +397,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                                 .iter()
                                 .find(|state| state.connected)
                                 .map(|state| state.name.clone())
-                                .unwrap_or_default(),
+                                .unwrap_or_else(|| "Guest".into()),
                             None,
                         )
                     });

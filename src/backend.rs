@@ -712,7 +712,20 @@ pub fn autostart() -> fastframe_autostart::Autostart {
     fastframe_autostart::Autostart::new("spotifast", "Spotifast")
 }
 
+type FileSelection =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Option<rfd::FileHandle>> + Send>>;
+
 pub enum Command {
+    GuestPlayback(bool),
+    Personal {
+        request: u64,
+        task: crate::personal_library::Task,
+    },
+    PersonalFiles {
+        request: u64,
+        export: Option<Vec<crate::addons::Collection>>,
+        selected: FileSelection,
+    },
     Mirror {
         serial: u64,
         action: crate::playlist_mirror::Action,
@@ -1044,6 +1057,14 @@ pub struct LyricsRequest {
 }
 
 pub enum Event {
+    PersonalProgress {
+        request: u64,
+        message: String,
+    },
+    Personal {
+        request: u64,
+        result: Result<crate::personal_library::Output, String>,
+    },
     Mirror {
         serial: u64,
         view: crate::playlist_mirror::View,
@@ -1973,6 +1994,8 @@ impl PlaylistHeaderLookup {
 }
 
 struct Worker {
+    guest: bool,
+    personal_tasks: Vec<(bool, tokio::task::JoinHandle<()>)>,
     connected_music: [bool; 2],
     music_account_serial: [u64; 2],
     music_account_tasks: [Option<tokio::task::JoinHandle<()>>; 2],
@@ -2109,6 +2132,8 @@ impl Worker {
             playlist_outbox: crate::playlist_outbox::Outbox::default(),
             mirror: None,
             music_account_tasks: [None, None],
+            guest: false,
+            personal_tasks: Vec::new(),
             connected_music: [false; 2],
             music_account_serial: [0; 2],
             #[cfg(not(test))]
@@ -2175,6 +2200,46 @@ impl Worker {
         }
     }
 
+    fn personal_task(&mut self, request: u64, task: crate::personal_library::Task) {
+        self.personal_tasks.retain(|(_, t)| !t.is_finished());
+        if self.personal_tasks.len() >= 8 {
+            self.emit(Event::Personal {
+                request,
+                result: Err("Please wait for the current playlist operations to finish".into()),
+            });
+            return;
+        }
+        let scoped = matches!(
+            task,
+            crate::personal_library::Task::Backup { .. } | crate::personal_library::Task::Account
+        );
+        let progress_events = self.events.clone();
+        let progress_waker = self.waker.clone();
+        let context = crate::personal_library::ContextData {
+            progress: Box::new(move |message| {
+                let _ = progress_events.send(Event::PersonalProgress { request, message });
+                progress_waker.wake();
+            }),
+            root: self.dirs.state.join("personal-backups"),
+            config: self.dirs.config.clone(),
+            proxy: self.engine_config.proxy.clone(),
+            http: self.http.clone(),
+            api: self.api.clone(),
+        };
+        let events = self.events.clone();
+        let waker = self.waker.clone();
+        self.personal_tasks.push((
+            scoped,
+            tokio::spawn(async move {
+                let result = crate::personal_library::execute(task, context)
+                    .await
+                    .map_err(|e| e.to_string());
+                let _ = events.send(Event::Personal { request, result });
+                waker.wake();
+            }),
+        ));
+    }
+
     fn emit(&self, event: Event) {
         let _ = self.events.send(event);
         self.waker.wake();
@@ -2191,6 +2256,54 @@ impl Worker {
         ));
         while let Some(command) = commands.recv().await {
             match command {
+                Command::GuestPlayback(enabled) => {
+                    self.guest = enabled;
+                    if enabled {
+                        self.resume_engine();
+                    }
+                }
+                Command::Personal { request, task } => self.personal_task(request, task),
+                Command::PersonalFiles {
+                    request,
+                    export,
+                    selected,
+                } => {
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        let result = async {
+                            let file = selected
+                                .await
+                                .ok_or_else(|| anyhow::anyhow!("File selection cancelled"))?;
+                            if let Some(lists) = export {
+                                let bytes = serde_json::to_vec_pretty(&lists)?;
+                                let path = file.path().to_owned();
+                                tokio::task::spawn_blocking(move || {
+                                    fastframe_file::write_private(&path, bytes)
+                                })
+                                .await??;
+                                Ok(crate::personal_library::Output::Exported)
+                            } else {
+                                let path = file.path().to_owned();
+                                let lists =
+                                    tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+                                        use std::io::Read;
+                                        let mut bytes = Vec::new();
+                                        std::fs::File::open(path)?
+                                            .take(20_000_001)
+                                            .read_to_end(&mut bytes)?;
+                                        crate::personal_library::decode_backup(&bytes)
+                                    })
+                                    .await??;
+                                Ok(crate::personal_library::Output::Restored(lists))
+                            }
+                        }
+                        .await
+                        .map_err(|error: anyhow::Error| error.to_string());
+                        let _ = events.send(Event::Personal { request, result });
+                        waker.wake();
+                    });
+                }
                 Command::TrackPeek(session) => {
                     if let Some(old) = self.peek.replace(Arc::clone(&session)) {
                         old.cancel();
@@ -2407,6 +2520,19 @@ impl Worker {
                     if let Some(task) = self.music_account_tasks[provider as usize].take() {
                         task.abort();
                     }
+                    if provider == crate::music_accounts::Provider::YouTubeMusic
+                        && matches!(
+                            action,
+                            crate::music_accounts::Action::Disconnect
+                                | crate::music_accounts::Action::Connect
+                        )
+                    {
+                        for (scoped, task) in &self.personal_tasks {
+                            if *scoped {
+                                task.abort();
+                            }
+                        }
+                    }
                     let disconnected = matches!(action, crate::music_accounts::Action::Disconnect);
                     let http = self.http.clone();
                     let config = self.dirs.config.clone();
@@ -2457,7 +2583,10 @@ impl Worker {
                     self.connected_music[provider as usize] = connected;
                     if connected {
                         self.resume_engine();
-                    } else if !self.signed_in && !self.connected_music.iter().any(|v| *v) {
+                    } else if !self.guest
+                        && !self.signed_in
+                        && !self.connected_music.iter().any(|v| *v)
+                    {
                         if let Some(engine) = self.engine.take() {
                             engine.shutdown();
                         }
@@ -3976,7 +4105,7 @@ impl Worker {
     /// Bring the engine up from a credential stored by a previous playback
     /// authorization, if there is one. Silent when there is nothing to resume.
     fn resume_engine(&mut self) {
-        if (!self.signed_in && !self.connected_music.iter().any(|v| *v))
+        if (!self.guest && !self.signed_in && !self.connected_music.iter().any(|v| *v))
             || self.engine.is_some()
             || self.engine_busy
         {
@@ -3998,7 +4127,7 @@ impl Worker {
     /// an HTTP proxy). Does not count toward the drop limiter: flipping a
     /// setting is not the session falling over.
     fn replace_engine(&mut self) {
-        if !self.signed_in && !self.connected_music.iter().any(|v| *v) {
+        if !self.guest && !self.signed_in && !self.connected_music.iter().any(|v| *v) {
             return;
         }
         // New audio settings take effect now, even when the replacement
@@ -4017,7 +4146,7 @@ impl Worker {
     /// Six drops in ten minutes stop the loop so a flapping session cannot
     /// sit there reconnecting forever.
     fn reconnect_engine(&mut self) {
-        if !self.signed_in && !self.connected_music.iter().any(|v| *v) {
+        if !self.guest && !self.signed_in && !self.connected_music.iter().any(|v| *v) {
             return;
         }
         if self.engine_busy {
@@ -4239,7 +4368,7 @@ impl Worker {
         error: Option<String>,
         attempt: u64,
     ) {
-        if (!self.signed_in && !self.connected_music.iter().any(|v| *v))
+        if (!self.guest && !self.signed_in && !self.connected_music.iter().any(|v| *v))
             || session_generation != self.album_type_lookup.session_generation
         {
             if let Some(engine) = engine {

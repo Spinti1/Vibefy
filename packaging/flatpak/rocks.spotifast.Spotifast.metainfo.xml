@@ -50,6 +50,7 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.4.48" date="2026-11-05"><description><p>Optional sign-in, local playlists, playlist imports and YouTube backups.</p></description></release>
     <release version="0.4.47" date="2026-11-05"><description><p>Centered visualizer covers and colours from the current artwork.</p></description></release>
     <release version="0.4.46" date="2026-11-05"><description><p>Fix visualizer artwork and add multi-colour rendering.</p></description></release>
     <release version="0.4.45" date="2026-11-05"><description><p>Sixteen built-in visualizer effects in one selector, with preserved settings.</p></description></release>

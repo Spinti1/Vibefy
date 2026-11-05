@@ -31,6 +31,8 @@ mod addon_app;
 mod music_app;
 #[path = "peek_app.rs"]
 mod peek_app;
+#[path = "personal_app.rs"]
+mod personal_app;
 use fastframe_now_playing::{
     Command as MediaCommand, NowPlaying as MediaControls, Playback as MediaPlayback,
     Repeat as MediaRepeat, State as MediaState, Track as MediaTrack,
@@ -310,6 +312,7 @@ pub enum PlayCountRead {
 const PLAY_COUNT_RETRY: Duration = Duration::from_secs(60);
 
 pub struct App {
+    pub personal: crate::personal_library::State,
     pub addons: crate::addons::Runtime,
     pub music_accounts: [crate::music_accounts::State; 2],
     pub music_accounts_serial: [u64; 2],
@@ -969,8 +972,14 @@ impl App {
     pub fn new(waker: &Waker, dirs: AppDirs, mut settings: Settings, options: AppOptions) -> Self {
         settings.addons.require_packages = options.restore_sign_in;
         settings.addons.migrate_builtin_visualizers();
-        let addon_collections =
-            crate::addons::load_collections(&dirs.state.join("mod-collections.json"));
+        let library_path = dirs.state.join("library-playlists.json");
+        let migrate_library =
+            !library_path.exists() && dirs.state.join("mod-collections.json").is_file();
+        let addon_collections = crate::addons::load_collections(&if migrate_library {
+            dirs.state.join("mod-collections.json")
+        } else {
+            library_path
+        });
         // The legacy password file has no endpoint of its own. Keep the old
         // settings beside it until migration binds that password in the store.
         settings.migrate_proxy("");
@@ -1221,6 +1230,7 @@ impl App {
             show_devices: false,
             toasts: Vec::new(),
             cache_usage: None,
+            personal: Default::default(),
             music_accounts: Default::default(),
             music_accounts_serial: [0; 2],
             mirror: Default::default(),
@@ -1343,6 +1353,9 @@ impl App {
             pixels_per_point: 1.0,
         };
         app.local.volume = app.settings.volume;
+        if migrate_library {
+            app.save_addon_collections();
+        }
         if options.restore_sign_in {
             app.backend.send(Command::RestoreMusicAccounts);
         }
@@ -2927,6 +2940,12 @@ impl App {
                         self.mirror.message = message;
                     }
                 }
+                Event::Personal { request, result } => self.receive_personal(request, result),
+                Event::PersonalProgress { request, message } => {
+                    if let Some(pending) = self.personal.tasks.get_mut(&request) {
+                        pending.message = message;
+                    }
+                }
                 Event::MusicAccount {
                     provider,
                     serial,
@@ -3381,7 +3400,9 @@ impl App {
                 self.shared_grant = false;
                 self.user = None;
                 self.premium_notice_shown = false;
-                if !self.music_accounts.iter().any(|state| state.connected) {
+                if !self.settings.welcome_completed
+                    && !self.music_accounts.iter().any(|state| state.connected)
+                {
                     self.local = LocalState::default();
                     self.local_ready = false;
                     self.local_device_id = None;
@@ -12511,6 +12532,7 @@ impl App {
                 banner.dismissals = banner.dismissals.saturating_add(1);
                 self.settings_dirty = true;
             }
+            Action::Personal(action) => self.apply_personal(action),
             Action::CreatePlaylist {
                 name,
                 public,
@@ -12824,6 +12846,12 @@ impl App {
                 });
             }
             Action::SignOut => {
+                self.personal.started = false;
+                self.settings.welcome_completed = false;
+                self.settings_dirty = true;
+                self.auth = AuthStatus::SignedOut;
+                self.user = None;
+                self.backend.send(Command::GuestPlayback(false));
                 for provider in [
                     crate::music_accounts::Provider::YouTubeMusic,
                     crate::music_accounts::Provider::JuiceVault,
@@ -14130,6 +14158,7 @@ impl App {
 
     pub fn frame_ui(&mut self, ui: &mut egui::Ui) {
         self.tick_addons(ui.ctx());
+        self.tick_personal_library();
         // The native close can take another frame. Settings already describe
         // the replacement window, but drawing it here would resize this one
         // before eframe saves its geometry. attach clears the switch intent
@@ -14166,9 +14195,7 @@ impl App {
             }
         }
         // Switch to the main window when sign-in is required.
-        let needs_sign_in = (!self.music_accounts[0].connected
-            || !self.mirror.setup_complete
-            || !(self.is_connected() && self.user.is_some()))
+        let needs_sign_in = !self.library_access()
             && !matches!(self.auth, AuthStatus::Connecting | AuthStatus::Starting)
             && !(self.is_connected() && self.user.is_none());
         if self.settings.winamp_window && needs_sign_in && !self.switch_intent {
@@ -14899,6 +14926,179 @@ mod tests {
     use crate::api::models::{
         Episode, Image, Page as ApiPage, ResumePoint, SavedEpisode, SavedTrack, SearchResults,
     };
+
+    #[test]
+    fn personal_library_accounts_are_optional_and_guest_choice_persists() {
+        let mut app = test_app("personal-optional");
+        app.backend.set_offline(true);
+        app.offline = true;
+        app.auth = AuthStatus::SignedOut;
+        app.user = None;
+        app.music_accounts = Default::default();
+        assert!(!app.library_access());
+        app.apply_personal(crate::personal_library::Action::Continue);
+        assert!(app.library_access());
+        assert!(app.settings.welcome_completed);
+        let settings =
+            serde_json::from_str::<Settings>(&serde_json::to_string(&app.settings).unwrap())
+                .unwrap();
+        assert!(settings.welcome_completed);
+        app.settings.welcome_completed = false;
+        app.music_accounts[0].connected = true;
+        assert!(app.library_access(), "YouTube alone opens the library");
+        app.music_accounts[0].connected = false;
+        app.auth = AuthStatus::Connected {
+            username: "demo".into(),
+        };
+        app.user = Some(User {
+            id: "demo".into(),
+            ..Default::default()
+        });
+        assert!(app.library_access(), "Spotify alone opens the library");
+    }
+    #[test]
+    fn personal_library_create_edit_and_metadata_restore_keep_source_identity() {
+        use crate::personal_library::Action as Edit;
+        let mut app = test_app("personal-edit");
+        app.backend.set_offline(true);
+        app.offline = true;
+        let song = crate::player::LocalTrack {
+            uri: "vibefy:youtube:abcdefghijk".into(),
+            title: "Song".into(),
+            name: "Song".into(),
+            ..Default::default()
+        };
+        app.apply_personal(Edit::CreateFrom(vec![song.clone()]));
+        app.apply_personal(Edit::Create {
+            name: "Roadtrip".into(),
+            backup: false,
+        });
+        let list = app.addons.collections.last().unwrap().clone();
+        let source = list.source.clone();
+        assert_eq!(list.tracks.len(), 1);
+        app.apply_personal(Edit::Add {
+            source: source.clone(),
+            tracks: vec![song.clone()],
+        });
+        assert_eq!(app.source_collection(&source).unwrap().tracks.len(), 1);
+        app.apply_personal(Edit::Rename {
+            source: source.clone(),
+            name: "Night drive".into(),
+        });
+        let bytes = serde_json::to_vec(&app.addons.collections).unwrap();
+        let restored = crate::personal_library::decode_backup(&bytes).unwrap();
+        assert_eq!(restored[0].source, source);
+        assert_eq!(restored[0].title, "Night drive");
+        let file = app.dirs.state.join("round-trip.json");
+        std::fs::create_dir_all(&app.dirs.state).unwrap();
+        std::fs::write(&file, bytes).unwrap();
+        assert_eq!(crate::addons::load_collections(&file), restored);
+        app.apply_personal(Edit::Remove {
+            source: source.clone(),
+            uri: song.uri,
+        });
+        assert!(app.source_collection(&source).unwrap().tracks.is_empty());
+        app.apply_personal(Edit::Delete(source.clone()));
+        assert!(app.source_collection(&source).is_none());
+    }
+    #[test]
+    fn personal_library_rejects_backup_results_from_a_previous_youtube_account() {
+        use crate::personal_library::{Output, Pending, Report};
+        let mut app = test_app("personal-account-boundary");
+        app.backend.set_offline(true);
+        app.offline = true;
+        app.music_accounts[0].connected = true;
+        app.music_accounts_serial[0] = 2;
+        app.personal.tasks.insert(
+            7,
+            Pending {
+                source: Some("old".into()),
+                backup: true,
+                fingerprint: String::new(),
+                epoch: 1,
+                message: String::new(),
+            },
+        );
+        app.receive_personal(
+            7,
+            Ok(Output::Backed {
+                source: "old".into(),
+                report: Report {
+                    remote: "PLold".into(),
+                    ..Default::default()
+                },
+            }),
+        );
+        assert!(app.personal.backups.is_empty());
+        assert!(app.personal.tasks.is_empty());
+    }
+    #[test]
+    fn personal_library_home_renders_import_controls_without_any_account() {
+        let mut app = test_app("personal-home-layout");
+        app.backend.set_offline(true);
+        app.offline = true;
+        app.settings.welcome_completed = true;
+        app.auth = AuthStatus::SignedOut;
+        app.user = None;
+        app.music_accounts = Default::default();
+        fn text(shape: &egui::Shape, result: &mut String) {
+            match shape {
+                egui::Shape::Text(t) => {
+                    result.push_str(&t.galley.job.text);
+                    result.push('\n');
+                }
+                egui::Shape::Vec(v) => {
+                    for s in v {
+                        text(s, result);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for width in [700.0, 1280.0] {
+            for dark in [false, true] {
+                let ctx = egui::Context::default();
+                crate::theme::install(&ctx);
+                app.settings.theme = if dark {
+                    ThemeChoice::Dark
+                } else {
+                    ThemeChoice::Light
+                };
+                app.apply_theme(&ctx);
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(width, 900.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        egui::CentralPanel::default()
+                            .show(ui, |ui| crate::ui::home::show(&mut app, ui));
+                    },
+                );
+                output.textures_delta.clear();
+                let mut rendered = String::new();
+                for clipped in output.shapes {
+                    text(&clipped.shape, &mut rendered);
+                }
+                for label in [
+                    "Create playlist",
+                    "Import YouTube playlist",
+                    "Import Spotify playlist",
+                    "Vibefy playlists",
+                ] {
+                    assert!(
+                        rendered.contains(label),
+                        "missing {label} at {width}: {rendered}"
+                    );
+                }
+                assert!(!rendered.contains("Step 1"));
+                assert!(!rendered.contains("Bring your playlists along"));
+            }
+        }
+    }
 
     /// #623: the missing-output message the sink reports is the one the
     /// catalogues translate.

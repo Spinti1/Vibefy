@@ -18,9 +18,9 @@ mod mods;
 pub mod music_accounts;
 pub mod music_search;
 pub mod new_releases;
-mod onboarding;
+pub(crate) mod personal_library;
 pub mod player_bar;
-mod playlist_mirror;
+
 mod prerelease;
 pub mod queue;
 pub mod radio;
@@ -48,21 +48,12 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let ctx = &ctx;
     keys::handle(app, ctx);
-    let signed_in = app.is_connected() && app.user.is_some();
+    let signed_in = app.library_access();
     let connecting = matches!(app.auth, AuthStatus::Connecting | AuthStatus::Starting)
         || (app.is_connected() && app.user.is_none());
     if !signed_in {
         player_bar::end_tint_session(ctx);
         login::show(app, ui, connecting);
-        update::show(app, ctx);
-        toasts(app, ctx, 20.0);
-        caption_buttons(ui, &app.palette, app.locale);
-        fastframe_titlebar::resize(ui);
-        return;
-    }
-    if onboarding::required(app, ctx) {
-        player_bar::end_tint_session(ctx);
-        onboarding::show(app, ui);
         update::show(app, ctx);
         toasts(app, ctx, 20.0);
         caption_buttons(ui, &app.palette, app.locale);
@@ -113,6 +104,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     keep_room_for_panels(app, ctx);
     devices::popup(app, ctx);
     dialogs::show(app, ctx);
+    personal_library::dialog(app, ctx);
     mods::reload_prompt(app, ctx);
     update::show(app, ctx);
     widgets::drag_ghost(ctx, &app.palette, app.locale);

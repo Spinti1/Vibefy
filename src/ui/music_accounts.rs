@@ -64,7 +64,7 @@ pub fn youtube_connect(app: &mut App, ui: &mut egui::Ui) {
     });
     if !state.connected && !state.busy {
         ui.small(if app.user_id().is_some() {
-            "Sign in to YouTube to copy your Spotify playlists as unlisted. Anyone with a copy’s link can view it."
+            "Connect YouTube to save selected Vibefy playlists to your account. New copies are unlisted: anyone with their link can view them."
         } else { "Sign in with Google in the dedicated YouTube window to load your playlists." });
     }
     if let Some(message) = &state.message {
@@ -100,12 +100,12 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 action = Some(Action::Disconnect);
             }
         });
-        ui.small("Your YouTube Music playlists are on Home. Playlist transfer is managed below.");
+        ui.small("Your YouTube playlists are available on Home.");
         if let Some(action) = action {
             send(app, Provider::YouTubeMusic, action);
         }
     }
-    super::playlist_mirror::show(app, ui);
+    ui.small("Create and import playlists on Home. YouTube backups are optional; local copies stay on this device.");
 }
 
 pub(super) fn juice_connect(app: &mut App, ui: &mut egui::Ui) {

@@ -6,37 +6,49 @@ nav_order: 1
 
 ## Vibefy HTTPS and sign-in transport
 
-## Ordered setup and initial transfer (0.4.31)
+## Optional accounts and playlist backups (0.4.48)
 
-New sessions enter Spotify sign-in first, then the dedicated YouTube sign-in.
-The two centered account buttons share the same native size and style. YouTube
-or JuiceVault alone no longer unlocks the main UI. Existing account grants are
-restored normally, so a previously connected account does not need another login.
+The desktop welcome screen offers Spotify, YouTube and Continue as guest. Connecting
+either provider is optional; Spotify access remains necessary for private Spotify
+imports and operations requiring its account. Guest playback uses the existing
+YouTube engine. The mobile web beta is separate.
 
-After both accounts are connected, users select Spotify playlists and start the
-transfer. The progress screen shows backend messages, confirmed remote song counts,
-recordings needing review, service cooldowns, and an explicit not-recommended
-skip. Skipping opens Home; an already-started transfer continues in the background.
-Selection, transfer-pass completion and setup dismissal are stored per account
-pair in the existing journal, with defaults for previous versions. Setup remains
-available in Settings. A finished pass can still contain unmatched songs or errors;
-those are disclosed and are not reported as a complete catalogue transfer.
+Home offers Create playlist, Import YouTube playlist and Import Spotify playlist.
+Playlist imports copy metadata without modifying the original. Reimporting the
+same URL refreshes one local copy. Spotify pagination is complete and its snapshot
+is checked again before saving. The public yt-dlp YouTube import is bounded to
+500 rows; authenticated Music imports retain the existing 20,000-song/page bounds.
 
-Existing complete account-scoped source snapshots can be used for the first pass
-without fetching the entire Spotify library again. Later scans refresh snapshots.
-Selected lists are processed shortest first where their lengths are known. Matches
-are made before creating a new nonempty copy; every 20 processed recordings, the
-confirmed matches can be appended to the same copy. The exact visibility/marker
-checks remain mandatory, with a bounded read-only retry for a newly created copy.
-The remote membership and durable-intent checks remain unchanged. This does not
-make playback instant: the source still has to be resolved/downloaded as needed.
+Vibefy playlists are identified by random local IDs. They support naming, adding
+songs from context menus and removing songs. The local metadata file is
+state/library-playlists.json, atomically written by the existing file writer.
+Existing mod-collections.json data is migrated on first use, preserving the old
+file. Local storage is bounded to 200 lists and 20 MB of metadata. No audio is
+included. An optional JSON export/import provides an account-independent backup.
 
-Home shows native YouTube playlists in their own shelf. Opening one loads its
-contents through the protected YouTube session and then opens the shared native
-collection view. Linked copies are excluded from that shelf and share their
-Spotify library tile. Settings contains account and transfer controls, not a
-second browsable playlist list. Dual-destination additions are enabled only after
-the user finishes/skips setup, and only for selected linked playlists.
+YouTube backups require explicit selection and use the protected session. New
+copies are unlisted; anyone with a link can access them. Account identity hashes
+scope local backup journals under state/personal-backups. Before creating a copy,
+a durable creation intent is written. Uncertain creation searches the account for
+the exact description marker and stops if it cannot recover a unique copy.
+Later writes verify the account, editable private/unlisted header and marker.
+Song removals use server playlist-row identities. Membership/order is read before
+and after reconciliation. An interrupted operation is read back before another
+attempt; explicit rate-limit deadlines persist. Other failures remain visible
+and require retry. The complete local list is retained when recordings cannot be
+matched. Backups deduplicate recording IDs; YouTube cannot recover local-only or
+unmatched songs, so file export is the complete independent backup.
+
+On a new installation, open a Vibefy-created backup from the connected YouTube
+shelf to recover its local identity and edit it again. Its description must retain
+the Vibefy source marker. Existing local edits are kept when reopening that copy.
+Deleting a local copy keeps the remote original and backup; the confirmation says
+so explicitly. Account-specific remote deletion remains a separate operation.
+
+The old mandatory connection/transfer screens and optional YouTube-import mod
+are removed. Existing linked playlist journals stay readable for legacy playlist
+operations, but automatic catalogue-wide mirroring is paused. New imports and
+backups are explicit, per-playlist actions.
 
 ## YouTube session window (0.4.29)
 

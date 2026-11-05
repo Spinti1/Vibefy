@@ -276,6 +276,22 @@ impl App {
         }
     }
     pub(super) fn save_source_collection(&mut self, collection: crate::addons::Collection) -> bool {
+        let bytes = self
+            .addons
+            .collections
+            .iter()
+            .filter(|c| c.source != collection.source)
+            .chain(std::iter::once(&collection))
+            .try_fold(2usize, |n, c| {
+                serde_json::to_vec(c).map(|b| n.saturating_add(b.len() + 1))
+            });
+        if !crate::personal_library::validate(&collection)
+            || bytes.is_err()
+            || bytes.is_ok_and(|n| n > 20_000_000)
+        {
+            self.personal.message=Some("This playlist exceeds the supported metadata size. Export a backup and remove unused local copies before importing more.".into());
+            return false;
+        }
         if let Some(old) = self
             .addons
             .collections
@@ -283,8 +299,8 @@ impl App {
             .find(|saved| saved.source == collection.source)
         {
             *old = collection;
-        } else if self.addons.collections.len() >= 30 {
-            self.addons.message = Some("Remove a saved playlist before adding another (limit: 30). Your import is still available below.".into());
+        } else if self.addons.collections.len() >= crate::personal_library::MAX_LISTS {
+            self.addons.message = Some("Remove a saved playlist before adding another (limit: 200). Your import is still available below.".into());
             return false;
         } else {
             self.addons.collections.push(collection);
@@ -300,7 +316,7 @@ impl App {
         }
         if let Ok(text) = serde_json::to_string(&self.addons.collections) {
             self.files.write(
-                &self.dirs.state.join("mod-collections.json"),
+                &self.dirs.state.join("library-playlists.json"),
                 text,
                 fastframe_file::Access::Default,
             );

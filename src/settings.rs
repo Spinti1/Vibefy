@@ -220,6 +220,9 @@ impl SlowAppBanner {
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// Welcome was completed by connecting an account or continuing locally.
+    pub welcome_completed: bool,
+    pub playlist_backups: std::collections::BTreeMap<String, String>,
     /// Hidden Home playlists, scoped to the signed-in Spotify account.
     pub hidden_playlists: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     pub addons: crate::addons::Preferences,
@@ -443,6 +446,8 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             hidden_playlists: Default::default(),
+            welcome_completed: false,
+            playlist_backups: Default::default(),
             device_name: "Vibefy".to_string(),
             addons: crate::addons::Preferences::default(),
             bitrate: 320,

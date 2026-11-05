@@ -432,9 +432,15 @@ mod native_ui {
         let out = frame(&ctx, &mut app, 760.0);
         let tree = out.platform_output.accesskit_update.unwrap();
         assert!(
-            tree.nodes
+            !tree
+                .nodes
                 .iter()
                 .any(|(_, n)| n.value().or(n.label()) == Some("YouTube Playlist Import"))
+        );
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, n)| n.value().or(n.label()) == Some("WaveLink"))
         );
         assert!(tree.nodes.iter().any(|(_, n)| n.label() == Some("Install")));
         app.backend.shutdown();

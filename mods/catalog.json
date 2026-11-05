@@ -30,12 +30,6 @@
     "sha256": "ab5c68951acce0761b8ee8eeadbc17ff70ba30c5089bd2ad992226f9201e15bc"
   },
   {
-    "id": "YouTube",
-    "slug": "youtube",
-    "bytes": 6750,
-    "sha256": "f15dd1835d4400ce01e3582ed3bb5ca10c1d587af9c747015444cb5f280317fe"
-  },
-  {
     "id": "TrackPeek",
     "slug": "trackpeek",
     "bytes": 7108,

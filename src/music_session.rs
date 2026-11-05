@@ -22,6 +22,15 @@ pub enum Failure {
 const ORIGIN: &str = "https://music.youtube.com";
 const MAX_SESSION: usize = 64 * 1024;
 
+fn managed_prefix(current: &[(String, String)], desired: &[String]) -> usize {
+    current
+        .iter()
+        .map(|(video, _)| video)
+        .zip(desired)
+        .take_while(|(a, b)| a == b)
+        .count()
+}
+
 fn find_section<'a>(value: &'a Value, key: &str, depth: usize) -> Option<&'a Value> {
     if depth > 60 {
         return None;
@@ -709,6 +718,120 @@ impl Session {
             "The Music library exceeded the supported page limit; no partial library was saved"
         )
     }
+    /// Reconcile only a Vibefy-created copy, using server row identities for removals.
+    /// Every retry reads the current list first, including after an interrupted write.
+    pub async fn sync_managed(
+        &self,
+        proxy: &ProxyConfig,
+        id: &str,
+        marker: &str,
+        desired: &[String],
+    ) -> Result<()> {
+        ensure!(
+            self.google.is_none(),
+            "Reconnect YouTube to update this backup"
+        );
+        ensure!(
+            valid_playlist_id(id)
+                && desired.len() <= 20_000
+                && desired.iter().all(|v| crate::addons::valid_video_id(v)),
+            "Invalid backup playlist"
+        );
+        let (private, description) = self.details(proxy, id).await?;
+        ensure!(
+            private && description.contains(marker),
+            "This playlist is no longer a private or unlisted Vibefy backup"
+        );
+        let current = self.managed_rows(proxy, id).await?;
+        let prefix = managed_prefix(&current, desired);
+        for batch in current[prefix..].chunks(50) {
+            let actions:Vec<_>=batch.iter().map(|(video,set)|json!({"action":"ACTION_REMOVE_VIDEO","removedVideoId":video,"setVideoId":set})).collect();
+            let value = self
+                .post(
+                    &Self::client(proxy)?,
+                    "browse/edit_playlist",
+                    json!({"playlistId":id,"actions":actions}),
+                    None,
+                )
+                .await?;
+            ensure!(
+                value["status"].as_str() == Some("STATUS_SUCCEEDED"),
+                Failure::Unconfirmed
+            );
+        }
+        // Read back removals before adding, so an uncertain deletion never duplicates songs.
+        let remaining = self.managed_rows(proxy, id).await?;
+        ensure!(
+            remaining
+                .iter()
+                .map(|(v, _)| v)
+                .eq(desired[..prefix].iter()),
+            Failure::Unconfirmed
+        );
+        for batch in desired[prefix..].chunks(self.append_batch_size()) {
+            self.append(proxy, id, batch).await?;
+        }
+        let result = self.managed_rows(proxy, id).await?;
+        ensure!(
+            result.iter().map(|(v, _)| v).eq(desired.iter()),
+            Failure::Unconfirmed
+        );
+        Ok(())
+    }
+    async fn managed_rows(&self, proxy: &ProxyConfig, id: &str) -> Result<Vec<(String, String)>> {
+        fn rows(value: &Value, result: &mut Vec<(String, String)>, depth: usize) -> Result<()> {
+            ensure!(depth <= 60, "Unsupported playlist response");
+            if let Some(row) = value.get("musicResponsiveListItemRenderer") {
+                let data = &row["playlistItemData"];
+                if let Some(video) = data["videoId"].as_str() {
+                    let set = data["playlistSetVideoId"].as_str().ok_or_else(|| {
+                        anyhow::anyhow!("YouTube did not provide editable song identities")
+                    })?;
+                    ensure!(
+                        crate::addons::valid_video_id(video)
+                            && !set.is_empty()
+                            && set.len() <= 1024,
+                        "Invalid editable song identity"
+                    );
+                    result.push((video.into(), set.into()));
+                }
+                return Ok(());
+            }
+            match value {
+                Value::Object(map) => {
+                    for child in map.values() {
+                        rows(child, result, depth + 1)?;
+                    }
+                }
+                Value::Array(list) => {
+                    for child in list {
+                        rows(child, result, depth + 1)?;
+                    }
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+        let client = Self::client(proxy)?;
+        let mut next = None;
+        let mut seen = HashSet::new();
+        let mut result = Vec::new();
+        for _ in 0..400 {
+            let value = self
+                .request(&client, next.as_deref(), &format!("VL{id}"))
+                .await?;
+            rows(playlist_section(&value)?, &mut result, 0)?;
+            ensure!(result.len() <= 20_000, "Playlist exceeds 20,000 songs");
+            match parse_playlist_page(&value)?.continuation {
+                Some(token) => {
+                    ensure!(seen.insert(token.clone()), "Repeated playlist page");
+                    next = Some(token);
+                }
+                None => return Ok(result),
+            }
+        }
+        anyhow::bail!("Playlist exceeded the page limit")
+    }
     pub async fn membership(
         &self,
         proxy: &ProxyConfig,
@@ -763,10 +886,28 @@ impl Session {
         );
         let client = Self::client(proxy)?;
         let mut tracks = Vec::new();
+        let mut title = playlist.title.clone();
         let mut next = None;
         let mut pages = HashSet::new();
         for _ in 0..400 {
             let value = self.request(&client, next.as_deref(), &playlist.id).await?;
+            if next.is_none() {
+                for key in ["musicResponsiveHeaderRenderer", "musicDetailHeaderRenderer"] {
+                    if let Some(runs) = find_section(&value, key, 0)
+                        .and_then(|v| v.pointer("/title/runs"))
+                        .and_then(Value::as_array)
+                    {
+                        let text = runs
+                            .iter()
+                            .filter_map(|v| v["text"].as_str())
+                            .collect::<String>();
+                        if !text.trim().is_empty() {
+                            title = text;
+                            break;
+                        }
+                    }
+                }
+            }
             let parsed = parse_playlist_page(&value)?;
             tracks.extend(parsed.entries.into_iter().filter_map(|entry| entry.track));
             ensure!(
@@ -783,7 +924,7 @@ impl Session {
                 }
                 None => {
                     return Ok(Collection {
-                        title: playlist.title.clone(),
+                        title: title.clone(),
                         source: format!(
                             "https://www.youtube.com/playlist?list={}",
                             &playlist.id[2..]
@@ -807,4 +948,19 @@ pub fn valid_playlist_id(id: &str) -> bool {
         && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+#[cfg(test)]
+mod personal_playlist_tests {
+    use super::*;
+    #[test]
+    fn personal_library_managed_reconciliation_preserves_confirmed_prefix() {
+        let current = vec![("a".into(), "row-a".into()), ("b".into(), "row-b".into())];
+        let ids = |values: &[&str]| values.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(managed_prefix(&current, &ids(&["a", "b"])), 2);
+        assert_eq!(managed_prefix(&current, &ids(&["a", "b", "c"])), 2);
+        assert_eq!(managed_prefix(&current, &ids(&["a", "c"])), 1);
+        assert_eq!(managed_prefix(&current, &ids(&["b", "a"])), 0);
+        assert_eq!(managed_prefix(&current, &[]), 0);
+    }
 }

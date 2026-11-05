@@ -384,26 +384,7 @@ fn controls(app: &mut App, ui: &mut egui::Ui, id: Id) {
                 "WaveLink by xoft122 (MIT). Public, unprotected tracks; no account token stored.",
             );
         }
-        Id::YouTube => {
-            ui.label("YouTube playlist URL (up to 500 entries)");
-            ui.add(
-                egui::TextEdit::singleline(&mut app.addons.youtube_url)
-                    .hint_text("https://www.youtube.com/playlist?list=…")
-                    .desired_width(ui.available_width())
-                    .char_limit(500),
-            );
-            let url = app.addons.youtube_url.clone();
-            ui.add_enabled_ui(!app.addons.busy, |ui| {
-                button(
-                    app,
-                    ui,
-                    "Import playlist",
-                    Command::Fetch(Request::YouTube(url)),
-                    false,
-                )
-            });
-            ui.small("Imported playlists are saved on Home automatically. Unavailable videos may be omitted.");
-        }
+        Id::YouTube => {}
         Id::Vivy | Id::Backmusic | Id::SoundVisualizer => {
             ui.small("Open Visualizers beside Lyrics. Display settings are available inside the visualizer; fullscreen is optional.");
         }

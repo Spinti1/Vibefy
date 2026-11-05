@@ -212,7 +212,7 @@ fn youtube_import_saves_once_opens_on_home_and_survives_disabling_the_addon() {
         "same source updates existing import"
     );
     assert!(app.flush_files());
-    let restored = addons::load_collections(&root.join("state/mod-collections.json"));
+    let restored = addons::load_collections(&root.join("state/library-playlists.json"));
     assert_eq!(restored, app.addons.collections);
     app.settings.addons.uninstall(addons::Id::YouTube);
     app.actions.push(Action::Open(Page::Home));
@@ -311,12 +311,10 @@ fn mods_catalogue_has_one_ordered_grid_and_collapses_optional_tools() {
         frame(&ctx, &mut app, width, 1000.0, 0.0);
         let out = frame(&ctx, &mut app, width, 1000.0, 0.0);
         let text = labels(&out);
-        let youtube = text
-            .iter()
-            .position(|s| s == "YouTube Playlist Import")
-            .unwrap();
+        assert!(!text.iter().any(|s| s == "YouTube Playlist Import"));
         let wave = text.iter().position(|s| s == "WaveLink").unwrap();
-        assert!(youtube < wave);
+        let juice = text.iter().position(|s| s == "JuiceVault").unwrap();
+        assert!(wave < juice);
         assert!(text.iter().any(|s| s == "Listen Together"));
         assert!(!text.iter().any(|s| s == "Intensity"));
     }

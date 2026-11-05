@@ -22,8 +22,7 @@ pub enum Id {
     SoundVisualizer,
 }
 
-pub const ALL: [Id; 7] = [
-    Id::YouTube,
+pub const ALL: [Id; 6] = [
     Id::WaveLink,
     Id::JuiceVault,
     Id::TrackPeek,
@@ -211,9 +210,12 @@ impl Preferences {
         [Id::Vivy, Id::Backmusic, Id::SoundVisualizer].into_iter()
     }
     pub fn migrate_builtin_visualizers(&mut self) {
-        self.installed.retain(|id| !id.is_visualizer());
-        self.enabled.retain(|id| !id.is_visualizer());
-        self.ready_packages.retain(|id| !id.is_visualizer());
+        self.installed
+            .retain(|id| !id.is_visualizer() && *id != Id::YouTube);
+        self.enabled
+            .retain(|id| !id.is_visualizer() && *id != Id::YouTube);
+        self.ready_packages
+            .retain(|id| !id.is_visualizer() && *id != Id::YouTube);
         if self.visualizer.is_some_and(|id| !id.is_visualizer()) {
             self.visualizer = None;
         }
@@ -707,9 +709,7 @@ pub fn load_collections(path: &std::path::Path) -> Vec<Collection> {
     };
     collections
         .into_iter()
-        .filter(|c| {
-            c.tracks.len() <= 20_000 && c.tracks.iter().all(|t| direct_url(&t.uri).is_some())
-        })
+        .filter(|c| crate::personal_library::validate(c))
         .collect()
 }
 

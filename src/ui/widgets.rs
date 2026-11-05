@@ -796,6 +796,7 @@ pub fn picked_menu(
             positions: positions.to_vec(),
         });
     }
+    super::personal_library::song_menu(ui, app, songs, None);
     add_to_playlist_menu(ui, app, songs);
 }
 
@@ -1024,6 +1025,7 @@ fn item_menu_at(
         }
         ui.close();
     }
+    super::personal_library::song_menu(ui, app, std::slice::from_ref(item), context);
     if uri.starts_with("vibefy:") {
         if let PlayableItem::Track(track) = item
             && menu_item(

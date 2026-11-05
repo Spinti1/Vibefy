@@ -5,7 +5,7 @@ use egui::{Align, CornerRadius, Frame, Layout, Margin, Rect, Sense, Vec2, pos2, 
 use crate::api::models::pick_image;
 use crate::app::App;
 use crate::i18n::{Locale, gettext};
-use crate::model::{Action, Dialog, DragEntry, DragTrack, Loadable, Page};
+use crate::model::{Action, DragEntry, DragTrack, Loadable, Page};
 use crate::settings::{LIKED_SONGS_KEY, LibraryShelf as Filter, LibrarySort};
 use crate::theme::{self, Icon, Palette};
 
@@ -1044,11 +1044,13 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
             )
             .clicked()
             {
-                app.actions.push(Action::ShowDialog(Dialog::CreatePlaylist {
-                    name: String::new(),
-                    public: false,
-                    add_uris: Vec::new(),
-                }));
+                app.actions
+                    .push(Action::Personal(crate::personal_library::Action::Show(
+                        crate::personal_library::Dialog::New {
+                            name: String::new(),
+                            backup: app.music_accounts[0].connected,
+                        },
+                    )));
             }
             if theme::icon_button(
                 ui,

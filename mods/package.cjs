@@ -1,6 +1,6 @@
 const fs=require('fs'),crypto=require('crypto'),path=require('path');
 const root=path.resolve(__dirname,'..'),out=path.join(__dirname,'packages');
-const names={nyan:'Nyan',wavelink:'WaveLink',juicevault:'JuiceVault',oneko:'Oneko',catjam:'CatJam',youtube:'YouTube',trackpeek:'TrackPeek'};
+const names={nyan:'Nyan',wavelink:'WaveLink',juicevault:'JuiceVault',oneko:'Oneko',catjam:'CatJam',trackpeek:'TrackPeek'};
 const asset=n=>fs.readFileSync(path.join(root,'assets/mods',n)).toString('base64');
 let credits=fs.readFileSync(path.join(root,'assets/mods/README.md'),'utf8');for(const n of fs.readdirSync(path.join(root,'assets/mods')).filter(n=>n.startsWith('LICENSE') && n!=='LICENSE-SoundVisualizer.txt'))credits+='\n'+fs.readFileSync(path.join(root,'assets/mods',n),'utf8');
 const catalog=[];

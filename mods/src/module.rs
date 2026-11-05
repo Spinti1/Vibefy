@@ -12,13 +12,13 @@ fn repaint(fps:f32) { draw(8,[fps,0.,0.,0.,0.,0.,0.,0.]); }
 #[unsafe(no_mangle)] pub extern "C" fn abi() -> i32 { 1 }
 #[unsafe(no_mangle)] pub extern "C" fn identity() -> i32 {
     if cfg!(nyan) {0} else if cfg!(wavelink) {1} else if cfg!(juicevault) {2}
-    else if cfg!(oneko) {3} else if cfg!(catjam) {4} else if cfg!(youtube) {5}
+    else if cfg!(oneko) {3} else if cfg!(catjam) {4}
     else {8}
 }
 /// Native service adapters remain in the host so credentials are never shared
 /// with mods. Provider modules register the corresponding optional entry points.
 #[unsafe(no_mangle)] pub extern "C" fn capabilities() -> i32 {
-    if cfg!(wavelink) {1} else if cfg!(juicevault) {2} else if cfg!(youtube) {4} else {0}
+    if cfg!(wavelink) {1} else if cfg!(juicevault) {2} else {0}
 }
 #[unsafe(no_mangle)] pub extern "C" fn render() {
     let (x,y,w,h)=(n(0),n(1),n(2),n(3));

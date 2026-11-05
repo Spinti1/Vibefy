@@ -13,47 +13,23 @@ use super::widgets;
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
     if !app.network_reachable {
-        let space = ((ui.available_height() - 160.0) / 2.0).max(48.0);
-        ui.add_space(space);
-        ui.vertical_centered(|ui| {
-            theme::icon(ui, Icon::WifiOff, 54.0, palette.dim);
-            ui.add_space(16.0);
-            theme::text(
-                ui,
-                gettext(app.locale, "You're offline"),
-                theme::bold(28.0),
-                palette.text,
-            );
-            ui.add_space(8.0);
-            theme::text(
-                ui,
-                gettext(
-                    app.locale,
-                    "Spotifast will reconnect automatically when your connection returns.",
-                ),
-                theme::regular(14.0),
-                palette.secondary,
-            );
-        });
-        return;
+        ui.label(
+            "You're offline. Local playlists are still available; streaming needs a connection.",
+        );
     }
     ui.add_space(6.0);
     let greeting = crate::util::greeting(app.locale);
     theme::text(ui, greeting.as_ref(), theme::bold(30.0), palette.text);
     ui.add_space(12.0);
-    if app.user_id().is_some() && (!app.music_accounts[0].connected || app.music_accounts[0].busy) {
-        egui::Frame::new()
-            .fill(palette.panel)
-            .corner_radius(10)
-            .inner_margin(16.0)
-            .show(ui, |ui| {
-                ui.label("Spotify connected");
-                super::music_accounts::youtube_connect(app, ui);
-            });
-        ui.add_space(16.0);
-    }
+    super::personal_library::home(app, ui);
     let all = quick_access_tiles(app);
-    for (group, title) in [(0, "Linked"), (1, "Spotify")] {
+    for (group, title) in [(4, "Vibefy playlists"), (0, "Linked"), (1, "Spotify")] {
+        if group == 1 && app.user_id().is_none() {
+            continue;
+        }
+        if group == 0 && app.mirror.lists.is_empty() {
+            continue;
+        }
         ui.label(
             egui::RichText::new(title)
                 .font(theme::semibold(20.0))
@@ -71,6 +47,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         if tiles.is_empty() {
             ui.small(if group == 0 {
                 "Your linked Spotify and YouTube playlists appear here."
+            } else if group == 4 {
+                "Create a playlist above, then add songs from search using their right-click menu."
             } else {
                 "Your Spotify playlists appear here."
             });
@@ -84,14 +62,16 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
     ui.add_space(16.0);
 
-    if app.settings.home.made_for_you.visible {
-        made_for_you(app, ui);
-        top_mixes(app, ui);
+    if app.is_connected() {
+        if app.settings.home.made_for_you.visible {
+            made_for_you(app, ui);
+            top_mixes(app, ui);
+        }
+        new_releases(app, ui);
+        recently_played(app, ui);
+        podcasts(app, ui);
+        top_artists(app, ui);
     }
-    new_releases(app, ui);
-    recently_played(app, ui);
-    podcasts(app, ui);
-    top_artists(app, ui);
     hidden_playlists(app, ui);
 }
 
@@ -110,9 +90,6 @@ struct Tile {
 
 /// Linked copies remain in the Spotify shelf; native YouTube lists get their own shelf.
 fn youtube_playlists(app: &mut App, ui: &mut egui::Ui) {
-    if !app.music_accounts[0].connected {
-        return;
-    }
     let linked: std::collections::HashSet<_> = app
         .mirror
         .lists
@@ -130,6 +107,15 @@ fn youtube_playlists(app: &mut App, ui: &mut egui::Ui) {
         .filter(|p| {
             let id = p.id.strip_prefix("VL").unwrap_or(&p.id);
             !linked.contains(id)
+                && !app.personal.backups.values().any(|r| {
+                    r.remote == id
+                        && app.addons.collections.iter().any(|c| {
+                            app.personal
+                                .backups
+                                .get(&c.source)
+                                .is_some_and(|b| b.remote == id)
+                        })
+                })
                 && !app.playlist_hidden(&format!("https://www.youtube.com/playlist?list={id}"))
                 && seen.insert(id.to_owned())
         })
@@ -223,11 +209,12 @@ fn youtube_playlists(app: &mut App, ui: &mut egui::Ui) {
             app.actions
                 .push(Action::Open(Page::LocalCollection(source)));
         } else {
-            super::music_accounts::send(
-                app,
-                crate::music_accounts::Provider::YouTubeMusic,
-                crate::music_accounts::Action::Import(playlist),
-            );
+            app.actions
+                .push(Action::Personal(crate::personal_library::Action::Import {
+                    youtube: true,
+                    url: source,
+                    backup: false,
+                }));
         }
     }
 }
@@ -376,17 +363,22 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
             .lists
             .iter()
             .find(|list| list.spotify_id == playlist.id && !list.youtube_id.is_empty());
+        let imported = app
+            .addons
+            .collections
+            .iter()
+            .find(|c| c.source == format!("https://open.spotify.com/playlist/{}", playlist.id));
+        let local_source = linked
+            .map(|l| l.collection.source.clone())
+            .or_else(|| imported.map(|c| c.source.clone()));
         Tile {
             image: pick_image(&playlist.images, tile_art).map(str::to_string),
             name: playlist.name.clone(),
-            page: linked
-                .map(|list| Page::LocalCollection(list.collection.source.clone()))
+            page: local_source
+                .clone()
+                .map(Page::LocalCollection)
                 .unwrap_or_else(|| Page::Playlist(playlist.id.clone())),
-            uri: Some(
-                linked
-                    .map(|list| list.collection.source.clone())
-                    .unwrap_or_else(|| playlist.uri.clone()),
-            ),
+            uri: Some(local_source.unwrap_or_else(|| playlist.uri.clone())),
             liked: false,
             owned_playlist: app
                 .user_id()
@@ -395,7 +387,11 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
             song: None,
         }
     };
-    let mut tiles: Vec<Tile> = vec![liked_tile()];
+    let mut tiles: Vec<Tile> = if app.user_id().is_some() {
+        vec![liked_tile()]
+    } else {
+        Vec::new()
+    };
     let mut seen = std::collections::HashSet::from([Page::LikedSongs]);
     for saved in app
         .mirror
@@ -1154,6 +1150,55 @@ fn top_artists(app: &mut App, ui: &mut egui::Ui) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn personal_library_imported_spotify_playlist_has_one_home_tile() {
+        use crate::{
+            addons::Collection,
+            api::models::Playlist,
+            app::{App, AppOptions},
+            backend::Waker,
+            model::Loadable,
+            paths::AppDirs,
+        };
+        let root =
+            std::env::temp_dir().join(format!("vibefy-home-dedup-{}", rand::random::<u64>()));
+        let mut app = App::new(
+            &Waker::default(),
+            AppDirs {
+                config: root.join("config"),
+                state: root.join("state"),
+                cache: root.join("cache"),
+            },
+            Default::default(),
+            AppOptions {
+                media_controls: false,
+                restore_sign_in: false,
+                tray: false,
+                autostart: false,
+            },
+        );
+        app.backend.set_offline(true);
+        app.offline = true;
+        let id = "1234567890123456789012";
+        app.library.playlists = Loadable::Loaded(vec![Playlist {
+            id: id.into(),
+            uri: format!("spotify:playlist:{id}"),
+            name: "Imported playlist".into(),
+            ..Default::default()
+        }]);
+        app.addons.collections.push(Collection {
+            title: "Imported playlist".into(),
+            source: format!("https://open.spotify.com/playlist/{id}"),
+            ..Default::default()
+        });
+        assert_eq!(
+            super::quick_access_tiles(&app)
+                .iter()
+                .filter(|t| t.name == "Imported playlist")
+                .count(),
+            1
+        );
+    }
     use super::*;
     use crate::api::models::ResumePoint;
 
@@ -1385,6 +1430,12 @@ fn open_tile(app: &mut App, page: &Page) {
     app.actions.push(Action::Open(page.clone()));
 }
 fn source_menu(app: &mut App, ui: &mut egui::Ui, source: &str, name: &str) {
+    if crate::personal_library::owned(source)
+        || source.starts_with("https://open.spotify.com/playlist/")
+    {
+        super::personal_library::menu(app, ui, source, name);
+        return;
+    }
     let linked = app
         .mirror
         .lists

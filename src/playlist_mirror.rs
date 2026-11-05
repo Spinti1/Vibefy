@@ -1534,7 +1534,8 @@ pub fn start(serial: u64, context: Context) -> Handle {
                     file(cache, Some(repaired)).await?;
                 }
             }
-            // Existing unfinished imports now wait for the playlist selection screen.
+            journal.enabled = false;
+            // Existing unfinished imports remain readable; transfers are now explicit Home imports.
             if !journal.setup_complete && journal.selected.is_none() {
                 journal.enabled = false;
             }

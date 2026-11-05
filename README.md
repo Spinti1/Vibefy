@@ -11,7 +11,7 @@ Built in Rust, based on [Spotifast](https://github.com/crmne/spotifast).
 
 ## Features
 
-- **Library:** connect Spotify and YouTube, browse playlists and Liked Songs, and link selected playlists across both services.
+- **Library:** optional Spotify/YouTube connections, local Vibefy playlists, playlist imports and optional unlisted YouTube backups. Export/import metadata backups without storing audio.
 - **Playback:** YouTube Music search, queue controls and a ten-band equalizer.
 - **Lyrics:** synchronized or plain lyrics from available providers, with background controls.
 - **Visualizers:** 16 built-in effects from Vivy, Backmusic and SoundVisualizer, selected directly in the player.

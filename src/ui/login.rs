@@ -272,14 +272,33 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
                 client_id_field(app, ui);
                 ui.add_space(4.0);
             }
-            if big_button(ui, app, "Step 1 · Sign in with Spotify") {
+            if big_button(ui, app, "Connect Spotify") {
                 app.actions.push(Action::SignIn);
             }
             ui.add_space(8.0);
-            ui.add_enabled_ui(false, |ui| {
-                big_button(ui, app, "Step 2 · Sign in with YouTube");
+            let youtube_busy = app.music_accounts[0].busy;
+            ui.add_enabled_ui(!youtube_busy, |ui| {
+                if big_button(ui, app, "Connect YouTube") {
+                    super::music_accounts::send(
+                        app,
+                        crate::music_accounts::Provider::YouTubeMusic,
+                        crate::music_accounts::Action::Connect,
+                    );
+                }
             });
-            ui.small("Connect Spotify first, then YouTube. Vibefy copies your selected Spotify playlists to unlisted YouTube Music playlists. Anyone with their link can view them.");
+            if youtube_busy {
+                ui.spinner();
+                ui.label("Finish signing in in the YouTube window…");
+            }
+            if let Some(error) = &app.music_accounts[0].message {
+                ui.colored_label(palette.danger, error);
+            }
+            ui.add_space(8.0);
+            if theme::pill_button(ui, &palette, "Skip · Continue as guest", false).clicked() {
+                app.actions
+                    .push(Action::Personal(crate::personal_library::Action::Continue));
+            }
+            ui.small("Both connections are optional. Create playlists locally, import playlists on Home, and connect YouTube whenever you want an account backup.");
             ui.add_space(10.0);
             wrapped(
                 ui,
@@ -304,6 +323,15 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
                 }
             }
         }
+    }
+    if (connecting || matches!(app.auth, AuthStatus::WaitingForBrowser { .. }))
+        && theme::pill_button(ui, &palette, "Skip · Continue as guest", false).clicked()
+    {
+        if matches!(app.auth, AuthStatus::WaitingForBrowser { .. }) {
+            app.actions.push(Action::CancelSignIn);
+        }
+        app.actions
+            .push(Action::Personal(crate::personal_library::Action::Continue));
     }
 }
 

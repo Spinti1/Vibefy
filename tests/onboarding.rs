@@ -48,92 +48,67 @@ fn render_sized(
 }
 
 #[test]
-fn playlist_gallery_has_direct_selection_and_visible_actions_in_small_window() {
+fn home_import_controls_are_visible_without_mandatory_transfer_in_small_window() {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     theme::install(&ctx);
-    let mut app = fixture("gallery-small");
-    app.auth = AuthStatus::Connected {
-        username: "example".into(),
-    };
-    app.user = Some(spotifast::api::models::User {
-        id: "example".into(),
-        ..Default::default()
-    });
-    app.music_accounts[0].connected = true;
-    app.mirror.ready = true;
-    app.mirror.pair = "gallery-pair".into();
-    app.library.playlists = spotifast::model::Loadable::Loaded(
-        (0..18)
-            .map(|i| spotifast::api::models::Playlist {
-                id: format!("{i:022}"),
-                name: format!("Playlist {i}"),
-                ..Default::default()
-            })
-            .collect(),
-    );
+    let mut app = fixture("home-import-actions");
+    app.backend.set_offline(true);
+    app.offline = true;
+    app.settings.welcome_completed = true;
+    app.auth = AuthStatus::SignedOut;
     let tree = render_sized(&ctx, &mut app, 820.0, 640.0);
-    for label in ["Start transfer", "Skip for now — not recommended"] {
+    for label in [
+        "Create playlist",
+        "Import YouTube playlist",
+        "Import Spotify playlist",
+    ] {
         let bounds = button(&tree, label).bounds().unwrap();
         assert!(
             bounds.y1 <= 640.0 && bounds.x1 <= 820.0,
-            "Action outside viewport: {label} {bounds:?}"
+            "{label} outside viewport: {bounds:?}"
         );
     }
-    let card = &tree
-        .nodes
-        .iter()
-        .find(|(_, n)| {
-            n.label() == Some("Playlist 0") && n.role() == egui::accesskit::Role::CheckBox
-        })
-        .expect("direct selectable card")
-        .1;
-    let bounds = card.bounds().unwrap();
-    assert!(bounds.x1 - bounds.x0 > 140.0 && bounds.y1 - bounds.y0 > 180.0);
-    assert!(
-        bounds.y1 < button(&tree, "Start transfer").bounds().unwrap().y0,
-        "First card must be fully visible above the footer"
-    );
-    assert!(
-        !tree
-            .nodes
-            .iter()
-            .any(|(_, n)| n.label() == Some("Choose playlists to copy"))
-    );
-}
-
-#[test]
-fn active_transfer_has_a_dedicated_progress_screen_and_edit_action() {
-    let ctx = egui::Context::default();
-    ctx.enable_accesskit();
-    theme::install(&ctx);
-    let mut app = fixture("transfer-screen");
-    app.auth = AuthStatus::Connected {
-        username: "example".into(),
-    };
-    app.user = Some(spotifast::api::models::User {
-        id: "example".into(),
-        ..Default::default()
-    });
-    app.music_accounts[0].connected = true;
-    app.mirror.ready = true;
-    app.mirror.pair = "transfer-pair".into();
-    app.mirror.enabled = true;
-    app.mirror.busy = true;
-    app.mirror.selected = Some(vec!["0123456789012345678901".into()]);
-    let tree = render_sized(&ctx, &mut app, 820.0, 640.0);
-    button(&tree, "Change selection");
-    let skip = button(&tree, "Skip for now — not recommended")
-        .bounds()
-        .unwrap();
-    assert!(skip.y1 <= 640.0);
     assert!(
         !tree
             .nodes
             .iter()
             .any(|(_, n)| n.label() == Some("Start transfer"))
     );
-    // The decorative title uses the theme painter; interactive actions above are accessible.
+}
+#[test]
+fn backup_progress_is_inline_on_home_and_does_not_block_import_controls() {
+    let ctx = egui::Context::default();
+    ctx.enable_accesskit();
+    theme::install(&ctx);
+    let mut app = fixture("home-backup-progress");
+    app.backend.set_offline(true);
+    app.offline = true;
+    app.settings.welcome_completed = true;
+    app.personal.tasks.insert(
+        1,
+        spotifast::personal_library::Pending {
+            source: Some("demo".into()),
+            backup: true,
+            fingerprint: String::new(),
+            epoch: 0,
+            message: "Saving playlist to YouTube…".into(),
+        },
+    );
+    let tree = render(&ctx, &mut app);
+    button(&tree, "Create playlist");
+    button(&tree, "Import Spotify playlist");
+    assert!(
+        tree.nodes
+            .iter()
+            .any(|(_, n)| n.value().or(n.label()) == Some("Saving playlist to YouTube…"))
+    );
+    assert!(
+        !tree
+            .nodes
+            .iter()
+            .any(|(_, n)| n.label() == Some("Change selection"))
+    );
 }
 fn button<'a>(tree: &'a egui::accesskit::TreeUpdate, label: &str) -> &'a egui::accesskit::Node {
     &tree
@@ -144,27 +119,24 @@ fn button<'a>(tree: &'a egui::accesskit::TreeUpdate, label: &str) -> &'a egui::a
         .1
 }
 #[test]
-fn youtube_alone_cannot_skip_spotify_and_account_buttons_share_size_and_center() {
+fn optional_account_buttons_share_size_and_center_and_offer_skip() {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     theme::install(&ctx);
     let mut app = fixture("spotify-first");
     app.auth = AuthStatus::SignedOut;
-    app.music_accounts[0].connected = true;
+    app.music_accounts[0].connected = false;
     let tree = render(&ctx, &mut app);
-    let first = button(&tree, "Step 1 · Sign in with Spotify")
-        .bounds()
-        .unwrap();
-    let second = button(&tree, "Step 2 · Sign in with YouTube")
-        .bounds()
-        .unwrap();
+    button(&tree, "Skip · Continue as guest");
+    let first = button(&tree, "Connect Spotify").bounds().unwrap();
+    let second = button(&tree, "Connect YouTube").bounds().unwrap();
     assert_eq!(first.x1 - first.x0, second.x1 - second.x0);
     assert_eq!(first.y1 - first.y0, second.y1 - second.y0);
     assert!(((first.x1 + first.x0) - (second.x1 + second.x0)).abs() < 1.0);
     assert!(first.y1 <= second.y0);
 }
 #[test]
-fn spotify_connection_shows_required_youtube_step_before_the_main_player() {
+fn spotify_connection_opens_home_without_requiring_youtube() {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     theme::install(&ctx);
@@ -177,8 +149,8 @@ fn spotify_connection_shows_required_youtube_step_before_the_main_player() {
         ..Default::default()
     });
     let tree = render(&ctx, &mut app);
-    button(&tree, "Step 1 · Spotify connected");
-    button(&tree, "Step 2 · Sign in with YouTube");
+    button(&tree, "Create playlist");
+    button(&tree, "Import Spotify playlist");
     assert!(
         !tree
             .nodes
@@ -187,7 +159,7 @@ fn spotify_connection_shows_required_youtube_step_before_the_main_player() {
     );
 }
 #[test]
-fn connected_accounts_show_selection_and_an_explicit_skip_before_home() {
+fn connected_accounts_open_home_without_the_old_transfer_wizard() {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     theme::install(&ctx);
@@ -209,8 +181,14 @@ fn connected_accounts_show_selection_and_an_explicit_skip_before_home() {
             ..Default::default()
         }]);
     let tree = render(&ctx, &mut app);
-    button(&tree, "Start transfer");
-    button(&tree, "Skip for now — not recommended");
+    button(&tree, "Create playlist");
+    button(&tree, "Import YouTube playlist");
+    assert!(
+        !tree
+            .nodes
+            .iter()
+            .any(|(_, n)| n.label() == Some("Start transfer"))
+    );
     assert!(
         tree.nodes
             .iter()

@@ -4980,6 +4980,7 @@ pub fn source_playlist(app: &mut App, ui: &mut egui::Ui, source: &str) {
             ui.label(message);
         }
     }
+    super::personal_library::controls(app, ui, source);
     let filter_id = egui::Id::new(("source-playlist-filter", &page));
     let mut filter = ui
         .data(|data| data.get_temp::<String>(filter_id))
