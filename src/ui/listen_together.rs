@@ -112,7 +112,7 @@ fn controls(app: &mut App, ui: &mut egui::Ui) {
         ui.colored_label(app.palette.warning, message);
         ui.add_space(8.0);
     }
-    ui.small("Vibefy only · up to 8 listeners · host controls playback · trusted LAN or VPN. Direct sessions are not encrypted; use a VPN outside your home network. Closing the host ends the session.");
+    ui.small("Desktop + mobile web · up to 24 listeners · host controls playback. Connections use Cloudflare; participants do not connect to each other. Rooms expire after 6 hours.");
     if let Some(session) = &app.addons.jam {
         let state = session.shared.lock().unwrap();
         ui.label(format!(
@@ -121,17 +121,13 @@ fn controls(app: &mut App, ui: &mut egui::Ui) {
         ));
         if session.host && !state.invite.is_empty() {
             let mut invite = state.invite.clone();
-            ui.label("Host IPv4 override (optional, for VPN / another network adapter)");
-            ui.text_edit_singleline(&mut app.addons.jam_address);
-            if !app.addons.jam_address.trim().is_empty() {
-                if let (Ok(ip), Ok((address, token))) = (
-                    app.addons.jam_address.trim().parse::<std::net::Ipv4Addr>(),
-                    crate::jam::parse_invite(&invite),
-                ) {
-                    invite = format!("vibefy-jam://{}:{}/{token}", ip, address.port());
-                } else {
-                    ui.small("Enter a valid IPv4 address.");
-                }
+            if let Ok(code) = crate::jam::parse_invite(&invite) {
+                ui.label(format!(
+                    "Code: {}-{}-{}",
+                    &code[..4],
+                    &code[4..8],
+                    &code[8..]
+                ));
             }
             ui.label("Share this invitation with your listeners:");
             ui.add(
@@ -144,7 +140,22 @@ fn controls(app: &mut App, ui: &mut egui::Ui) {
             {
                 ui.ctx().copy_text(invite);
             }
-            ui.small("If Windows asks, allow Vibefy on private networks. Other users paste this invitation into Listen Together.");
+            ui.small("Share the link or code privately. Each participant streams the recording on their own device.");
+        }
+        if !state.queue.is_empty() {
+            ui.add_space(12.0);
+            ui.strong("Up next");
+            for (i, track) in state.queue.iter().take(12).enumerate() {
+                ui.label(format!(
+                    "{}. {} · {}",
+                    i + 1,
+                    track.title,
+                    track.artist_names()
+                ));
+            }
+        }
+        if !session.host {
+            ui.small("Use Add to queue on a YouTube song to send it to the host.");
         }
         drop(state);
         button(app, ui, "Leave session", Command::Leave, false);
@@ -154,7 +165,7 @@ fn controls(app: &mut App, ui: &mut egui::Ui) {
         ui.label("Join a Vibefy host");
         ui.add(
             egui::TextEdit::singleline(&mut app.addons.jam_invite)
-                .hint_text("vibefy-jam://IP:port/invitation")
+                .hint_text("Paste a link or 12-character code")
                 .desired_width(ui.available_width())
                 .char_limit(200),
         );

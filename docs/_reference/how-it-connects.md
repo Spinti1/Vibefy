@@ -1236,3 +1236,17 @@ artwork when space allows. The previous card uses actual played metadata; the
 next respects manually queued songs, repeat context and a reserved shuffle choice.
 Cards perform no additional network requests during drawing. Track-menu audio
 previews remain available independently.
+
+## Cloud relay Jam (0.4.44)
+
+Listen Together is built in and has a fixed Users button in the top bar. The old LAN listener and browser PeerJS/STUN transport are replaced by an independent shared TLS WebSocket protocol through a Cloudflare Worker and SQLite Durable Object per room. Neither app opens an inbound listening port. Participants see no peer IP addresses; Cloudflare processes them. Only exact resolved YouTube recording IDs, bounded song metadata, upcoming supported tracks and play/pause/timing are exchanged. No audio, music tokens, cookies, account names or third-party cover URLs cross the relay.
+
+A random 12-character code grants listener access; a separate random 256-bit host credential grants control. Host credentials remain outside the invite link. Rooms allow 24 listeners and expire after six hours. Reconnection attempts are bounded. Host control, input lengths, connection/message rates, queue lengths and unauthenticated socket lifetimes are checked by the server. Normal clock ticks are checkpointed at most every 30 seconds; track, pause, seek and queue changes persist immediately. Ending/expiring the room deletes its state. This is transport encryption, not end-to-end encryption. Service quotas and browser autoplay/background/availability restrictions remain applicable.
+
+## Confirmed playlist deletion (0.4.44)
+
+Deleting a Linked tile queues both removal from the Spotify library (the operation Spotify exposes) and deletion of its marked YouTube copy. A durable per-account intent records each acknowledgement separately and retries after service cooldowns. Tombstones prevent stale Spotify pages from recreating the deleted copy. YouTube deletion checks an editable playlist header and, for linked copies, the pairing marker before writing. Owned ordinary YouTube playlists also offer Delete from YouTube with confirmation. Saved collections can still be removed locally. JuiceVault's public API excludes account mutations; no undocumented delete endpoint is guessed.
+
+## Audio edition selection (0.4.44)
+
+Candidate titles, music credits and album labels are checked for clean/censored/radio-edit editions. Explicit/uncensored labels improve the score among identified recordings, while artist, title and duration checks remain. Old matches with a known clean title and known clean linked catalogue choices are rechecked. Unlabelled censorship cannot be inferred reliably from metadata. Official-audio and Topic searches run first; a fully inspected, verified artist official-audio recording within three seconds of the expected duration can start without the remaining fallback queries. Artist videos and uncertain uploads still require the broader comparison. Queued tracks retain known metadata so the engine avoids an unnecessary metadata fetch.

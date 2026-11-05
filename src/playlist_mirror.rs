@@ -28,6 +28,7 @@ use tokio::sync::mpsc;
 #[derive(Clone, Debug)]
 pub enum Action {
     Observe,
+    Delete(String),
     Rename { id: String, title: String },
     Configure(Vec<String>),
     FinishSetup,
@@ -83,6 +84,12 @@ pub struct Intent {
     pub expected: BTreeMap<String, usize>,
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
+struct DeleteIntent {
+    spotify_done: bool,
+    youtube_done: bool,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
 struct RenameIntent {
     title: String,
     spotify_done: bool,
@@ -95,6 +102,8 @@ pub fn valid_title(title: &str) -> bool {
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct Linked {
+    #[serde(default)]
+    deleting: Option<DeleteIntent>,
     #[serde(default)]
     copied: usize,
     #[serde(default)]
@@ -111,6 +120,9 @@ struct Linked {
 }
 #[derive(Default, Serialize, Deserialize)]
 struct Journal {
+    /// Explicit removals must never be recreated by a stale library page.
+    #[serde(default)]
+    deleted: HashSet<String>,
     #[serde(default)]
     setup_complete: bool,
     #[serde(default)]
@@ -257,11 +269,17 @@ pub fn choose_recording(source: &LocalTrack, candidates: &[LocalTrack]) -> Optio
                 && c.duration_ms > 0
                 && source.duration_ms.abs_diff(c.duration_ms) <= 3500
                 && crate::audio_match::compatible_version(&source.title, &c.title)
+                && crate::audio_match::audio_edition_allowed(
+                    &format!("{} {}", source.title, source.album),
+                    &c.album,
+                )
         })
         .map(|c| {
             let album = (!source.album.is_empty() && norm(&c.album) == norm(&source.album)) as i32;
             (
-                album * 20 - (source.duration_ms.abs_diff(c.duration_ms) / 1000) as i32,
+                album * 20
+                    + (crate::audio_match::normalized(&c.album).contains("explicit") as i32 * 30)
+                    - (source.duration_ms.abs_diff(c.duration_ms) / 1000) as i32,
                 c,
             )
         })
@@ -445,6 +463,10 @@ impl Service {
         self.waker.wake();
     }
     fn update_view(&mut self, id: &str) {
+        if self.journal.deleted.contains(id) {
+            self.views.remove(id);
+            return;
+        }
         let Some(list) = self.journal.lists.get(id) else {
             return;
         };
@@ -519,6 +541,10 @@ impl Service {
                 "Pending sync request is too large"
             );
             let addition: Addition = serde_json::from_slice(&bytes)?;
+            if self.journal.deleted.contains(&addition.playlist) {
+                tokio::fs::remove_file(entry.path()).await?;
+                continue;
+            }
             if let Some(list) = self.journal.lists.get_mut(&addition.playlist) {
                 for track in addition.tracks {
                     if !list
@@ -540,6 +566,21 @@ impl Service {
     }
     async fn action(&mut self, action: Action) -> Result<()> {
         match action {
+            Action::Delete(id) => {
+                ensure!(valid_spotify(&id), "Invalid linked playlist");
+                let list = self
+                    .journal
+                    .lists
+                    .get_mut(&id)
+                    .ok_or_else(|| anyhow::anyhow!("Playlist is no longer linked"))?;
+                if list.deleting.is_none() {
+                    list.deleting = Some(DeleteIntent::default());
+                }
+                list.rename = None;
+                self.journal.deleted.insert(id.clone());
+                self.save().await?;
+                self.update_view(&id);
+            }
             Action::Rename { id, title } => {
                 let title = title.trim().to_owned();
                 ensure!(
@@ -675,7 +716,11 @@ impl Service {
         }
         self.inbox().await?;
         ensure!(
-            !self.journal.lists.values().any(|l| l.rename.is_some()),
+            !self
+                .journal
+                .lists
+                .values()
+                .any(|l| l.rename.is_some() || l.deleting.is_some()),
             Interrupted
         );
         ensure!(self.journal.enabled, "Playlist sync is paused");
@@ -696,7 +741,7 @@ impl Service {
                 action=self.rx.recv()=> {
                     let action=action.ok_or_else(||anyhow::anyhow!("Playlist sync stopped"))?;
                     self.action(action).await?;self.publish("Sync settings updated",true);
-                    ensure!(!self.journal.lists.values().any(|l| l.rename.is_some()), Interrupted);
+                    ensure!(!self.journal.lists.values().any(|l| l.rename.is_some() || l.deleting.is_some()), Interrupted);
                     ensure!(self.journal.enabled,"Playlist sync is paused");
                 }
             }
@@ -705,7 +750,7 @@ impl Service {
     async fn refresh_list(&mut self, playlist: Playlist) -> Result<()> {
         self.api.observe_playlist(&playlist);
         let id = playlist.id.clone();
-        if !valid_spotify(&id) {
+        if !valid_spotify(&id) || self.journal.deleted.contains(&id) {
             return Ok(());
         }
         let unchanged =
@@ -1110,17 +1155,87 @@ impl Service {
         }
         Ok(())
     }
+    async fn delete_pending(&mut self) -> Result<()> {
+        let ids: Vec<_> = self
+            .journal
+            .lists
+            .iter()
+            .filter(|(_, l)| l.deleting.is_some())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            let list = self.journal.lists[&id].clone();
+            let pending = list.deleting.unwrap();
+            if !pending.youtube_done {
+                let youtube_id = if list.youtube_id.is_empty()
+                    && list.intent.as_ref().is_some_and(|i| i.creating)
+                {
+                    self.discover(&id, &list.title).await?.ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Waiting to locate the unfinished YouTube copy before deleting"
+                        )
+                    })?
+                } else {
+                    list.youtube_id.clone()
+                };
+                if !youtube_id.is_empty() {
+                    self.session
+                        .delete(&self.proxy, &youtube_id, Some(&self.marker(&id)))
+                        .await?;
+                }
+                self.journal
+                    .lists
+                    .get_mut(&id)
+                    .unwrap()
+                    .deleting
+                    .as_mut()
+                    .unwrap()
+                    .youtube_done = true;
+                self.save().await?;
+            }
+            if !pending.spotify_done {
+                let client = self
+                    .api
+                    .client_for(Operation::PlaylistMutation(self.api.playlist_access(&id)))
+                    .await?;
+                self.last_client = Some(client.clone());
+                match client.unfollow_playlist(&id).await {
+                    Ok(()) => {}
+                    Err(e) if e.status() == Some(404) => {}
+                    Err(e) => return Err(e.into()),
+                }
+                self.journal
+                    .lists
+                    .get_mut(&id)
+                    .unwrap()
+                    .deleting
+                    .as_mut()
+                    .unwrap()
+                    .spotify_done = true;
+                self.save().await?;
+            }
+            self.journal.lists.remove(&id);
+            if let Some(selected) = &mut self.journal.selected {
+                selected.retain(|p| p != &id);
+            }
+            self.save().await?;
+            self.views.remove(&id);
+            self.publish("Removed from Spotify and deleted from YouTube", false);
+        }
+        Ok(())
+    }
     async fn cycle(&mut self) -> Result<()> {
         ensure!(
             self.api.account().as_ref().map(|a| a.as_str()) == Some(self.journal.spotify.as_str()),
             "Spotify account changed; rename paused"
         );
+        self.delete_pending().await?;
         if let Err(error) = self.rename_pending().await {
             let ids: Vec<_> = self
                 .journal
                 .lists
                 .iter()
-                .filter(|(_, l)| l.rename.is_some())
+                .filter(|(_, l)| l.rename.is_some() || l.deleting.is_some())
                 .map(|(id, _)| id.clone())
                 .collect();
             for id in ids {
@@ -1207,6 +1322,7 @@ impl Service {
         if let Some(selected) = &self.journal.selected {
             listed.retain(|p| selected.contains(&p.id));
         }
+        listed.retain(|p| !self.journal.deleted.contains(&p.id));
         listed.sort_by_key(|p| {
             self.journal
                 .lists
@@ -1260,7 +1376,7 @@ impl Service {
         self.save().await?;
         self.publish(
             if errors.is_empty() {
-                "Sync finished. Check Review recordings for unmatched songs. Deletions stay separate.".into()
+                "Sync finished. Unmatched recordings need review.".into()
             } else {
                 format!("{} playlists need attention. {}", errors.len(), errors[0])
             },
@@ -1278,7 +1394,11 @@ impl Service {
         );
         let mut due = 0;
         loop {
-            let renaming = self.journal.lists.values().any(|l| l.rename.is_some());
+            let renaming = self
+                .journal
+                .lists
+                .values()
+                .any(|l| l.rename.is_some() || l.deleting.is_some());
             if (self.journal.enabled || renaming) && now() >= due.max(self.journal.retry_at) {
                 match self.cycle().await {
                     Ok(()) => {
@@ -1394,6 +1514,17 @@ pub fn start(serial: u64, context: Context) -> Handle {
             let cache = context.root.join(format!("{pair}-recordings.jsonl"));
             if let Some(bytes) = file(cache.clone(), None).await? {
                 journal.decisions = recover_decisions(&bytes)?;
+                for decision in journal.decisions.values_mut() {
+                    if decision.chosen.as_ref().is_some_and(|chosen| {
+                        !crate::audio_match::audio_edition_allowed(
+                            &format!("{} {}", decision.source.title, decision.source.album),
+                            &format!("{} {}", chosen.title, chosen.album),
+                        )
+                    }) {
+                        decision.chosen = None;
+                        decision.checked_at = 0;
+                    }
+                }
                 if !bytes.is_empty() && !bytes.ends_with(b"\n") {
                     let mut repaired = Vec::new();
                     for decision in journal.decisions.values() {
@@ -1470,5 +1601,32 @@ mod rename_tests {
         assert!(!valid_title("  "));
         assert!(!valid_title("bad\nname"));
         assert!(!valid_title(&"a".repeat(101)));
+    }
+}
+
+#[cfg(test)]
+mod release_update_tests {
+    use super::*;
+    #[test]
+    fn linked_delete_retains_partial_acknowledgements_and_a_tombstone_after_restart() {
+        let mut journal = Journal::default();
+        journal.deleted.insert("playlist".into());
+        journal.lists.insert(
+            "playlist".into(),
+            Linked {
+                deleting: Some(DeleteIntent {
+                    youtube_done: true,
+                    spotify_done: false,
+                }),
+                ..Default::default()
+            },
+        );
+        let restored: Journal =
+            serde_json::from_slice(&serde_json::to_vec(&journal).unwrap()).unwrap();
+        assert!(restored.deleted.contains("playlist"));
+        let pending = restored.lists["playlist"].deleting.as_ref().unwrap();
+        assert!(pending.youtube_done);
+        assert!(!pending.spotify_done);
+        assert!(serde_json::from_str::<Linked>(r#"{"title":"Old","snapshot":null,"youtube_id":"","tracks":[],"extra":[],"image":null,"intent":null}"#).unwrap().deleting.is_none());
     }
 }

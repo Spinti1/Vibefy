@@ -1867,6 +1867,16 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 "https://github.com/Kamiloo13/spicetify-extensions/tree/main/extensions/more-lyrics",
             );
             ui.add_space(12.0);
+            theme::text(ui, "SoundVisualizer", theme::semibold(15.0), palette.text);
+            ui.label("12 adapted 2D effects by CaYatur (Çağan Turgut / CaYaDev), MIT. Optional package. Uses live post-EQ audio; Canvas bloom and GPU modes are not included.");
+            credit_link(
+                &mut app.actions,
+                ui,
+                &palette,
+                "SoundVisualizer · GitHub",
+                "https://github.com/CaYatur/SoundVisualizer",
+            );
+            ui.add_space(12.0);
             theme::text(ui, "Track Peek", theme::semibold(15.0), palette.text);
             ui.label("Inspired by Spotify Spice by Grason Chan (MIT). Native adjacent-track cards and on-demand audio previews.");
             credit_link(

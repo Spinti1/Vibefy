@@ -34,6 +34,7 @@ pub fn slug(id: Id) -> &'static str {
         Id::Vivy => "vivy",
         Id::Backmusic => "backmusic",
         Id::TrackPeek => "trackpeek",
+        Id::SoundVisualizer => "soundvisualizer",
     }
 }
 fn identity(id: Id) -> i32 {
@@ -47,6 +48,7 @@ fn identity(id: Id) -> i32 {
         Id::Vivy => 6,
         Id::Backmusic => 7,
         Id::TrackPeek => 8,
+        Id::SoundVisualizer => 9,
     }
 }
 #[derive(Deserialize)]
@@ -401,4 +403,77 @@ pub fn load_all(root: &std::path::Path, ids: Vec<Id>) -> BTreeMap<Id, Result<Arc
     ids.into_iter()
         .map(|id| (id, load(root, id).map_err(|e| e.to_string())))
         .collect()
+}
+
+#[cfg(test)]
+mod release_update_tests {
+    use super::*;
+    fn input(style: u8) -> Vec<f32> {
+        let mut v = vec![0.; 3584];
+        v[2] = 1200.;
+        v[3] = 760.;
+        v[4] = 12.;
+        v[6] = 1.;
+        v[12] = 1.;
+        v[13] = style as f32;
+        v[18] = 128.;
+        v[19] = 24.;
+        v[26] = 30.;
+        for (i, b) in v[64..192].iter_mut().enumerate() {
+            *b = (i as f32 * 0.1).sin().abs();
+        }
+        for (i, w) in v[3328..].iter_mut().enumerate() {
+            *w = (i as f32 * 0.06).sin() * 0.5;
+        }
+        v
+    }
+    fn package(id: Id) -> Arc<Guest> {
+        decode(
+            id,
+            &std::fs::read(format!(
+                "{}/mods/packages/{}.vmod",
+                env!("CARGO_MANIFEST_DIR"),
+                slug(id)
+            ))
+            .unwrap(),
+        )
+        .unwrap()
+    }
+    #[test]
+    fn all_soundvisualizer_modes_and_existing_visuals_stay_within_the_sandbox_budget() {
+        for id in [Id::SoundVisualizer, Id::Vivy, Id::Backmusic] {
+            let guest = package(id);
+            for style in 0..if id == Id::SoundVisualizer { 12 } else { 2 } {
+                for (width, height) in [(1200., 760.), (320., 240.)] {
+                    let mut v = input(style);
+                    v[2] = width;
+                    v[3] = height;
+                    let commands = guest
+                        .render(v)
+                        .unwrap_or_else(|e| panic!("{id:?} style {style}: {e}"));
+                    assert!(!commands.is_empty() && commands.len() <= MAX_COMMANDS);
+                    assert!(commands.iter().flat_map(|c| c.values).all(f32::is_finite));
+                }
+            }
+        }
+    }
+    #[test]
+    fn waveform_modes_use_pcm_and_paused_modes_do_not_request_animation_frames() {
+        for style in [3, 4] {
+            let guest = package(Id::SoundVisualizer);
+            let mut quiet = input(style);
+            quiet[3328..].fill(0.);
+            let a = guest.render(quiet.clone()).unwrap();
+            let mut signal = quiet.clone();
+            signal[3328..].fill(0.5);
+            let b = guest.render(signal).unwrap();
+            assert!(
+                a.iter()
+                    .zip(&b)
+                    .any(|(a, b)| a.kind == 1 && a.values != b.values)
+            );
+            quiet[6] = 0.;
+            assert!(!guest.render(quiet).unwrap().iter().any(|c| c.kind == 8));
+        }
+    }
 }

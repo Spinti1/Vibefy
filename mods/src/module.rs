@@ -16,7 +16,7 @@ fn repaint(fps:f32) { draw(8,[fps,0.,0.,0.,0.,0.,0.,0.]); }
 #[unsafe(no_mangle)] pub extern "C" fn identity() -> i32 {
     if cfg!(nyan) {0} else if cfg!(wavelink) {1} else if cfg!(juicevault) {2}
     else if cfg!(oneko) {3} else if cfg!(catjam) {4} else if cfg!(youtube) {5}
-    else if cfg!(vivy) {6} else if cfg!(backmusic) {7} else {8}
+    else if cfg!(vivy) {6} else if cfg!(backmusic) {7} else if cfg!(soundvisualizer) {9} else {8}
 }
 /// Native service adapters remain in the host so credentials are never shared
 /// with mods. Provider modules register the corresponding optional entry points.
@@ -43,6 +43,7 @@ fn repaint(fps:f32) { draw(8,[fps,0.,0.,0.,0.,0.,0.,0.]); }
         let width=((w-n(23))/2.-10.).clamp(0.,180.);
         if width<28. {return;}
         for next in 0..2 {let left=if next==1 {x+w/2.+n(23)/2.+8.} else {x+w/2.-n(23)/2.-8.-width};draw(6,[left,n(24)-21.,width,42.,next as f32,0.,0.,0.]);}
+    } else if cfg!(soundvisualizer) { #[cfg(soundvisualizer)] soundvisualizer::render(x,y,w,h);
     } else if cfg!(vivy) {
         let count=n(18) as i32;let rows=n(19) as i32;
         for row in (0..rows.min(24)).rev() {
@@ -74,3 +75,5 @@ fn neko(x:f32,y:f32,w:f32,h:f32) {
     sprite(2.,(row*8+col) as f32,px-16.,py-16.,32.,32.);
     if moving {repaint(20.);} else if time-idle<4.1 {repaint(1.);}
 }
+
+#[cfg(soundvisualizer)] mod soundvisualizer;

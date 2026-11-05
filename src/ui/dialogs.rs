@@ -102,6 +102,16 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 }
                 Dialog::CreatePlaylist { .. } => create_playlist(app, ui),
                 Dialog::EditPlaylist { .. } => edit_playlist(app, ui),
+                Dialog::ConfirmSourceDelete { source, name } => {
+                    theme::text(ui, "Delete playlist?", theme::bold(20.0), palette.text);
+                    ui.add_space(8.0);
+                    ui.label(format!("Delete “{name}” from your YouTube account? This cannot be undone. Only playlists you own can be deleted."));
+                    ui.add_space(20.0);
+                    buttons(ui, |ui| {
+                        if theme::pill_button(ui, &palette, "Delete from YouTube", true).clicked() { app.actions.push(Action::DeleteSourcePlaylist(source)); }
+                        if theme::pill_button(ui, &palette, "Cancel", false).clicked() { app.actions.push(Action::CloseDialog); }
+                    });
+                }
                 Dialog::ConfirmDeletePlaylist { id, name, owned } => {
                     theme::text(
                         ui,
@@ -131,7 +141,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                         .wrap(),
                     );
                     if app.mirror.lists.iter().any(|l| l.spotify_id == id && !l.youtube_id.is_empty()) {
-                        ui.label("This affects Spotify only. Your YouTube copy remains available.");
+                        ui.label("This also permanently deletes the linked YouTube copy. Spotify removes the playlist from your library. Pending work is retried if a service is temporarily unavailable.");
                     }
                     ui.add_space(20.0);
                     buttons(ui, |ui| {

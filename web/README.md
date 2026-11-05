@@ -1,6 +1,6 @@
 # Vibefy web
 
-Desktop presentation and phone-only player hosted on Vercel (team use-vibefy, project root web). Web update 0.4.16; latest Windows installer remains 0.4.15.
+Desktop presentation and phone-only player hosted on Vercel (team use-vibefy, project root web). Jam transport update: 0.4.44.
 
 ## Run and check
 
@@ -24,11 +24,11 @@ Authorization Code with PKCE uses S256, a random one-use state and a ten-minute 
 
 Spotify Development Mode currently permits at most five allowlisted users and requires the app owner to have Premium. Public use needs Spotify Extended Quota approval. See https://developer.spotify.com/documentation/web-api/concepts/quota-modes. A Client ID alone does not remove these restrictions. Some playlist contents may be withheld by Spotify. OAuth was unit-tested; live sign-in cannot be verified until the publisher configures an eligible application.
 
-## Browser Jam and Cloudflare research
+## Shared Jam
 
-Current Jam uses pinned PeerJS 1.5.5, public signalling and Google STUN, with up to eight listeners. It sends recording identity, position and play/pause over encrypted WebRTC data channels. Some NAT/firewall combinations prevent direct connections. Native desktop LAN and browser sessions are separate protocols.
+Desktop and mobile web use the same Cloudflare Worker / Durable Object relay, with TLS WebSockets. Host a session or join using a 12-character code or https://usevibefy.online/app?jam=CODE. A desktop browser opens the presentation with instructions to paste the code into the native app; phones open the web player.
 
-Recommended next implementation: Cloudflare Worker plus one SQLite-backed Durable Object per room, with authenticated host/listener roles and WebSocket Hibernation. Each client connects outbound using WSS; only commands and timestamps pass through Cloudflare. A host capability must be distinct from the shareable invitation, inputs and rate limits bounded, room lifetime limited, and reconnection/clock drift handled. This can serve both mobile and native clients after adapting the Rust Jam transport. It does not solve ads, autoplay or recording availability. Cloudflare TURN is another option if retaining WebRTC. No Cloudflare service was provisioned or billed by this update.
+The host publishes the exact resolved YouTube recording, play/pause, timing and supported upcoming recordings. Participants can suggest YouTube songs for the host queue. Only the separate host credential permits playback control or ending the room; it is never part of the invitation. Rooms expire after six hours, allow 24 listeners, bound messages/queues and remove metadata at end/expiry. Cloudflare processes connection IP addresses; participants never connect directly. No audio files or music-account credentials are relayed. Browser autoplay, visible-player, background playback and recording availability restrictions still apply. Timing is corrected periodically, not sample-accurate. Deployment and limits: [jam-relay](../jam-relay).
 
 ## Hosting and privacy
 

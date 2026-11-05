@@ -11,7 +11,7 @@ use crate::model::{Action, BackgroundActivity, Page};
 use crate::theme::{self, Icon, Palette};
 
 /// The gap the bar keeps between everything it lays out.
-const ITEM_SPACING: f32 = 8.0;
+const ITEM_SPACING: f32 = 6.0;
 /// The account avatar, and the icon in each of the three buttons beside it.
 const AVATAR_SIZE: f32 = 36.0;
 const ICON_BUTTON_ICON: f32 = 19.0;
@@ -39,7 +39,7 @@ const SEARCH_MIN: f32 = 80.0;
 /// button, so this counts three gaps, not four. The spinner and the badges
 /// are measured on top of it because they come and go.
 const RIGHT_CONTROLS_WIDTH: f32 =
-    super::widgets::PAGE_PADDING + AVATAR_SIZE + 4.0 + 4.0 * ICON_BUTTON_SIZE + 4.0 * ITEM_SPACING;
+    super::widgets::PAGE_PADDING + AVATAR_SIZE + 4.0 + 5.0 * ICON_BUTTON_SIZE + 5.0 * ITEM_SPACING;
 
 /// What precedes the field until the bar has drawn once: the page padding,
 /// the back and forward buttons and the gaps after them.
@@ -499,6 +499,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                         if super::widgets::menu_item(
                             ui,
                             &palette,
+                            Some(Icon::Users),
+                            "Listen Together",
+                        ) {
+                            app.actions.push(Action::ToggleListenTogether);
+                        }
+                        if super::widgets::menu_item(
+                            ui,
+                            &palette,
                             Some(Icon::Info),
                             &gettext(locale, "Keyboard shortcuts"),
                         ) {
@@ -546,6 +554,22 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     ));
                 }
                 ui.add_space(4.0);
+                if theme::icon_button(
+                    ui,
+                    Icon::Users,
+                    ICON_BUTTON_ICON,
+                    if app.show_listen_together || app.addons.jam.is_some() {
+                        palette.accent
+                    } else {
+                        palette.secondary
+                    },
+                    palette.text,
+                    "Listen Together",
+                )
+                .clicked()
+                {
+                    app.actions.push(Action::ToggleListenTogether);
+                }
                 if theme::icon_button(
                     ui,
                     Icon::Settings,

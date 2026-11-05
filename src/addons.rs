@@ -19,15 +19,17 @@ pub enum Id {
     Vivy,
     Backmusic,
     TrackPeek,
+    SoundVisualizer,
 }
 
-pub const ALL: [Id; 9] = [
+pub const ALL: [Id; 10] = [
     Id::YouTube,
     Id::WaveLink,
     Id::JuiceVault,
     Id::TrackPeek,
     Id::Vivy,
     Id::Backmusic,
+    Id::SoundVisualizer,
     Id::Nyan,
     Id::CatJam,
     Id::Oneko,
@@ -36,6 +38,7 @@ pub const ALL: [Id; 9] = [
 impl Id {
     pub fn name(self) -> &'static str {
         match self {
+            Self::SoundVisualizer => "SoundVisualizer",
             Self::Nyan => "Nyan Cat Progress Bar",
             Self::WaveLink => "WaveLink",
             Self::JuiceVault => "JuiceVault",
@@ -49,6 +52,9 @@ impl Id {
     }
     pub fn description(self) -> &'static str {
         match self {
+            Self::SoundVisualizer => {
+                "Twelve native audio-reactive modes adapted from CaYatur SoundVisualizer. Optional download; no additional player or audio capture."
+            }
             Self::Nyan => {
                 "The original Nyan Cat frames animate along a rainbow progress bar at the track's estimated tempo."
             }
@@ -78,6 +84,7 @@ impl Id {
     }
     pub fn source(self) -> Option<&'static str> {
         match self {
+            Self::SoundVisualizer => Some("https://github.com/CaYatur/SoundVisualizer"),
             Self::Nyan => Some("https://github.com/NoahClemmensen/spicetify-nyan-bar-synced"),
             Self::JuiceVault => Some("https://juicevault.xyz/"),
             Self::WaveLink => Some("https://github.com/xoft122/wavelink"),
@@ -108,6 +115,7 @@ pub struct Preferences {
     pub particles: bool,
     pub vivy: Option<VisualConfig>,
     pub backmusic: Option<VisualConfig>,
+    pub soundvisualizer: Option<VisualConfig>,
     pub cat_jam_scale: f32,
 }
 
@@ -132,6 +140,7 @@ impl Default for Preferences {
             particles: false,
             vivy: None,
             backmusic: None,
+            soundvisualizer: None,
             cat_jam_scale: 0.9,
         }
     }
@@ -181,11 +190,15 @@ impl Preferences {
         };
         match id {
             Id::Backmusic => self.backmusic.unwrap_or(fallback),
+            Id::SoundVisualizer => self.soundvisualizer.unwrap_or_default(),
             _ => self.vivy.unwrap_or(fallback),
         }
     }
     pub fn visual_mut(&mut self, id: Id) -> &mut VisualConfig {
-        let old = self.visual(Id::Vivy);
+        if id == Id::SoundVisualizer {
+            return self.soundvisualizer.get_or_insert_with(Default::default);
+        }
+        let old = self.visual(id);
         self.vivy.get_or_insert(old);
         self.backmusic.get_or_insert(old);
         if id == Id::Backmusic {
@@ -195,10 +208,12 @@ impl Preferences {
         }
     }
     pub fn installed_visualizers(&self) -> impl Iterator<Item = Id> + '_ {
-        [Id::Vivy, Id::Backmusic].into_iter().filter(|id| {
-            self.installed.contains(id)
-                && (!self.require_packages || self.ready_packages.contains(id))
-        })
+        [Id::Vivy, Id::Backmusic, Id::SoundVisualizer]
+            .into_iter()
+            .filter(|id| {
+                self.installed.contains(id)
+                    && (!self.require_packages || self.ready_packages.contains(id))
+            })
     }
     pub fn active(&self, id: Id) -> bool {
         self.installed.contains(&id)
@@ -574,7 +589,17 @@ pub async fn fetch(request: Request, proxy: crate::settings::ProxyConfig) -> Res
 
 pub fn source_error(stderr: &[u8]) -> &'static str {
     let text = String::from_utf8_lossy(stderr).to_ascii_lowercase();
-    if text.contains("drm") {
+    if text.contains("429") || text.contains("too many requests") {
+        "The source is temporarily rate limiting requests. Try again later."
+    } else if text.contains("timed out")
+        || text.contains("timeout")
+        || text.contains("unable to download")
+        || text.contains("connection")
+        || text.contains("name resolution")
+        || text.contains("network is unreachable")
+    {
+        "Cannot reach the audio source. Check your connection and try again."
+    } else if text.contains("drm") {
         "This track is DRM-protected and cannot be played in Vibefy. Choose a public, unprotected upload."
     } else if text.contains("geo") || text.contains("country") || text.contains("region") {
         "This track is not available in your region."
@@ -612,6 +637,8 @@ pub struct Runtime {
     pub analyser: crate::vis::WideAnalyser,
     pub ridges: std::collections::VecDeque<Vec<f32>>,
     pub audio_time: f64,
+    pub history_time: f64,
+    pub waveform: Vec<f32>,
     pub bands: Vec<f32>,
     pub beat: BeatDetector,
     pub active_tracks: Vec<LocalTrack>,
@@ -626,7 +653,7 @@ pub struct Runtime {
     pub was_fullscreen: bool,
     pub jam_message: Option<String>,
     pub jam_invite: String,
-    pub jam_address: String,
+    pub jam_tracks: std::collections::HashMap<String, LocalTrack>,
     pub jam: Option<crate::jam::Session>,
     pub pending_sync: Option<(crate::jam::Snapshot, std::time::Instant)>,
     pub last_sync: Option<std::time::Instant>,

@@ -14,8 +14,8 @@ Built in Rust, based on [Spotifast](https://github.com/crmne/spotifast).
 - **Library:** connect Spotify and YouTube, browse playlists and Liked Songs, and link selected playlists across both services.
 - **Playback:** YouTube Music search, queue controls and a ten-band equalizer.
 - **Lyrics:** synchronized or plain lyrics from available providers, with background controls.
-- **Mods:** optional cats, Track Peek, visualizers and additional music sources. Install from the in-app catalogue and reload.
-- **Listen Together:** shared listening on a trusted local network or VPN.
+- **Mods:** optional cats, Track Peek, visualizers (including 12 adapted SoundVisualizer 2D effects) and additional music sources. Install from the in-app catalogue and reload.
+- **Listen Together:** desktop and mobile web sessions through Cloudflare, using an invitation link or code.
 - **Updates:** check GitHub releases from the profile menu, with size and SHA-256 verification.
 
 ## Mini player

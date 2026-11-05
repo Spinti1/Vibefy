@@ -120,9 +120,9 @@ def spotify_config():
 
 @app.get("/api/capabilities")
 def capabilities():
-    return {"version": "0.4.16", "beta": True, "search": True, "playback": "official-embedded-player" if os.getenv("VERCEL") else "source-dependent",
-            "nativeOnly": ["local Whisper Auto Sync", "LAN Listen Together", "audio-reactive desktop visualizers", "classic mini window"],
-            "storage": "browser-local", "analytics": False, "spotifyConfigured": bool(re.fullmatch(r"[a-fA-F0-9]{32}", os.getenv("VIBEFY_SPOTIFY_CLIENT_ID", ""))), "jam": "browser WebRTC via PeerJS; separate from desktop LAN"}
+    return {"version": "0.4.44", "beta": True, "search": True, "playback": "official-embedded-player" if os.getenv("VERCEL") else "source-dependent",
+            "nativeOnly": ["local Whisper Auto Sync", "audio-reactive desktop visualizers", "classic mini window"],
+            "storage": "browser-local", "analytics": False, "spotifyConfigured": bool(re.fullmatch(r"[a-fA-F0-9]{32}", os.getenv("VIBEFY_SPOTIFY_CLIENT_ID", ""))), "jam": "shared Cloudflare relay; desktop and mobile web"}
 
 @app.get("/api/search")
 async def search(q: str = Query(min_length=1, max_length=160)):

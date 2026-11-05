@@ -1395,15 +1395,60 @@ fn source_menu(app: &mut App, ui: &mut egui::Ui, source: &str, name: &str) {
         let playlist = app.known_playlist(&id).cloned();
         if let Some(playlist) = playlist {
             let owned = app.user_id().is_some_and(|id| playlist.owned_by(id));
+            if !owned
+                && widgets::menu_item(
+                    ui,
+                    &app.palette,
+                    Some(Icon::Trash),
+                    "Delete from Spotify and YouTube",
+                )
+            {
+                app.actions.push(Action::ShowDialog(
+                    crate::model::Dialog::ConfirmDeletePlaylist {
+                        id: id.clone(),
+                        name: name.into(),
+                        owned: false,
+                    },
+                ));
+            }
             widgets::context_menu_items(ui, app, &playlist.uri, name, owned.then_some(&playlist));
-            ui.small("Spotify actions affect Spotify. The YouTube copy remains.");
+            ui.small("Linked playlist deletion removes it from both platforms.");
             return;
         }
+        widgets::playlist_visibility_menu(ui, app, source);
+        if widgets::menu_item(ui, &app.palette, Some(Icon::Play), "Open playlist") {
+            open_tile(app, &Page::LocalCollection(source.into()));
+        }
+        if widgets::menu_item(
+            ui,
+            &app.palette,
+            Some(Icon::Trash),
+            "Delete from Spotify and YouTube",
+        ) {
+            app.actions.push(Action::ShowDialog(
+                crate::model::Dialog::ConfirmDeletePlaylist {
+                    id,
+                    name: name.into(),
+                    owned: false,
+                },
+            ));
+        }
+        return;
     }
     ui.set_min_width(200.0);
     widgets::playlist_visibility_menu(ui, app, source);
     if widgets::menu_item(ui, &app.palette, Some(Icon::Play), "Open playlist") {
         open_tile(app, &Page::LocalCollection(source.into()));
+    }
+    if source.starts_with("https://www.youtube.com/playlist?list=PL")
+        && widgets::menu_item(ui, &app.palette, Some(Icon::Trash), "Delete from YouTube")
+    {
+        app.actions.push(Action::ShowDialog(
+            crate::model::Dialog::ConfirmSourceDelete {
+                source: source.into(),
+                name: name.into(),
+            },
+        ));
     }
     if let Some(index) = app
         .addons

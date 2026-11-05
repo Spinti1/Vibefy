@@ -1156,6 +1156,10 @@ pub enum Dialog {
         /// left untouched on save unless the switch is used.
         public: Option<bool>,
     },
+    ConfirmSourceDelete {
+        source: String,
+        name: String,
+    },
     ConfirmDeletePlaylist {
         id: String,
         name: String,
@@ -1351,6 +1355,7 @@ pub enum Action {
         public: Option<bool>,
     },
     DeletePlaylist(String),
+    DeleteSourcePlaylist(String),
     SetPlaylistHidden {
         source: String,
         hidden: bool,

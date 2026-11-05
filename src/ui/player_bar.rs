@@ -1128,26 +1128,6 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
     {
         app.actions.push(Action::ToggleSpicyLyrics);
     }
-    // The Listen Together button is the first to go in a narrow window,
-    // so it never crowds the transport.
-    let left = ui.min_rect().left() - ui.spacing().item_spacing.x - (18.0 + theme::ICON_BUTTON_PAD);
-    if left - transport_right >= TRANSPORT_GAP
-        && theme::icon_button(
-            ui,
-            Icon::Users,
-            18.0,
-            if app.show_listen_together || app.addons.jam.is_some() {
-                palette.accent
-            } else {
-                palette.secondary
-            },
-            palette.text,
-            "Listen Together",
-        )
-        .clicked()
-    {
-        app.actions.push(Action::ToggleListenTogether);
-    }
 }
 
 #[cfg(test)]

@@ -167,3 +167,16 @@ counts once, and the notification reports only the rows actually added.
     rewrites the queue by clearing it and re-adding the rest, so it is
     offered only while this computer is the active player. *Next up* rows
     have no such entry; they play from the current context.
+
+## Vibefy recording recovery
+
+When a recording is unavailable, restricted or has no matching YouTube
+recording, local playback advances to the next queued song. Repeat-one does
+not retry the failed recording. Three consecutive failures stop playback;
+successful playback resets this limit. Connection failures and source rate
+limits stop playback without skipping songs. An empty remaining queue stays
+stopped.
+
+## Cloud Jam queue (0.4.44)
+
+A participant's Add to queue for a YouTube song sends the exact recording and bounded metadata to the host. The host uses the normal manual-queue ordering; metadata is retained by AddResolvedToQueue. Shared queue previews contain supported upcoming YouTube recordings, not the host's private account library. Host controls playback and removals. Browser guests see the shared queue and cannot locally rearrange it. Leaving Jam returns control to the participant.

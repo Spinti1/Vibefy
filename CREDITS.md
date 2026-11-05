@@ -35,7 +35,8 @@ These are native adaptations, not the original extensions running inside Spiceti
 | [wairence / Vivy](https://github.com/wairence/vivy) | Independent live audio visual adaptation; MIT notice retained |
 | [rolandyangg / Backmusic](https://github.com/rolandyangg/backmusic_extension) | Visual inspiration for independent spectrum / rings / particles implementation; unlicensed extension code was not copied |
 | [Grason Chan / Spotify Spice](https://github.com/grasonchan/spotify-spice) | Track Peek inspiration / native adaptation only, no Vinyl; MIT notice retained |
-| [Kyzenkms / Spicetify Jam](https://github.com/Kyzenkms/spicetify-jam) | Inspiration for independent direct LAN/VPN metadata-and-timing protocol; no copied PeerJS service or Spotify Jam implementation |
+| [CaYatur / SoundVisualizer](https://github.com/CaYatur/SoundVisualizer) | 12 adapted 2D effect geometries and audio mappings by Çağan Turgut / CaYaDev, revision c3e7fc6bc3fa826e323486256268fa764a317963. MIT notice preserved in assets/mods/LICENSE-SoundVisualizer.txt and the optional package. Canvas bloom, GPU and MilkDrop modes are not included. |
+| [Kyzenkms / Spicetify Jam](https://github.com/Kyzenkms/spicetify-jam) | Inspiration for independent shared listening; current transport uses a Vibefy Cloudflare relay, not Spotify Jam |
 | [Spicetify contributors](https://github.com/spicetify) | Original extension ecosystem and marketplace references |
 
 The inspected Nyan and Cat Jam repositories do not contain explicit artwork license notices. **This project's MIT license does not relicense that artwork.** Source revisions, original URLs, conversion details and hashes are recorded in [assets/mods/README.md](assets/mods/README.md). Other mod notices are retained under `assets/mods/LICENSE_*.txt` and in the distribution's third-party notices.
@@ -48,9 +49,9 @@ The website uses **DM Sans** (Colophon Foundry and contributors) and **Space Gro
 
 Vibefy is not affiliated with, endorsed by, or an official client of Spotify, YouTube, Google, SoundCloud or Spicetify. Only access content you are permitted to use; availability remains subject to each provider.
 
-## Browser Listen Together
+## Listen Together
 
-The web implementation uses [PeerJS 1.5.5](https://github.com/peers/peerjs) under MIT, with the original notice retained in web/public/vendor/peerjs-LICENSE.txt. PeerJS Cloud provides signalling and Google STUN assists direct encrypted WebRTC connections. This is a Vibefy web implementation, separate from the native LAN protocol. Audio is played independently by each participant.
+[Cloudflare Workers and Durable Objects](https://developers.cloudflare.com/durable-objects/) host the independently implemented room relay. [tungstenite](https://github.com/snapview/tungstenite-rs) provides the native TLS WebSocket client (MIT / Apache-2.0). Desktop and mobile web share one metadata-and-timing protocol. Audio is played independently by each participant. Cloudflare processes connection IP addresses; participants receive no peer IP addresses. No Spotify or YouTube credentials are sent to the relay.
 
 ## Mobile mod adaptations
 

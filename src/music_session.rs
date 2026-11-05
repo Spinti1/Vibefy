@@ -574,6 +574,57 @@ impl Session {
             .map(str::to_owned)
             .ok_or_else(|| Failure::Unconfirmed.into())
     }
+    /// A user-confirmed deletion. The editable header protects saved playlists
+    /// owned by somebody else. The server authorizes the write again.
+    pub async fn delete(&self, proxy: &ProxyConfig, id: &str, marker: Option<&str>) -> Result<()> {
+        ensure!(
+            self.google.is_none(),
+            "Reconnect YouTube before deleting playlists"
+        );
+        ensure!(
+            valid_playlist_id(id) && id.starts_with("PL"),
+            "Only ordinary owned YouTube playlists can be deleted"
+        );
+        let value = match self
+            .request(&Self::client(proxy)?, None, &format!("VL{id}"))
+            .await
+        {
+            Ok(value) => value,
+            Err(error)
+                if matches!(
+                    error.downcast_ref::<Failure>(),
+                    Some(Failure::Rejected(404))
+                ) =>
+            {
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+        ensure!(
+            find_section(&value, "musicEditablePlaylistDetailHeaderRenderer", 0).is_some(),
+            "Only the owner can delete this YouTube playlist"
+        );
+        if let Some(marker) = marker {
+            let (private, description) = playlist_details(&value);
+            ensure!(
+                private && description.contains(marker),
+                "YouTube copy is no longer identified as this linked playlist"
+            );
+        }
+        let response = self
+            .post(
+                &Self::client(proxy)?,
+                "playlist/delete",
+                json!({"playlistId": id}),
+                None,
+            )
+            .await?;
+        ensure!(
+            response["status"].as_str() == Some("STATUS_SUCCEEDED"),
+            Failure::Unconfirmed
+        );
+        Ok(())
+    }
     pub async fn rename(&self, proxy: &ProxyConfig, id: &str, title: &str) -> Result<()> {
         ensure!(
             self.google.is_none(),

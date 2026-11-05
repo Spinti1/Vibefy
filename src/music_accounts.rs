@@ -37,6 +37,7 @@ pub struct State {
     pub auth_pending: bool,
     pub enable_sync_after_connect: bool,
     pub busy: bool,
+    pub deleting: bool,
     pub connected: bool,
     pub name: String,
     pub message: Option<String>,
@@ -64,11 +65,13 @@ pub enum Action {
     PublicProfile,
     Connect,
     Refresh,
+    Delete(String),
     Disconnect,
     Import(LibraryPlaylist),
 }
 #[derive(Clone, Debug)]
 pub struct Update {
+    pub removed_source: Option<String>,
     pub name: String,
     pub playlists: Vec<LibraryPlaylist>,
     pub collection: Option<Collection>,
@@ -336,6 +339,7 @@ pub async fn execute(
         }
         credential(provider, config, Some(None)).await?;
         return Ok(Update {
+            removed_source: None,
             name: String::new(),
             playlists: Vec::new(),
             collection: None,
@@ -358,18 +362,26 @@ pub async fn execute(
         session.bind(config, proxy)?;
         let connecting = matches!(action, Action::Connect);
         let result = async {
-            // Validate live access before persisting or showing Connected.
-            let playlists = session.playlists(proxy).await?;
+            let name = session.display_name(proxy).await?;
+            let mut playlists = session.playlists(proxy).await?;
+            let removed_source = if let Action::Delete(id) = &action {
+                let raw = id.strip_prefix("VL").unwrap_or(id);
+                session.delete(proxy, raw, None).await?;
+                playlists.retain(|p| p.id.strip_prefix("VL").unwrap_or(&p.id) != raw);
+                Some(format!("https://www.youtube.com/playlist?list={raw}"))
+            } else {
+                None
+            };
             let collection = if let Action::Import(playlist) = action {
                 Some(session.import(proxy, &playlist).await?)
             } else {
                 None
             };
-            let name = session.display_name(proxy).await?;
             if connecting {
                 credential(provider, config, Some(Some(serde_json::to_vec(&session)?))).await?;
             }
             Ok(Update {
+                removed_source,
                 name,
                 playlists,
                 collection,
@@ -382,6 +394,10 @@ pub async fn execute(
         return result;
     }
     // Authentication bodies and bearer credentials must never follow a redirect.
+    ensure!(
+        !matches!(action, Action::Delete(_)),
+        "JuiceVault does not document playlist deletion through its public API. Manage this playlist on JuiceVault."
+    );
     let secure =
         Http::new(crate::http::build_collection_client(proxy).map_err(anyhow::Error::msg)?);
     if matches!(action, Action::PublicProfile) {
@@ -393,6 +409,7 @@ pub async fn execute(
         };
         save(provider, config, &public).await?;
         return Ok(Update {
+            removed_source: None,
             name,
             playlists,
             collection: None,
@@ -441,6 +458,7 @@ pub async fn execute(
     };
     save(provider, config, &tokens).await?;
     Ok(Update {
+        removed_source: None,
         name,
         playlists,
         collection,

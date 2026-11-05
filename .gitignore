@@ -39,3 +39,6 @@ settings.json
 history.json
 
 /mods/packages/
+
+# Local Cloudflare deployment state
+.wrangler/

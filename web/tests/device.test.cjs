@@ -9,3 +9,5 @@ test('desktop browsers cannot initialize the mobile player, including narrow win
 test('phones enter mobile player and preserve Jam invitations',()=>{for(const ua of ['Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)','Mozilla/5.0 (Linux; Android 14) Mobile']){assert.deepEqual(route(ua,'/','?jam=vibefy-abc'),{phone:true,redirect:'/app?jam=vibefy-abc'});assert.deepEqual(route(ua,'/app'),{phone:true,redirect:undefined});}});
 test('phone users can explicitly read the desktop information page',()=>{assert.equal(route('iPhone','/','?site=1').redirect,undefined);});
 test('an Android tablet is not mistaken for a phone',()=>{assert.equal(route('Mozilla/5.0 (Linux; Android 14) Safari/537.36','/').phone,false);});
+
+test('desktop Jam links preserve only a valid code on the presentation page',()=>{assert.equal(route('Windows NT','/app','?jam=ABCDEFGHJKLM').redirect,'/?jam=ABCDEFGHJKLM');assert.equal(route('Windows NT','/app','?jam=https://evil').redirect,'/');});

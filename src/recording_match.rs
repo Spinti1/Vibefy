@@ -307,7 +307,17 @@ fn metadata_artists(recording: &Recording) -> Vec<&str> {
 fn base_score(reference: &Reference, recording: &Recording, full_metadata: bool) -> Option<i32> {
     let title = recording.title.as_deref()?;
     let key = title_key(&reference.title, &[]);
-    if key.is_empty() || !compatible_version(&reference.title, title) {
+    if key.is_empty()
+        || !compatible_version(&reference.title, title)
+        || !crate::audio_match::audio_edition_allowed(
+            &format!("{} {}", reference.title, reference.album),
+            &format!(
+                "{} {}",
+                recording.track.as_deref().unwrap_or(""),
+                recording.album.as_deref().unwrap_or("")
+            ),
+        )
+    {
         return None;
     }
     // Explicitly modified audio is distinct even if its duration happens to fit.
@@ -336,7 +346,6 @@ fn base_score(reference: &Reference, recording: &Recording, full_metadata: bool)
         "loop",
         "1 hour",
         "10 hours",
-        "clean",
     ] {
         if title_norm.contains(&format!(" {tag} ")) && !expected_norm.contains(&format!(" {tag} "))
         {
@@ -419,6 +428,19 @@ fn base_score(reference: &Reference, recording: &Recording, full_metadata: bool)
             6..=8 => 35,
             _ => 0,
         };
+    // Prefer an explicitly labelled original recording over an otherwise
+    // equivalent upload. Unlabelled songs remain eligible.
+    if !crate::audio_match::clean_edition(&reference.title)
+        && ["explicit", "uncensored", "necenzurat"].iter().any(|tag| {
+            contains_name(title, tag)
+                || recording
+                    .album
+                    .as_deref()
+                    .is_some_and(|a| contains_name(a, tag))
+        })
+    {
+        score += 180;
+    }
     if !identified {
         score -= 80;
     }
@@ -539,9 +561,9 @@ pub fn search_queries(reference: &Reference) -> Vec<String> {
     let primary = reference.artists.first().map(String::as_str).unwrap_or("");
     let all = reference.artists.join(" ");
     let mut queries = vec![
-        format!("{primary} {title}"),
         format!("{all} {title} official audio"),
         format!("{primary} {title} topic"),
+        format!("{primary} {title}"),
     ];
     if !reference.album.is_empty() && normalized(&reference.album) != normalized(&title) {
         queries.push(format!("{primary} {title} {}", reference.album));
@@ -549,4 +571,89 @@ pub fn search_queries(reference: &Reference) -> Vec<String> {
     queries.push(format!("{all} {title}"));
     queries.dedup();
     queries
+}
+
+#[cfg(test)]
+mod release_update_tests {
+    use super::*;
+    fn reference() -> Reference {
+        Reference {
+            title: "Song".into(),
+            artists: vec!["Artist".into()],
+            album: "Album".into(),
+            duration_secs: 200,
+        }
+    }
+    fn recording() -> Recording {
+        Recording {
+            id: "abcdefghijk".into(),
+            title: Some("Artist - Song (Official Audio)".into()),
+            channel: Some("Artist".into()),
+            channel_is_verified: Some(true),
+            duration: Some(200.),
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn censored_audio_editions_in_title_credits_and_album_are_rejected() {
+        let r = reference();
+        for label in ["[Clean]", "(Censored)", "(Radio Edit)", "Clean Version"] {
+            let mut c = recording();
+            c.title = Some(format!("Artist - Song {label}"));
+            assert!(verified_match(&r, &c).is_none(), "{label}");
+            let mut c = recording();
+            c.album = Some(format!("Album {label}"));
+            assert!(verified_match(&r, &c).is_none(), "album {label}");
+        }
+        assert!(!crate::audio_match::clean_edition(
+            "Clean Bandit - Symphony"
+        ));
+        assert!(!crate::audio_match::clean_edition("Song (Uncensored)"));
+        assert!(verified_match(&r, &recording()).is_some());
+    }
+    #[test]
+    fn explicit_recording_is_preferred_and_verified_audio_can_start_without_extra_queries() {
+        let r = reference();
+        let ordinary = recording();
+        let mut explicit = ordinary.clone();
+        explicit.title = Some("Artist - Song (Explicit) (Official Audio)".into());
+        assert!(
+            verified_match(&r, &explicit).unwrap().score
+                > verified_match(&r, &ordinary).unwrap().score
+        );
+        let matched = verified_match(&r, &ordinary).unwrap();
+        assert!(crate::player::fast_catalog_match(&r, &ordinary, &matched));
+        let mut video = ordinary;
+        video.title = Some("Artist - Song (Official Video)".into());
+        assert!(!crate::player::fast_catalog_match(&r, &video, &matched));
+    }
+    #[test]
+    fn catalogue_mirroring_does_not_choose_a_clean_album_or_reject_ordinary_song_words() {
+        let source = crate::player::LocalTrack {
+            title: "Song".into(),
+            album: "Album".into(),
+            artists: vec![crate::api::models::ArtistRef {
+                name: "Artist".into(),
+                ..Default::default()
+            }],
+            duration_ms: 200000,
+            ..Default::default()
+        };
+        let clean = crate::player::LocalTrack {
+            uri: "vibefy:youtube:abcdefghijk".into(),
+            album: "Album (Clean)".into(),
+            ..source.clone()
+        };
+        let explicit = crate::player::LocalTrack {
+            uri: "vibefy:youtube:bbbbbbbbbbb".into(),
+            album: "Album (Explicit)".into(),
+            ..source.clone()
+        };
+        assert_eq!(
+            crate::playlist_mirror::choose_recording(&source, &[clean, explicit.clone()])
+                .unwrap()
+                .uri,
+            explicit.uri
+        );
+    }
 }

@@ -2166,6 +2166,9 @@ impl App {
     }
 
     pub fn find_track_metadata(&self, uri: &str) -> Option<crate::player::LocalTrack> {
+        if let Some(track) = self.addons.jam_tracks.get(uri) {
+            return Some(track.clone());
+        }
         if let Some(track) = self
             .addons
             .collections
@@ -2867,12 +2870,18 @@ impl App {
                         continue;
                     }
                     self.music_accounts[index].busy = false;
+                    let deleting = std::mem::take(&mut self.music_accounts[index].deleting);
                     let auth_pending = std::mem::take(&mut self.music_accounts[index].auth_pending);
                     if auth_pending && result.is_ok() && !disconnected {
                         self.actions.push(Action::ShowWindow);
                     }
                     match result {
                         Ok(update) => {
+                            if let Some(source) = update.removed_source {
+                                self.addons.collections.retain(|c| c.source != source);
+                                self.save_addon_collections();
+                                self.toast("Playlist deleted from YouTube");
+                            }
                             let state = &mut self.music_accounts[index];
                             state.connected = !disconnected;
                             state.name = update.name;
@@ -2887,6 +2896,9 @@ impl App {
                         }
                         Err(error) => {
                             self.music_accounts[index].enable_sync_after_connect = false;
+                            if deleting {
+                                self.toast(format!("Playlist was not deleted: {error}"));
+                            }
                             self.music_accounts[index].message = Some(error);
                         }
                     }
@@ -2913,8 +2925,12 @@ impl App {
                         Ok(()) => {
                             self.settings.addons.installed.insert(id);
                             self.settings.addons.enabled.insert(id);
-                            if matches!(id, crate::addons::Id::Vivy | crate::addons::Id::Backmusic)
-                            {
+                            if matches!(
+                                id,
+                                crate::addons::Id::Vivy
+                                    | crate::addons::Id::Backmusic
+                                    | crate::addons::Id::SoundVisualizer
+                            ) {
                                 self.settings.addons.visualizer = Some(id);
                             }
                             self.addons.package_errors.remove(&id);
@@ -4113,7 +4129,11 @@ impl App {
                     // Spotify's queue refuses local files; the engine
                     // queues them itself.
                     if uri.starts_with(LOCAL_URI_PREFIX) {
-                        self.backend.player(PlayerCommand::AddToQueue(uri));
+                        let command = self
+                            .find_track_metadata(&uri)
+                            .map(PlayerCommand::AddResolvedToQueue)
+                            .unwrap_or(PlayerCommand::AddToQueue(uri));
+                        self.backend.player(command);
                         continue;
                     }
                     self.backend.api(ApiRequest::AddToQueue {
@@ -10639,6 +10659,24 @@ impl App {
 
     /// Adds a row to Next up immediately, before the context's upcoming rows.
     fn add_to_queue(&mut self, uri: String, label: String) {
+        if let Some(session) = &self.addons.jam {
+            if !session.host {
+                let track = self
+                    .find_track_metadata(&uri)
+                    .unwrap_or(crate::player::LocalTrack {
+                        uri,
+                        title: label,
+                        ..Default::default()
+                    });
+                let accepted = session.add(track);
+                self.toast(if accepted {
+                    "Song sent to the Jam host"
+                } else {
+                    "Choose a YouTube recording while connected to Jam"
+                });
+                return;
+            }
+        }
         if util::uri_kind(&uri) == Some("album") {
             self.queue_album(uri, label);
             return;
@@ -12436,8 +12474,33 @@ impl App {
                 }
                 self.mark_settings_dirty();
             }
+            Action::DeleteSourcePlaylist(source) => {
+                self.dialog = None;
+                if let Some(id) = source.strip_prefix("https://www.youtube.com/playlist?list=") {
+                    if crate::music_session::valid_playlist_id(id) {
+                        self.music_accounts_serial[0] =
+                            self.music_accounts_serial[0].wrapping_add(1);
+                        self.music_accounts[0].busy = true;
+                        self.music_accounts[0].deleting = true;
+                        self.backend.send(Command::MusicAccount {
+                            selected: None,
+                            provider: crate::music_accounts::Provider::YouTubeMusic,
+                            action: crate::music_accounts::Action::Delete(id.into()),
+                            username: String::new(),
+                            serial: self.music_accounts_serial[0],
+                        });
+                        self.toast("Deleting YouTube playlist…");
+                    }
+                }
+            }
             Action::DeletePlaylist(id) => {
                 self.dialog = None;
+                if self.mirror.lists.iter().any(|l| l.spotify_id == id)
+                    && self.music_accounts[0].busy
+                {
+                    self.toast("Wait for the current YouTube account operation, then try again");
+                    return;
+                }
                 let uri = format!("spotify:playlist:{id}");
                 self.saved.insert(uri.clone(), false);
                 self.edit_playlists(PlaylistEdit {
@@ -12445,8 +12508,21 @@ impl App {
                     added: None,
                     settled_by: None,
                 });
-                self.backend
-                    .api(ApiRequest::FollowPlaylist { id, follow: false });
+                if let Some(linked) = self.mirror.lists.iter().find(|l| l.spotify_id == id) {
+                    let youtube_id = linked.youtube_id.clone();
+                    self.backend.send(Command::Mirror {
+                        serial: self.mirror_serial,
+                        action: crate::playlist_mirror::Action::Delete(id.clone()),
+                    });
+                    self.mirror.lists.retain(|l| l.spotify_id != id);
+                    self.music_accounts[0]
+                        .playlists
+                        .retain(|p| p.id.strip_prefix("VL").unwrap_or(&p.id) != youtube_id);
+                    self.toast("Removal queued for Spotify and YouTube");
+                } else {
+                    self.backend
+                        .api(ApiRequest::FollowPlaylist { id, follow: false });
+                }
             }
             Action::Transfer(device_id) => {
                 // The listener chose where to play instead.

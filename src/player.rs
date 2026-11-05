@@ -392,6 +392,7 @@ pub enum PlayerCommand {
     Repeat(RepeatMode),
     ClearQueue,
     AddToQueue(String),
+    AddResolvedToQueue(LocalTrack),
     SkipTo(usize),
     SkipToUri(String),
     Transfer,
@@ -463,6 +464,37 @@ enum WorkerEvent {
     TrackEnded { generation: u64 },
 }
 
+/// Continue past unavailable recordings, but stop after three consecutive failures.
+/// A generation is handled once so polling cannot skip multiple queue entries.
+#[derive(Default)]
+struct UnavailableRecovery {
+    handled: Option<u64>,
+    consecutive: u8,
+}
+
+impl UnavailableRecovery {
+    fn should_advance(&mut self, generation: u64, playback: Playback, error: Option<&str>) -> bool {
+        if playback == Playback::Playing {
+            self.consecutive = 0;
+        }
+        if playback != Playback::Stopped || self.handled == Some(generation) {
+            return false;
+        }
+        let unavailable = error.is_some_and(|error| {
+            error.contains("This source is unavailable or restricted.")
+                || error.contains("This track is not available in your region.")
+                || error.contains("This track is DRM-protected and cannot be played in Vibefy.")
+                || error.contains("No matching YouTube recording found after comparing")
+        });
+        if !unavailable {
+            return false;
+        }
+        self.handled = Some(generation);
+        self.consecutive = self.consecutive.saturating_add(1);
+        self.consecutive < 3
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct QueueState {
     pub tracks: Vec<LocalTrack>,
@@ -515,6 +547,7 @@ pub struct CachedMatch {
 impl CachedMatch {
     pub fn matches_track(&self, track: &LocalTrack) -> bool {
         (3..=crate::audio_match::MATCHER_VERSION).contains(&self.matcher_version)
+            && crate::audio_match::audio_edition_allowed(&track.title, &self.title)
             && self.source_kind.is_some()
             && (!self.channel_id.is_empty() || self.source_kind == Some(SourceKind::MetadataMatch))
             && self.reference_key == recording_reference_key(track)
@@ -1049,7 +1082,12 @@ pub fn fast_catalog_match(
     recording: &Recording,
     matched: &crate::recording_match::Match,
 ) -> bool {
-    matched.source == SourceKind::DistributedAudio
+    (matched.source == SourceKind::DistributedAudio
+        || (matched.source == SourceKind::VerifiedArtist
+            && !crate::audio_match::normalized(recording.title.as_deref().unwrap_or(""))
+                .contains("video")
+            && crate::audio_match::normalized(recording.title.as_deref().unwrap_or(""))
+                .contains("official audio")))
         && recording
             .duration
             .is_some_and(|duration| (duration - f64::from(reference.duration_secs)).abs() <= 3.0)
@@ -1819,11 +1857,24 @@ impl Engine {
         let listener_active = Arc::clone(&active);
         tokio::spawn(async move {
             let mut shutdown_check = tokio::time::interval(Duration::from_millis(250));
+            let mut recovery = UnavailableRecovery::default();
             loop {
                 let event = tokio::select! {
                     event = event_rx.recv() => event,
                     _ = shutdown_check.tick() => {
                         if !listener_active.load(Ordering::Relaxed) { break; }
+                        let generation = gen_ev.load(Ordering::SeqCst);
+                        let advance = {
+                            let current = state_ev.lock().unwrap();
+                            recovery.should_advance(generation, current.playback, current.error.as_deref())
+                        };
+                        if advance && gen_ev.load(Ordering::SeqCst) == generation {
+                            log::info!("Skipping an unavailable recording in the playback queue");
+                            Engine::advance_next(
+                                &state_ev, &notify_ev, &cmd_tx_ev, &yt_dlp_ev, &gen_ev, &cache_ev,
+                                &proxy_ev, &queue_ev, false,
+                            );
+                        }
                         continue;
                     }
                 };
@@ -1877,6 +1928,7 @@ impl Engine {
 
     pub fn shutdown(&self) {
         self.active.store(false, Ordering::Relaxed);
+        self.generation.fetch_add(1, Ordering::SeqCst);
         let _ = self.cmd_tx.send(AudioWorkerCmd::Stop);
         let mut state = self.state.lock().unwrap();
         state.connected = false;
@@ -2314,6 +2366,22 @@ impl Engine {
         }
     }
 
+    fn enqueue_track(&self, new_track: LocalTrack) {
+        let mut q = self.queue.lock().unwrap();
+        let insert_idx = (q.current_index + 1 + q.manual_queue_count).min(q.tracks.len());
+        q.tracks.insert(insert_idx, new_track);
+        q.manual_queue_count += 1;
+        let mut state = self.state.lock().unwrap();
+        state.queue_tracks = q.tracks.clone();
+        state.queue_index = q.current_index;
+        state.queue = q
+            .tracks
+            .iter()
+            .skip(q.current_index + 1)
+            .map(|t| t.uri.clone())
+            .collect();
+        (self.notify)(EngineEvent::State(state.clone()));
+    }
     pub fn command(&self, command: PlayerCommand) -> Result<()> {
         log::info!("YoutubePlayer command received: {command:?}");
         match command {
@@ -2554,35 +2622,13 @@ impl Engine {
                     .collect();
                 (self.notify)(EngineEvent::State(state.clone()));
             }
-            PlayerCommand::AddToQueue(uri) => {
-                let mut q = self.queue.lock().unwrap();
-                let insert_idx = (q.current_index + 1 + q.manual_queue_count).min(q.tracks.len());
-                let new_track = LocalTrack {
-                    uri: uri.clone(),
-                    name: "Queued track".into(),
-                    title: "Queued track".into(),
-                    album: String::new(),
-                    album_name: String::new(),
-                    artists: Vec::new(),
-                    duration_ms: 0,
-                    cover_url: None,
-                    art_url: None,
-                    art_small_url: None,
-                    is_episode: false,
-                };
-                q.tracks.insert(insert_idx, new_track);
-                q.manual_queue_count += 1;
-                let mut state = self.state.lock().unwrap();
-                state.queue_tracks = q.tracks.clone();
-                state.queue_index = q.current_index;
-                state.queue = q
-                    .tracks
-                    .iter()
-                    .skip(q.current_index + 1)
-                    .map(|t| t.uri.clone())
-                    .collect();
-                (self.notify)(EngineEvent::State(state.clone()));
-            }
+            PlayerCommand::AddToQueue(uri) => self.enqueue_track(LocalTrack {
+                uri,
+                name: "Queued track".into(),
+                title: "Queued track".into(),
+                ..Default::default()
+            }),
+            PlayerCommand::AddResolvedToQueue(track) => self.enqueue_track(track),
             PlayerCommand::SkipTo(target_idx) => {
                 let mut q = self.queue.lock().unwrap();
                 if target_idx < q.tracks.len() {
@@ -2746,5 +2792,111 @@ mod lifecycle_tests {
             .recv_timeout(Duration::from_secs(5))
             .expect("idle engine must not keep a blocking receiver alive during runtime shutdown");
         thread.join().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod unavailable_recovery_tests {
+    use super::*;
+    const MISSING: &str = "Playback failed: No matching YouTube recording found after comparing the track title, artist and version.";
+    const RESTRICTED: &str = "Playback failed: This source is unavailable or restricted. Try another public, unprotected track.";
+
+    #[tokio::test]
+    async fn recovery_advances_manual_queue_even_with_repeat_track() {
+        let first = LocalTrack {
+            uri: "spotify:track:first".into(),
+            ..Default::default()
+        };
+        let next = LocalTrack {
+            uri: "spotify:track:next".into(),
+            ..Default::default()
+        };
+        let state = Arc::new(Mutex::new(LocalState {
+            track: Some(first.clone()),
+            playback: Playback::Stopped,
+            error: Some(MISSING.into()),
+            ..Default::default()
+        }));
+        let queue = Arc::new(Mutex::new(QueueState {
+            tracks: vec![first, next.clone()],
+            manual_queue_count: 1,
+            repeat: RepeatMode::Track,
+            ..Default::default()
+        }));
+        let (tx, _rx) = mpsc::channel();
+        let notify: Notify = Arc::new(|_| {});
+        let generation = Arc::new(AtomicU64::new(1));
+        let root = std::env::temp_dir().join(format!("vibefy-recovery-{}", rand::random::<u64>()));
+        let cache = MatchCache::new(&root);
+        let proxy = Arc::new(Mutex::new(crate::settings::ProxyConfig::Off));
+        let mut recovery = UnavailableRecovery::default();
+        assert!(recovery.should_advance(1, Playback::Stopped, Some(MISSING)));
+        Engine::advance_next(
+            &state,
+            &notify,
+            &tx,
+            &None,
+            &generation,
+            &cache,
+            &proxy,
+            &queue,
+            false,
+        );
+        assert_eq!(queue.lock().unwrap().current_index, 1);
+        assert_eq!(queue.lock().unwrap().manual_queue_count, 0);
+        assert_eq!(state.lock().unwrap().track.as_ref(), Some(&next));
+        assert_eq!(state.lock().unwrap().playback, Playback::Loading);
+        assert!(state.lock().unwrap().error.is_none());
+        assert_eq!(generation.load(Ordering::SeqCst), 2);
+        drop(cache);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unavailable_tracks_advance_once_and_stop_after_three_failures() {
+        let mut recovery = UnavailableRecovery::default();
+        assert!(recovery.should_advance(1, Playback::Stopped, Some(MISSING)));
+        assert!(!recovery.should_advance(1, Playback::Stopped, Some(MISSING)));
+        assert!(recovery.should_advance(2, Playback::Stopped, Some(RESTRICTED)));
+        assert!(!recovery.should_advance(3, Playback::Stopped, Some(MISSING)));
+        assert!(!recovery.should_advance(4, Playback::Stopped, Some(MISSING)));
+    }
+
+    #[test]
+    fn successful_playback_resets_the_failure_limit() {
+        let mut recovery = UnavailableRecovery::default();
+        for generation in 1..=3 {
+            recovery.should_advance(generation, Playback::Stopped, Some(MISSING));
+        }
+        assert!(!recovery.should_advance(4, Playback::Playing, None));
+        assert!(recovery.should_advance(5, Playback::Stopped, Some(MISSING)));
+    }
+
+    #[test]
+    fn source_network_and_quota_errors_are_not_recording_failures() {
+        let mut recovery = UnavailableRecovery::default();
+        for message in [
+            "HTTP Error 429: Too Many Requests",
+            "Unable to download: connection timed out",
+            "Temporary failure in name resolution",
+        ] {
+            let error = crate::addons::source_error(message.as_bytes());
+            assert!(!recovery.should_advance(1, Playback::Stopped, Some(error)));
+        }
+    }
+
+    #[test]
+    fn pause_loading_network_errors_and_normal_end_never_skip() {
+        let mut recovery = UnavailableRecovery::default();
+        for playback in [Playback::Paused, Playback::Loading, Playback::Playing] {
+            assert!(!recovery.should_advance(1, playback, Some(MISSING)));
+        }
+        for error in [
+            None,
+            Some("Playback failed: network timeout"),
+            Some("yt-dlp is not available"),
+        ] {
+            assert!(!recovery.should_advance(2, Playback::Stopped, error));
+        }
     }
 }

@@ -1357,7 +1357,12 @@ pub fn context_menu_items(
                 public: playlist.public,
             }));
         }
-        if menu_item(ui, &palette, Some(Icon::Trash), "Delete from Spotify") {
+        let delete_label = if app.mirror.lists.iter().any(|l| l.spotify_id == playlist.id) {
+            "Delete from Spotify and YouTube"
+        } else {
+            "Delete from Spotify"
+        };
+        if menu_item(ui, &palette, Some(Icon::Trash), delete_label) {
             app.actions
                 .push(Action::ShowDialog(Dialog::ConfirmDeletePlaylist {
                     id: playlist.id.clone(),

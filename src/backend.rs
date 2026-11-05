@@ -2396,6 +2396,7 @@ impl Worker {
                             action,
                             crate::music_accounts::Action::Refresh
                                 | crate::music_accounts::Action::Import(_)
+                                | crate::music_accounts::Action::Delete(_)
                         )
                     {
                         if let Some(handle) = self.mirror.take() {

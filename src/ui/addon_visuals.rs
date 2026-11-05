@@ -32,8 +32,28 @@ fn audio(app: &mut App, ctx: &egui::Context) {
     app.addons
         .beat
         .step(if sounding { bass } else { 0.0 }, time, elapsed);
-    // Only Vivy draws history; Backmusic needs current bands alone.
-    let keep_history = sounding && app.settings.addons.visualizer.unwrap_or(Id::Vivy) == Id::Vivy;
+    app.addons.waveform.clear();
+    for i in 0..256 {
+        app.addons.waveform.push(
+            samples
+                .get(i * samples.len().saturating_sub(1) / 255)
+                .copied()
+                .unwrap_or(0.),
+        );
+    }
+    // Capture history at 30 Hz rather than once per UI repaint.
+    let keep_history = sounding
+        && matches!(
+            app.settings.addons.visualizer.unwrap_or(Id::Vivy),
+            Id::Vivy | Id::SoundVisualizer
+        )
+        && time - app.addons.history_time >= 1. / 30.;
+    if keep_history {
+        app.addons.history_time = time;
+    }
+    if !sounding {
+        app.addons.ridges.clear();
+    }
     app.addons.update_visual_levels(&levels, keep_history);
 }
 
@@ -125,13 +145,35 @@ fn fullscreen_controls(app: &mut App, ui: &mut egui::Ui, mode: Id) {
                         let mut config = original;
                         ui.strong(mode.name());
                         ui.horizontal(|ui| {
-                            for (style, label) in if mode == Id::Vivy {
-                                [(0, "Ridgeline"), (1, "Drift")]
+                            let styles: &[&str] = if mode == Id::SoundVisualizer {
+                                &[
+                                    "Bars",
+                                    "Center bars",
+                                    "Circular",
+                                    "Wave",
+                                    "Radial wave",
+                                    "Dots",
+                                    "Blocks",
+                                    "Starburst",
+                                    "Helix",
+                                    "Strings",
+                                    "Lissajous",
+                                    "Arcs",
+                                ]
+                            } else if mode == Id::Vivy {
+                                &["Ridgeline", "Drift"]
                             } else {
-                                [(0, "Rings"), (1, "Spectrum")]
-                            } {
-                                ui.selectable_value(&mut config.style, style, label);
-                            }
+                                &["Rings", "Spectrum"]
+                            };
+                            egui::ComboBox::from_id_salt("visualizer-style")
+                                .selected_text(
+                                    styles[usize::from(config.style).min(styles.len() - 1)],
+                                )
+                                .show_ui(ui, |ui| {
+                                    for (style, label) in styles.iter().enumerate() {
+                                        ui.selectable_value(&mut config.style, style as u8, *label);
+                                    }
+                                });
                         });
                         ui.add(
                             egui::Slider::new(&mut config.intensity, 0.2..=3.0).text("Intensity"),

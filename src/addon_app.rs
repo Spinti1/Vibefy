@@ -66,7 +66,7 @@ impl App {
                     return;
                 }
                 self.settings.addons.set(id, enabled);
-                if enabled && matches!(id, Id::Vivy | Id::Backmusic) {
+                if enabled && matches!(id, Id::Vivy | Id::Backmusic | Id::SoundVisualizer) {
                     self.settings.addons.visualizer = Some(id);
                 }
                 if !enabled {
@@ -147,7 +147,7 @@ impl App {
                 if self.settings.addons.installed.contains(&id)
                     && (!self.settings.addons.require_packages
                         || self.addons.modules.contains_key(&id))
-                    && matches!(id, Id::Vivy | Id::Backmusic)
+                    && matches!(id, Id::Vivy | Id::Backmusic | Id::SoundVisualizer)
                 {
                     self.settings.addons.set(id, true);
                     self.settings.addons.visualizer = Some(id);
@@ -182,7 +182,13 @@ impl App {
                 }
             }
             AddonCommand::ConfigureVisual(mut config) => {
-                config.style = config.style.min(1);
+                config.style = config.style.min(
+                    if self.settings.addons.visualizer == Some(Id::SoundVisualizer) {
+                        11
+                    } else {
+                        1
+                    },
+                );
                 config.intensity = if config.intensity.is_finite() {
                     config.intensity.clamp(0.2, 3.0)
                 } else {
@@ -233,6 +239,7 @@ impl App {
             AddonCommand::Leave => {
                 self.addons.jam_message = None;
                 self.addons.jam = None;
+                self.addons.jam_tracks.clear();
                 self.addons.pending_sync = None;
             }
         }
@@ -442,6 +449,23 @@ impl App {
                 })
             });
             session.publish(snapshot);
+            session.publish_queue(
+                self.local
+                    .queue_tracks
+                    .get(self.local.queue_index.saturating_add(1)..)
+                    .unwrap_or(&[]),
+            );
+            for track in session.take_additions() {
+                if self.addons.jam_tracks.len() < 100 {
+                    self.addons
+                        .jam_tracks
+                        .insert(track.uri.clone(), track.clone());
+                }
+                self.actions.push(Action::AddToQueue {
+                    uri: track.uri,
+                    label: track.title,
+                });
+            }
             return;
         }
         if let Some(received) = session.take() {

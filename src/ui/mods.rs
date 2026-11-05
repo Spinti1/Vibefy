@@ -404,7 +404,7 @@ fn controls(app: &mut App, ui: &mut egui::Ui, id: Id) {
             });
             ui.small("Imported playlists are saved on Home automatically. Unavailable videos may be omitted.");
         }
-        Id::Vivy | Id::Backmusic => {
+        Id::Vivy | Id::Backmusic | Id::SoundVisualizer => {
             ui.small("Open Visualizers beside Lyrics. Display settings are available inside the visualizer; fullscreen is optional.");
         }
         Id::Oneko => {

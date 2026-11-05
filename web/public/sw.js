@@ -1,4 +1,4 @@
-const CACHE='vibefy-shell-0416a';
+const CACHE='vibefy-shell-0444';
 const SHELL=['/app','/device.js','/mobile-boot.js','/spotify.js','/mobile-mods.js','/mobile.css','/player.js','/jam.js','/embedded-player.js','/player.css','/style.css','/assets/icon.png','/manifest.webmanifest'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('vibefy-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));

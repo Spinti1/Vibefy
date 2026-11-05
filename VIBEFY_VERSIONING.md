@@ -1,8 +1,8 @@
 # Vibefy releases
 
-Current source version: **0.4.42**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
+Current source version: **0.4.44**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
 
-For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.43), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
+For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.45), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
 
 0.4.4: About and Mods credits, clearer buttons, cache management and 2 GB advisory, performance improvements.
 
@@ -83,3 +83,7 @@ For each future user-requested functional update, increment the Vibefy patch ver
 0.4.41: Optional verified mod packages loaded in-process after restart; aligned mod catalogue and separate settings; removed JuiceVault browser sign-in button; collection reload no longer truncates at 30; installer version validation. Windows signing remains unavailable.
 
 0.4.42: Fix audio-worker runtime shutdown, clear stale network-wait state on reconnect, preserve optimistic queue selection, restore encoded local-track labels safely, distinguish same-name Cast devices, and redact untrusted OAuth redirect paths. Repair obsolete unit-test fixtures for the current native queue, search, account setup and interface.
+
+0.4.43: Continue the queue past unavailable recordings with a three-failure limit; distinguish source connectivity and rate-limit errors; invalidate pending playback work during shutdown.
+
+0.4.44: Optional SoundVisualizer package with 12 adapted 2D effects, bounded visual history and clipping; Cloudflare Jam shared by desktop and mobile web with link/code invitations; audio-edition checks for censored recordings, faster confirmed official-audio selection and hydrated queued tracks; durable linked deletion and owned YouTube playlist deletion.

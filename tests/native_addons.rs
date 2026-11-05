@@ -232,7 +232,8 @@ fn live_source_audio_is_playable_by_the_native_decoder_and_cached() {
 #[test]
 fn jam_invites_and_metadata_reject_other_protocols_and_sources() {
     use spotifast::jam::{Snapshot, parse_invite};
-    assert!(parse_invite("vibefy-jam://127.0.0.1:12345/0123456789abcdef0123456789abcdef").is_ok());
+    assert!(parse_invite("ABCD-EFGH-JKLM").is_ok());
+    assert!(parse_invite("https://usevibefy.online/app?jam=ABCDEFGHJKLM").is_ok());
     for text in [
         "https://foo",
         "vibefy-jam://host:123/short",
@@ -481,87 +482,5 @@ mod native_ui {
         );
         app.backend.shutdown();
         std::fs::remove_dir_all(root).unwrap();
-    }
-    #[test]
-    fn jam_loopback_sends_timing_pause_and_rejects_wrong_invitation() {
-        use spotifast::jam::{Session, Snapshot, parse_invite};
-        use std::time::{Duration, Instant};
-        let host = Session::loopback_host();
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let invite = loop {
-            let invite = host.shared.lock().unwrap().invite.clone();
-            if !invite.is_empty() {
-                break invite;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "Host startup: {}",
-                host.shared.lock().unwrap().status
-            );
-            std::thread::sleep(Duration::from_millis(10));
-        };
-        let (address, token) = parse_invite(&invite).unwrap();
-        let invite = format!("vibefy-jam://127.0.0.1:{}/{token}", address.port());
-        let snapshot = Snapshot {
-            track: spotifast::player::LocalTrack {
-                uri: "vibefy:youtube:8Zx6RXGNISk".into(),
-                title: "Machine".into(),
-                ..Default::default()
-            },
-            position_ms: 12_000,
-            playing: true,
-        };
-        host.publish(Some(snapshot.clone()));
-        let guest = Session::join(&invite).unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let received = loop {
-            if let Some((s, _)) = guest.take() {
-                break s;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "{}",
-                guest.shared.lock().unwrap().status
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        };
-        assert_eq!(received.track.uri, snapshot.track.uri);
-        assert!((12_000..16_000).contains(&received.position_ms));
-        let mut paused = snapshot;
-        paused.playing = false;
-        paused.position_ms = 24_000;
-        host.publish(Some(paused));
-        let deadline = Instant::now() + Duration::from_secs(4);
-        loop {
-            if let Some((s, _)) = guest.take() {
-                if !s.playing {
-                    assert_eq!(s.position_ms, 24_000);
-                    break;
-                }
-            }
-            assert!(Instant::now() < deadline);
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        let bad = Session::join(&format!(
-            "vibefy-jam://127.0.0.1:{}/00000000000000000000000000000000",
-            address.port()
-        ))
-        .unwrap();
-        std::thread::sleep(Duration::from_millis(350));
-        assert!(bad.take().is_none());
-        assert_ne!(bad.shared.lock().unwrap().status, "Connected to host");
-        assert_eq!(host.shared.lock().unwrap().listeners, 1);
-        host.publish(None);
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while !guest.shared.lock().unwrap().host_waiting {
-            assert!(Instant::now() < deadline);
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        drop(host);
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while guest.shared.lock().unwrap().connected {
-            assert!(Instant::now() < deadline);
-            std::thread::sleep(Duration::from_millis(20));
-        }
     }
 }

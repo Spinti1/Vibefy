@@ -140,6 +140,9 @@ fn phrase(text: &str, needle: &str) -> bool {
 }
 
 pub fn compatible_version(expected: &str, candidate: &str) -> bool {
+    if !audio_edition_allowed(expected, candidate) {
+        return false;
+    }
     let expected = normalized(expected);
     let candidate = normalized(candidate);
     for version in [
@@ -169,6 +172,32 @@ pub fn compatible_version(expected: &str, candidate: &str) -> bool {
         }
     }
     true
+}
+
+/// Labels describe an audio edition, not an artist or a song named "Clean".
+pub fn clean_edition(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let norm = normalized(text);
+    [
+        "clean version",
+        "clean edit",
+        "clean audio",
+        "censored",
+        "censurat",
+        "radio edit",
+        "radio version",
+        "edited version",
+        "family friendly",
+    ]
+    .iter()
+    .any(|tag| phrase(&norm, tag))
+        || ["(clean)", "[clean]", "- clean", "(edited)", "[edited]"]
+            .iter()
+            .any(|tag| lower.contains(tag))
+}
+
+pub fn audio_edition_allowed(expected: &str, candidate: &str) -> bool {
+    clean_edition(expected) || !clean_edition(candidate)
 }
 
 pub fn duration_matches(expected: u32, candidate: u32) -> bool {

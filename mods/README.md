@@ -7,3 +7,7 @@ The host supplies numeric playback state and renders bounded draw commands throu
 Build with: powershell -File mods/build.ps1, then node mods/package.cjs. The Rust wasm32-unknown-unknown target is required. Packages are published as .vmod assets under the mods-v1 GitHub release. Do not overwrite published packages: create a new catalogue/version for updates. The installer excludes packages.
 
 Credits and license notices are preserved inside every package and in the project CREDITS.md. See assets/mods/README.md for artwork provenance and licensing limitations.
+
+## SoundVisualizer
+
+The optional SoundVisualizer package adapts 12 2D effects: Bars, Center bars, Circular, Wave, Radial wave, Dots, Blocks, Starburst, Helix, Strings, Lissajous and Arcs. Geometry and audio mappings originate in CaYatur/SoundVisualizer (MIT), pinned to revision c3e7fc6bc3fa826e323486256268fa764a317963. It uses Vibefy's existing post-EQ, pre-volume audio tap; waveform modes receive PCM, and spectrum modes receive FFT bands. The history buffer is limited to 24 frames at 30 Hz. Guest commands are clipped to the visualization area. GPU/3D modes, Canvas bloom and MilkDrop are not part of this port.

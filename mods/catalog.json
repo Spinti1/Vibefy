@@ -52,5 +52,11 @@
     "slug": "trackpeek",
     "bytes": 7108,
     "sha256": "95e90b55470f9d22bad2988ca44440a9cba1bc70227408ed1d8ab5dd72a50083"
+  },
+  {
+    "id": "SoundVisualizer",
+    "slug": "soundvisualizer",
+    "bytes": 22039,
+    "sha256": "fc41f7574025469237a56863fee4036136b227c9cbd8afdcdb0226bc9779ed2f"
   }
 ]

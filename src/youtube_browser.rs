@@ -89,7 +89,11 @@ pub fn navigation_diagnostic(url: &str, event: &str, elapsed_seconds: u64) -> Va
 pub fn valid_endpoint(endpoint: &str) -> bool {
     matches!(
         endpoint,
-        "browse" | "account/account_menu" | "playlist/create" | "browse/edit_playlist"
+        "browse"
+            | "account/account_menu"
+            | "playlist/create"
+            | "playlist/delete"
+            | "browse/edit_playlist"
     )
 }
 fn nonce() -> String {
