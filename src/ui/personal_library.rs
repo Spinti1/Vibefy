@@ -416,7 +416,26 @@ fn backup_option(app: &App, ui: &mut egui::Ui, backup: &mut bool) {
             .corner_radius(10)
             .inner_margin(12.0)
             .show(ui, |ui| {
-                ui.checkbox(backup, "Also save to my YouTube account");
+                ui.scope(|ui| {
+                    let selected = *backup;
+                    let style = ui.style_mut();
+                    style.spacing.icon_width = 20.0;
+                    style.spacing.icon_width_inner = 12.0;
+                    style.visuals.override_text_color = Some(p.text);
+                    for (visuals, border) in [
+                        (&mut style.visuals.widgets.inactive, p.secondary),
+                        (&mut style.visuals.widgets.hovered, p.accent),
+                        (&mut style.visuals.widgets.active, p.accent),
+                    ] {
+                        visuals.corner_radius = egui::CornerRadius::same(4);
+                        visuals.bg_fill = if selected { p.accent } else { p.window };
+                        visuals.bg_stroke = egui::Stroke::new(1.5, border);
+                        visuals.fg_stroke =
+                            egui::Stroke::new(2.0, if selected { p.on_accent } else { p.text });
+                    }
+                    let response = ui.checkbox(backup, "Also save to my YouTube account");
+                    theme::focus_ring(ui, &response);
+                });
                 ui.add(
                     egui::Label::new(
                         egui::RichText::new(if *backup {
