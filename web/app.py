@@ -161,7 +161,7 @@ async def juice_request(path, token="", body=None, grant=""):
         headers["X-CA"] = grant
     async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
         async with client.stream("POST" if body is not None else "GET", "https://api.juicevault.xyz" + path, json=body, headers=headers) as response:
-            if response.status_code == 403:
+            if response.status_code == 403 or (response.status_code == 401 and not token and body is None):
                 raise HTTPException(503, "JuiceVault is blocking requests from this web host. Open JuiceVault directly or use the desktop add-on.")
             if response.status_code == 401:
                 raise HTTPException(401, "JuiceVault could not authorize this request. Check your login or try again later.")
