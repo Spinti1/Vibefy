@@ -105,3 +105,4 @@ For each future user-requested functional update, increment the Vibefy patch ver
 0.4.52: Redesigned playlist dialogs; versioned metadata-only guest backups with non-destructive restore and legacy-file compatibility; explicit search submission/history; public artist browsing without Spotify authentication and artist headers; native local/YouTube library with working source filters, sort and grid/list, removal of the podcast-only saved queue.
 
 0.4.53: Clear square YouTube backup checkbox with a larger target, contrasting outline and accent-colored checked state.
+Web companion for 0.4.53: explicit /web and /phone routes; presentation homepage, local playlist editing and backups, public Spotify/YouTube imports, optional Google account integration, browser-compatible mods and artist pages. Browser playback uses official source players and keeps its documented limits.

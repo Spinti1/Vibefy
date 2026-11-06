@@ -1,1 +1,1 @@
-{"name":"Vibefy","short_name":"Vibefy","description":"Your mobile music player","start_url":"/app","scope":"/","display":"standalone","background_color":"#101412","theme_color":"#101412","icons":[{"src":"/assets/icon.png","sizes":"512x512","type":"image/png","purpose":"any"}]}
+{"name":"Vibefy","short_name":"Vibefy","description":"Vibefy music, playlists and Jam in your browser","start_url":"/web","scope":"/","display":"standalone","background_color":"#101412","theme_color":"#101412","icons":[{"src":"/assets/icon.png","sizes":"512x512","type":"image/png","purpose":"any"}]}

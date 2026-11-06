@@ -19,7 +19,7 @@ window.vibefyEmbedded = (() => {
           player=new YT.Player('youtube-player',{host:'https://www.youtube-nocookie.com',width:'100%',height:'100%',playerVars:{playsinline:1,rel:0,origin:location.origin},events:{
             onReady:()=>{clearTimeout(timeout);resolve();},
             onStateChange:e=>{api.onUpdate();if(e.data===0)api.onEnded();},
-            onError:()=>api.onError('This recording cannot be embedded. Try a different recording.')
+            onError:e=>{console.warn('YouTube player error',e.data);api.onError(e.data===153?'YouTube could not verify this browser player. Open the site directly in a standard browser.':'This recording cannot be embedded here. Try another recording or open it on YouTube.');}
           }});
         };
         const script=document.createElement('script');script.src='https://www.youtube.com/iframe_api';script.onerror=()=>{clearTimeout(timeout);reject(new Error('The official player is unavailable.'));};document.head.append(script);

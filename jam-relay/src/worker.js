@@ -1,29 +1,30 @@
 import {DurableObject} from 'cloudflare:workers';
 import {CODE,TOKEN,track,snapshot,randomCode,secret} from './protocol.mjs';
-const ORIGINS=new Set(['https://usevibefy.online','https://www.usevibefy.online']);
-const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store','Access-Control-Allow-Origin':'https://usevibefy.online','Vary':'Origin'}});
+const ORIGINS=new Set(['https://usevibefy.online','https://www.usevibefy.online','https://vibefy-neon.vercel.app']);
+const json=(value,status=200,origin='https://usevibefy.online')=>Response.json(value,{status,headers:{'Cache-Control':'no-store','Access-Control-Allow-Origin':origin,'Vary':'Origin'}});
 export default {
   async fetch(request,env) {
     const origin=request.headers.get('Origin');
     if(origin&&!ORIGINS.has(origin))return json({error:'Origin not allowed'},403);
+    const respond=(value,status=200)=>json(value,status,origin||'https://usevibefy.online');
     const url=new URL(request.url);
-    if(request.method==='OPTIONS')return new Response(null,{headers:{'Access-Control-Allow-Origin':'https://usevibefy.online','Access-Control-Allow-Methods':'GET, POST','Access-Control-Allow-Headers':'Content-Type','Access-Control-Max-Age':'600'}});
-    if(url.pathname==='/health')return json({service:'Vibefy Jam',protocol:2});
+    if(request.method==='OPTIONS')return new Response(null,{headers:{'Access-Control-Allow-Origin':origin||'https://usevibefy.online','Vary':'Origin','Access-Control-Allow-Methods':'GET, POST','Access-Control-Allow-Headers':'Content-Type','Access-Control-Max-Age':'600'}});
+    if(url.pathname==='/health')return respond({service:'Vibefy Jam',protocol:2});
     const ip=request.headers.get('CF-Connecting-IP')||'unknown';
-    if(!(await env.LIMITER.limit({key:ip})).success)return json({error:'Too many connection attempts. Try again later.'},429);
+    if(!(await env.LIMITER.limit({key:ip})).success)return respond({error:'Too many connection attempts. Try again later.'},429);
     if(url.pathname==='/rooms'&&request.method==='POST') {
       for(let attempt=0;attempt<3;attempt++) {
         const code=randomCode();const room=env.ROOMS.get(env.ROOMS.idFromName(code));
         const result=await room.fetch(new Request('https://room/create',{method:'POST'}));
         if(result.status===409)continue;
-        if(!result.ok)return result;
+        if(!result.ok)return respond({error:'The Jam service is temporarily unavailable.'},result.status);
         const data=await result.json();
-        return json({code,host_token:data.host_token,expires_at:data.expires_at});
+        return respond({code,host_token:data.host_token,expires_at:data.expires_at});
       }
-      return json({error:'Please retry'},503);
+      return respond({error:'Please retry'},503);
     }
     const match=url.pathname.match(/^\/rooms\/([A-HJ-NP-Z2-9]{12})$/);
-    if(!match||request.headers.get('Upgrade')?.toLowerCase()!=='websocket')return json({error:'Not found'},404);
+    if(!match||request.headers.get('Upgrade')?.toLowerCase()!=='websocket')return respond({error:'Not found'},404);
     return env.ROOMS.get(env.ROOMS.idFromName(match[1])).fetch(request);
   }
 };

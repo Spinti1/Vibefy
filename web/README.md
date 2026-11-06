@@ -1,37 +1,31 @@
 # Vibefy web
 
-Desktop presentation and phone-only player hosted on Vercel (team use-vibefy, project root web). Jam transport update: 0.4.44.
+The root is a presentation and Windows download page. `/web` opens the responsive browser player on computers and phones; `/phone` and the existing `/app` route are aliases. Hosting stays on the existing Vercel project and usevibefy.online domain.
 
-## Run and check
+## Features
 
-Create a virtual environment, install requirements.lock, then run uvicorn app:app --host 127.0.0.1 --port 4173. Run python -m unittest discover -s tests -v and node --test tests/*.test.cjs.
+Public YouTube Music song search (submit with Enter or Search), artist songs/albums, official visible YouTube playback, queue, previous/next, shuffle/repeat, LRCLIB lyrics with YouTube Music fallback, and timing offset. Lyrics and queue share Now Playing so the official player stays visible.
 
-## Device behavior
+Create, rename, hide and remove browser-local playlists. Add songs through their options menu. Import public/unlisted YouTube playlists or public Spotify playlists; Spotify titles/artists/durations are matched to YouTube recordings. Private Spotify playlists and Liked Songs cannot be imported. Public YouTube imports are bounded to 500 entries; account imports to 10,000. Export/restore metadata-only JSON backups; existing collections are preserved. Browser storage is not a cross-device Vibefy account.
 
-The root shows the desktop download site. Phones automatically enter /app; desktop/laptop browsers visiting /app return to the presentation. Detection uses the mobile user-agent, not viewport width, so resizing a desktop window does not unlock the player. Device detection is a presentation choice, not a security boundary; a spoofed user-agent can change it. Phone users can view desktop information with /?site=1. Tablets receive the presentation. /download and /privacy remain available.
+Optional browser-local mods: WaveLink (public SoundCloud search and official widget), JuiceVault (search and optional account playlist imports), original Nyan Cat frames and Cat Jam animation. Disabled animation mods do not run loops. Cat tempo is manual because iframe audio is unavailable to the page. Visualizers, Track Peek and Oneko are excluded. Upstream creators and asset notices remain credited.
 
-## Mobile capabilities
+Jam uses the existing Cloudflare relay shared with the desktop app: link/code, 24 listeners, six-hour rooms, metadata only. YouTube recordings are supported. Autoplay may require a click. Audio and account credentials never pass through the relay.
 
-Audio-only search with cancellation and short caches; official visible YouTube playback; queue, previous/next, shuffle/repeat; local likes and public playlist imports; local backup/restore; LRCLIB lyrics with offset; installable app shell. Optional Nyan Cat, Oneko, Cat Jam and Track Peek use original credited assets and locally stored preferences. Cat Jam has size (90% default) and manual BPM controls. Disabled mods do not run animation loops; hidden pages stop rendering. Import is built in.
+## Optional Google connection
 
-Vivy/Backmusic reactive visuals and automatic BPM detection need an audio signal unavailable from the official iframe. WaveLink needs a separate authorized provider integration; it is not included in the mobile build. Native classic mini window and local Whisper Auto Sync remain desktop-only. Direct Web Audio EQ is available only for local direct-audio development, not the public iframe. The iframe pauses when covered or the page is hidden; background audio is not guaranteed.
+Set the public `VIBEFY_GOOGLE_WEB_CLIENT_ID` Vercel environment variable to a **Web application** Google OAuth client. Register `https://usevibefy.online` as a JavaScript origin. The native Desktop client cannot replace this web registration. Google Identity Services provides the Continue with Google popup for basic identity first. YouTube read-only access is a separate explicit step for choosing owned playlists; saving an unlisted copy or editing it requests `youtube.force-ssl` incrementally. Google verification, account eligibility and API quotas still apply.
 
-## Spotify setup and limits
+Short-lived Google tokens stay only in page memory and go directly to Google APIs. No client secret, account cookies or refresh token is stored. There is no shared Google account and no native browser-session import on the website. Until configured, the UI explains that Google connection is unavailable; guest playback and public import remain available.
 
-The publisher sets the public VIBEFY_SPOTIFY_CLIENT_ID environment variable in Vercel and registers exactly https://usevibefy.online/app as a redirect URI in the Spotify Developer Dashboard. No Client Secret is needed or accepted. /api/spotify-config exposes only the validated public identifier. No identifier is configured in production at this update, so the connection button is disabled with an explanation; music search remains usable.
+JuiceVault does not allow browser CORS for its API. Its narrow same-origin adapter forwards a user-submitted login to the fixed JuiceVault origin. Passwords are not saved or logged; the access token stays in page memory. Challenges and expired sessions fail visibly without bypasses. Disconnect clears the local session; downloaded playlist metadata remains local.
 
-Authorization Code with PKCE uses S256, a random one-use state and a ten-minute callback deadline. Tokens stay in sessionStorage for this tab, never in library backups, our API or logs. Spotify requests are read-only and restricted to the exact API origin and approved library paths. Both playlists and saved songs support explicit pagination. Account content stays in memory and clears on disconnect. Selecting a Spotify song starts a search for its public recording, rather than silently pretending Spotify metadata is audio.
+## Run and verify
 
-Spotify Development Mode currently permits at most five allowlisted users and requires the app owner to have Premium. Public use needs Spotify Extended Quota approval. See https://developer.spotify.com/documentation/web-api/concepts/quota-modes. A Client ID alone does not remove these restrictions. Some playlist contents may be withheld by Spotify. OAuth was unit-tested; live sign-in cannot be verified until the publisher configures an eligible application.
+Install `requirements.lock`, then run `python -m uvicorn app:app --host 127.0.0.1 --port 4173` from web. Run `python -m unittest discover -s tests -v` and `node --test tests/*.test.cjs`. JavaScript is buildless. The official embedded player is used in local preview too.
 
-## Shared Jam
+Vercel serves public assets from its CDN and FastAPI handles bounded public metadata requests. Source URLs, IDs, response sizes and timeouts are constrained; no arbitrary URL proxy is exposed. Rate limits are per instance, not a distributed abuse defence. Service worker caches the shell only, never API responses, tokens or audio.
 
-Desktop and mobile web use the same Cloudflare Worker / Durable Object relay, with TLS WebSockets. Host a session or join using a 12-character code or https://usevibefy.online/app?jam=CODE. A desktop browser opens the presentation with instructions to paste the code into the native app; phones open the web player.
+No web audio downloads, guaranteed background audio, EQ, native mini window, local Whisper Auto Sync or desktop visualizers are promised. YouTube/SoundCloud embedding restrictions still apply. Never deploy `.env`, `.vercel` credentials, desktop profiles, cookies or models.
 
-The host publishes the exact resolved YouTube recording, play/pause, timing and supported upcoming recordings. Participants can suggest YouTube songs for the host queue. Only the separate host credential permits playback control or ending the room; it is never part of the invitation. Rooms expire after six hours, allow 24 listeners, bound messages/queues and remove metadata at end/expiry. Cloudflare processes connection IP addresses; participants never connect directly. No audio files or music-account credentials are relayed. Browser autoplay, visible-player, background playback and recording availability restrictions still apply. Timing is corrected periodically, not sample-accurate. Deployment and limits: [jam-relay](../jam-relay).
-
-## Hosting and privacy
-
-Vercel serves public/ from its CDN and FastAPI handles the bounded public music API. requirements.txt mirrors requirements.lock. CSP restricts external script, image, frame and connection hosts. Spotify API URLs are validated before attaching authorization. Service worker caches only the public app shell, never API responses or OAuth tokens. API burst limits are per-instance, not a distributed abuse defence.
-
-Never deploy .env files, .vercel credentials, desktop profiles, cookies or model files. Public YouTube extraction was refused from Vercel, so production uses the official embedded player. Do not bypass challenges or upload user cookies. Privacy details are in public/privacy.html; asset credits and notices are in the repository root.
+The deployment also has the controlled public alias https://vibefy-neon.vercel.app. Jam explicitly allows this alias; arbitrary Vercel sites remain blocked.

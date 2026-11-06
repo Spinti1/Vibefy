@@ -1,5 +1,7 @@
 """Vibefy web beta. Public catalogue only; never accepts account cookies or arbitrary URLs."""
 import asyncio
+import base64
+import json
 import os
 import re
 import threading
@@ -15,6 +17,8 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from ytmusicapi import YTMusic
+from services import spotify_page, soundcloud_search, recording_score
+from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI(title="Vibefy", docs_url=None, redoc_url=None, openapi_url=None)
@@ -56,12 +60,20 @@ def track(row):
         return None
     return {"id": identity, "title": str(row.get("title", "Untitled"))[:300],
             "artist": ", ".join(str(a.get("name", "")) for a in row.get("artists", []))[:300],
+            "artistId": next((a["id"] for a in row.get("artists", []) if re.fullmatch(r"UC[A-Za-z0-9_-]{22}", a.get("id") or "")), ""),
+            "explicit": row.get("isExplicit") if isinstance(row.get("isExplicit"), bool) else None,
             "album": str((row.get("album") or {}).get("name", ""))[:300],
             "duration": row.get("duration_seconds") or 0,
             "image": safe_art((row.get("thumbnails") or [{}])[-1].get("url", ""))}
 
 @app.middleware("http")
 async def security(request: Request, call_next):
+    if request.method == "POST":
+        try:
+            if int(request.headers.get("content-length", "0")) > 64 * 1024:
+                return JSONResponse({"detail": "Request is too large."}, 413)
+        except ValueError:
+            return JSONResponse({"detail": "Invalid request size."}, 400)
     if request.url.path.startswith("/api/"):
         # Per-instance burst protection, not a substitute for a deployment firewall.
         ip = request.client.host if request.client else "unknown"
@@ -109,20 +121,103 @@ async def worker(work):
     except Exception:
         raise HTTPException(502, "The music source could not answer. Please try again shortly.") from None
 
-@app.get("/api/spotify-config")
-def spotify_config():
-    # Public OAuth identifier only. Never expose a secret or an account token.
-    identity = os.getenv("VIBEFY_SPOTIFY_CLIENT_ID", "")
-    if not re.fullmatch(r"[a-fA-F0-9]{32}", identity):
-        identity = ""
-    return JSONResponse({"clientId": identity, "redirectUri": "https://usevibefy.online/app"},
-                        headers={"Cache-Control": "no-store"})
-
 @app.get("/api/capabilities")
 def capabilities():
-    return {"version": "0.4.44", "beta": True, "search": True, "playback": "official-embedded-player" if os.getenv("VERCEL") else "source-dependent",
+    return {"version": "0.4.53", "beta": True, "search": True, "playback": "official-embedded-player",
             "nativeOnly": ["local Whisper Auto Sync", "audio-reactive desktop visualizers", "classic mini window"],
-            "storage": "browser-local", "analytics": False, "spotifyConfigured": bool(re.fullmatch(r"[a-fA-F0-9]{32}", os.getenv("VIBEFY_SPOTIFY_CLIENT_ID", ""))), "jam": "shared Cloudflare relay; desktop and mobile web"}
+            "storage": "browser-local", "analytics": False, "jam": "shared Cloudflare relay; desktop and web"}
+
+@app.get("/api/google-config")
+def google_config():
+    identity = os.getenv("VIBEFY_GOOGLE_WEB_CLIENT_ID", "")
+    if not re.fullmatch(r"[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com", identity):
+        identity = ""
+    return {"clientId": identity}
+
+@app.get("/api/import/spotify")
+async def import_spotify(id: str = Query(max_length=22), offset: int = Query(default=0, ge=0, le=20000)):
+    return await spotify_page(id, offset)
+
+class MatchSong(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    artist: str = Field(max_length=300)
+    duration: float = Field(default=0, ge=0, le=86400)
+    primary_artist: str = Field(default="", max_length=300)
+    explicit: bool | None = None
+
+@app.post("/api/match")
+async def match_recording(song: MatchSong):
+    data = await search((song.title + " " + song.artist)[:160])
+    scored = sorted(((recording_score(song.model_dump(), t), t) for t in data["tracks"]), key=lambda item: item[0], reverse=True)
+    return {"track": scored[0][1] if scored and scored[0][0] >= .7 else None}
+
+@app.get("/api/soundcloud/search")
+async def search_soundcloud(q: str = Query(min_length=2, max_length=160)):
+    return await worker(lambda: cached(("soundcloud", q.casefold()), 120, lambda: soundcloud_search(q)))
+
+async def juice_request(path, token="", body=None, grant=""):
+    headers = {"Authorization": "Bearer " + token} if token else {}
+    if grant:
+        headers["X-CA"] = grant
+    async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+        async with client.stream("POST" if body is not None else "GET", "https://api.juicevault.xyz" + path, json=body, headers=headers) as response:
+            if response.status_code == 403:
+                raise HTTPException(503, "JuiceVault is blocking requests from this web host. Open JuiceVault directly or use the desktop add-on.")
+            if response.status_code == 401:
+                raise HTTPException(401, "JuiceVault could not authorize this request. Check your login or try again later.")
+            if response.status_code != 200:
+                raise HTTPException(502, "JuiceVault is temporarily unavailable.")
+            data = bytearray()
+            async for chunk in response.aiter_bytes():
+                data.extend(chunk)
+                if len(data) > 2 * 1024 * 1024:
+                    raise HTTPException(502, "JuiceVault returned too much data.")
+            return json.loads(data)
+
+def juice_token(request):
+    value = request.headers.get("authorization", "")
+    if not value:
+        return ""
+    if not re.fullmatch(r"Bearer [A-Za-z0-9_.-]{1,16384}", value):
+        raise HTTPException(400, "Invalid session.")
+    return value[7:]
+
+class JuiceLogin(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=1024)
+
+@app.post("/api/juice/login")
+async def juice_login(value: JuiceLogin):
+    ticket = await juice_request("/user/auth/token", body={})
+    token = ticket.get("data", {}).get("token", "")
+    try:
+        payload = token.split(".")[1]
+        grant = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["ca"]
+        if not isinstance(grant, str) or not re.fullmatch(r"[!-~]{1,16384}", grant):
+            raise ValueError()
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise HTTPException(502, "JuiceVault sign-in is unavailable in this browser. Public search still works.") from None
+    result = await juice_request("/user/auth/login", body={"login": value.username, "password": value.password, "loginToken": token}, grant=grant)
+    access = result.get("data", {}).get("accessToken", "")
+    if not isinstance(access, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,16384}", access):
+        raise HTTPException(401, "JuiceVault did not grant a session.")
+    return {"accessToken": access}
+
+@app.get("/api/juice/search")
+async def juice_search(q: str = Query(min_length=2, max_length=160)):
+    from urllib.parse import urlencode
+    return await juice_request("/music/search?" + urlencode({"q": q}))
+
+@app.get("/api/juice/playlists")
+async def juice_playlists(request: Request, username: str = Query(min_length=1, max_length=100)):
+    from urllib.parse import quote
+    return await juice_request("/user/playlists/user/" + quote(username, safe=""), token=juice_token(request))
+
+@app.get("/api/juice/playlist")
+async def juice_playlist(request: Request, id: str = Query(max_length=36)):
+    if not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", id):
+        raise HTTPException(400, "Invalid playlist ID.")
+    return await juice_request("/user/playlists/" + id, token=juice_token(request))
 
 @app.get("/api/search")
 async def search(q: str = Query(min_length=1, max_length=160)):
@@ -141,6 +236,33 @@ async def search(q: str = Query(min_length=1, max_length=160)):
             return [item for row in rows if (item := track(row))]
         return cached(("search", q.casefold()), 120, fetch)
     return {"tracks": await worker(load)}
+
+@app.get("/api/artist")
+async def artist(id: str = Query(max_length=24)):
+    if not re.fullmatch(r"UC[A-Za-z0-9_-]{22}", id):
+        raise HTTPException(400, "Invalid artist.")
+    def load():
+        data = YTMusic(requests_session=False).get_artist(id)
+        songs = data.get("songs", {}).get("results", [])
+        for song in songs:
+            song.setdefault("videoType", "MUSIC_VIDEO_TYPE_ATV")
+        albums = [{"id": a.get("browseId", ""), "title": str(a.get("title", "Album"))[:200], "image": safe_art((a.get("thumbnails") or [{}])[-1].get("url", ""))} for a in data.get("albums", {}).get("results", []) if re.fullmatch(r"MPREb_[A-Za-z0-9_-]{5,100}", a.get("browseId", ""))]
+        return {"name": str(data.get("name", "Artist"))[:200], "image": safe_art((data.get("thumbnails") or [{}])[-1].get("url", "")), "description": str(data.get("description", ""))[:2000], "tracks": [t for row in songs if (t := track(row))], "albums": albums}
+    return await worker(lambda: cached(("artist", id), 300, load))
+
+@app.get("/api/album")
+async def album(id: str = Query(max_length=110)):
+    if not re.fullmatch(r"MPREb_[A-Za-z0-9_-]{5,100}", id):
+        raise HTTPException(400, "Invalid album.")
+    def load():
+        data = YTMusic(requests_session=False).get_album(id)
+        rows = data.get("tracks", [])
+        for row in rows:
+            row.setdefault("videoType", "MUSIC_VIDEO_TYPE_ATV")
+            row.setdefault("artists", data.get("artists", []))
+            row.setdefault("thumbnails", data.get("thumbnails", []))
+        return {"title": str(data.get("title", "Album"))[:200], "tracks": [t for row in rows if (t := track(row))]}
+    return await worker(lambda: cached(("album", id), 300, load))
 
 @app.get("/api/playlist")
 async def playlist(id: str = Query(min_length=10, max_length=200)):
@@ -204,19 +326,42 @@ async def audio(identity: str, request: Request):
                     headers={"Accept-Ranges": "bytes", "Content-Range": content_range, "Cache-Control": "private, max-age=60"})
 
 @app.get("/api/lyrics")
-async def lyrics(title: str = Query(min_length=1, max_length=300), artist: str = Query(max_length=300), duration: int = Query(default=0, ge=0, le=86400)):
+async def lyrics(title: str = Query(min_length=1, max_length=300), artist: str = Query(max_length=300), duration: int = Query(default=0, ge=0, le=86400), id: str = Query(default="", max_length=11)):
+    if id and not VIDEO.fullmatch(id):
+        raise HTTPException(400, "Invalid recording.")
     params = {"track_name": title, "artist_name": artist}
     if duration:
         params["duration"] = str(duration)
     async with httpx.AsyncClient(timeout=8, follow_redirects=False) as client:
         answer = await client.get("https://lrclib.net/api/get", params=params, headers={"User-Agent": "Vibefy/0.4.15 (https://github.com/Spinti1/Vibefy)"})
-    if answer.status_code == 404:
-        return {"plain": "", "synced": "", "source": "LRCLIB"}
-    if answer.status_code != 200 or len(answer.content) > 512 * 1024:
+    if answer.status_code not in (200, 404) or len(answer.content) > 512 * 1024:
         raise HTTPException(502, "Lyrics are temporarily unavailable.")
-    data = answer.json()
-    return {"plain": str(data.get("plainLyrics") or "")[:100000], "synced": str(data.get("syncedLyrics") or "")[:100000], "source": "LRCLIB"}
+    data = answer.json() if answer.status_code == 200 else {}
+    result = {"plain": str(data.get("plainLyrics") or "")[:100000], "synced": str(data.get("syncedLyrics") or "")[:100000], "source": "LRCLIB"}
+    if result["synced"] or not id:
+        return result
+    def music_lyrics():
+        api = YTMusic(requests_session=False)
+        reference = api.get_watch_playlist(videoId=id).get("lyrics")
+        if not reference:
+            return None
+        data = api.get_lyrics(reference, timestamps=True)
+        if not data:
+            return None
+        if data.get("hasTimestamps"):
+            synced = "\n".join(f"[{line.start_time // 60000:02d}:{line.start_time % 60000 / 1000:05.2f}]{line.text}" for line in data["lyrics"][:2000])
+            return {"plain": "", "synced": synced[:100000], "source": "YouTube Music · " + str(data.get("source") or "lyrics")[:100]}
+        return {"plain": str(data.get("lyrics") or "")[:100000], "synced": "", "source": "YouTube Music · " + str(data.get("source") or "lyrics")[:100]}
+    try:
+        extra = await worker(lambda: cached(("lyrics", id), 3600, music_lyrics))
+        if extra and (extra["synced"] or not result["plain"]):
+            return extra
+    except HTTPException:
+        pass
+    return result
 
+@app.get("/phone", include_in_schema=False)
+@app.get("/web", include_in_schema=False)
 @app.get("/app", include_in_schema=False)
 def player_page():
     return FileResponse(ROOT / "public" / "app.html")

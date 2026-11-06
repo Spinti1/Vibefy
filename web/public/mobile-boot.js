@@ -1,8 +1,8 @@
 'use strict';
-// Do not initialize media, Spotify or Jam on a desktop browser.
-if (window.vibefyPhone) {
+// Both desktop and phone browsers use the same local library and player.
+{
   (async () => {
-    for (const name of ['embedded-player', 'player', 'spotify', 'mobile-mods', 'jam']) {
+    for (const name of ['embedded-player', 'source-player', 'player', 'youtube-account', 'web-library', 'mobile-mods', 'jam']) {
       await new Promise((resolve, reject) => {
         const script = document.createElement('script');
         script.src = '/' + name + '.js';

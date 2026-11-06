@@ -19,14 +19,39 @@ class SecurityTests(unittest.TestCase):
                 self.assertEqual(self.client.get("/api/audio/" + path).status_code, 400)
             extract.assert_not_called()
 
-    def test_spotify_config_exposes_only_valid_public_id(self):
-        with patch.dict(module.os.environ, {"VIBEFY_SPOTIFY_CLIENT_ID": "a" * 32, "SPOTIFY_CLIENT_SECRET": "never-public"}):
-            r = self.client.get("/api/spotify-config")
-            self.assertEqual(r.json(), {"clientId": "a" * 32, "redirectUri": "https://usevibefy.online/app"})
+    def test_google_config_exposes_only_valid_public_id(self):
+        identity = "123456-demo.apps.googleusercontent.com"
+        with patch.dict(module.os.environ, {"VIBEFY_GOOGLE_WEB_CLIENT_ID": identity, "GOOGLE_CLIENT_SECRET": "never-public"}):
+            r = self.client.get("/api/google-config")
+            self.assertEqual(r.json(), {"clientId": identity})
             self.assertNotIn("never-public", r.text)
             self.assertEqual(r.headers["cache-control"], "no-store")
-        with patch.dict(module.os.environ, {"VIBEFY_SPOTIFY_CLIENT_ID": "invalid"}):
-            self.assertEqual(self.client.get("/api/spotify-config").json()["clientId"], "")
+        with patch.dict(module.os.environ, {"VIBEFY_GOOGLE_WEB_CLIENT_ID": "invalid"}):
+            self.assertEqual(self.client.get("/api/google-config").json()["clientId"], "")
+
+    def test_new_source_paths_validate_ids_before_network(self):
+        for identity in ["https://127.0.0.1", "../private", "a" * 22]:
+            if identity == "a" * 22:
+                continue
+            self.assertEqual(self.client.get("/api/import/spotify", params={"id": identity}).status_code, 400)
+            self.assertEqual(self.client.get("/api/juice/playlist", params={"id": identity}).status_code, 400)
+
+    def test_matching_preserves_artist_and_recording_version(self):
+        source = {"title": "Original Song", "artist": "Artist", "duration": 200}
+        good = {**source, "id": "abcdefghijk"}
+        self.assertGreater(module.recording_score(source, good), .9)
+        for change in [{"title": "Original Song Clean"}, {"title": "Original Song Live"}, {"artist": "Someone else"}, {"duration": 280}]:
+            self.assertEqual(module.recording_score(source, {**good, **change}), 0)
+
+    def test_explicit_player_routes_are_served(self):
+        for route in ["/web", "/phone", "/app"]:
+            response = self.client.get(route)
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('id="home-view"', response.text)
+
+    def test_login_payloads_are_bounded(self):
+        response = self.client.post("/api/juice/login", json={"username": "x", "password": "x" * 70000})
+        self.assertEqual(response.status_code, 413)
 
     def test_ranges_are_validated_before_network(self):
         with patch.object(module, "audio_url") as extract:
