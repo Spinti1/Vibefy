@@ -86,10 +86,12 @@ struct PlaylistResponse:Decodable {var title:String;var tracks:[Song]}
 
 }
 
+struct Checkpoint:Codable {var queue:[Song];var index:Int;var position:Double;var shuffle:Bool;var repeatSong:Bool}
 @MainActor final class Player:ObservableObject {
 
  @Published var queue:[Song]=[];@Published var index=0;@Published var playing=false;@Published var position=0.0;@Published var duration=1.0;@Published var error="";@Published var shuffled=false;@Published var repeating=false
 
+ private var lastCheckpoint=Date.distantPast
  private let engine=AVPlayer();private var tick:Any?;private var end:NSObjectProtocol?;private var status:NSKeyValueObservation?;private var controls:[(MPRemoteCommand,Any)]=[]
 
  var song:Song?{queue.indices.contains(index) ? queue[index]:nil}
@@ -100,10 +102,14 @@ struct PlaylistResponse:Decodable {var title:String;var tracks:[Song]}
 
   tick=engine.addPeriodicTimeObserver(forInterval:CMTime(seconds:0.5,preferredTimescale:600),queue:.main){[weak self] time in
 
-   Task{@MainActor in guard let self else{return};let seconds=time.seconds;self.position=seconds.isFinite ? seconds:0;let total=self.engine.currentItem?.duration.seconds ?? 0;self.duration=total.isFinite && total>0 ? total:1;self.playing=self.engine.timeControlStatus == .playing;self.updateNowPlaying()}
+   Task{@MainActor in guard let self else{return};let seconds=time.seconds;self.position=seconds.isFinite ? seconds:0;let total=self.engine.currentItem?.duration.seconds ?? 0;self.duration=total.isFinite && total>0 ? total:1;self.playing=self.engine.timeControlStatus == .playing;self.updateNowPlaying();if self.playing && Date().timeIntervalSince(self.lastCheckpoint)>5 {self.checkpoint()}}
 
   }
 
+  if let data=UserDefaults.standard.data(forKey:"native-playback"),data.count<2_000_000,let saved=try? JSONDecoder().decode(Checkpoint.self,from:data) {
+   queue=Array(saved.queue.prefix(1000));index=max(0,min(saved.index,max(0,queue.count-1)));position=saved.position.isFinite ? max(0,saved.position):0;shuffled=saved.shuffle;repeating=saved.repeatSong
+   if let url=song?.audioURL {engine.replaceCurrentItem(with:AVPlayerItem(url:url));engine.seek(to:CMTime(seconds:position,preferredTimescale:600))}
+  }
   let center=MPRemoteCommandCenter.shared()
 
   controls.append((center.playCommand,center.playCommand.addTarget{[weak self] _ in Task{@MainActor in self?.resume()};return .success}))
@@ -140,7 +146,7 @@ struct PlaylistResponse:Decodable {var title:String;var tracks:[Song]}
 
  func resume(){do {try AVAudioSession.sharedInstance().setActive(true);engine.play()}catch {self.error="Audio playback could not start."}}
 
- func pause(){engine.pause();playing=false;updateNowPlaying()}
+ func pause(){engine.pause();playing=false;updateNowPlaying();checkpoint()}
 
  func toggle(){playing ? pause():resume()}
 
@@ -150,6 +156,10 @@ struct PlaylistResponse:Decodable {var title:String;var tracks:[Song]}
 
  func seek(_ value:Double){guard value.isFinite else{return};engine.seek(to:CMTime(seconds:max(0,min(value,duration)),preferredTimescale:600));position=value}
 
+ func checkpoint(){
+  lastCheckpoint=Date();let state=Checkpoint(queue:Array(queue.prefix(1000)),index:index,position:position,shuffle:shuffled,repeatSong:repeating)
+  if let data=try? JSONEncoder().encode(state){UserDefaults.standard.set(data,forKey:"native-playback")}
+ }
  func updateNowPlaying(){guard let song else{return};MPNowPlayingInfoCenter.default().nowPlayingInfo=[MPMediaItemPropertyTitle:song.title,MPMediaItemPropertyArtist:song.artist,MPMediaItemPropertyPlaybackDuration:duration,MPNowPlayingInfoPropertyElapsedPlaybackTime:position,MPNowPlayingInfoPropertyPlaybackRate:playing ? 1:0]}
 
 }

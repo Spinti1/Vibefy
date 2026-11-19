@@ -70,7 +70,7 @@ public final class MainActivity extends Activity {
 
   transport=new LinearLayout(this);transport.setOrientation(LinearLayout.VERTICAL);now=label("Choose a song",16);transport.addView(now);seek=new SeekBar(this);transport.addView(seek);seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){public void onStartTrackingTouch(SeekBar s){dragging=true;}public void onProgressChanged(SeekBar s,int value,boolean user){}public void onStopTrackingTouch(SeekBar s){if(player!=null)player.seekTo(s.getProgress());dragging=false;}});
 
-  LinearLayout controls=new LinearLayout(this);controls.setGravity(Gravity.CENTER);controls.addView(button("Previous",()->{if(player!=null)player.seekToPreviousMediaItem();}));play=button("Play",()->{if(player!=null){if(player.isPlaying())player.pause();else player.play();}});play.setBackgroundTintList(android.content.res.ColorStateList.valueOf(ACCENT));play.setTextColor(BG);controls.addView(play);controls.addView(button("Next",()->{if(player!=null)player.seekToNextMediaItem();}));transport.addView(controls);root.addView(transport);
+  LinearLayout controls=new LinearLayout(this);controls.setGravity(Gravity.CENTER);controls.addView(button("Previous",()->{if(player!=null)player.seekToPreviousMediaItem();}));play=button("Play",()->{if(player!=null){if(player.isPlaying())player.pause();else {player.prepare();player.play();}}});play.setBackgroundTintList(android.content.res.ColorStateList.valueOf(ACCENT));play.setTextColor(BG);controls.addView(play);controls.addView(button("Next",()->{if(player!=null)player.seekToNextMediaItem();}));transport.addView(controls);root.addView(transport);
 
  }
 
