@@ -29,7 +29,7 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
   stack.axis = .vertical;stack.spacing=16;stack.alignment = .center;stack.translatesAutoresizingMaskIntoConstraints=false;cover.addSubview(stack);NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo:cover.centerXAnchor),stack.centerYAnchor.constraint(equalTo:cover.centerYAnchor),stack.widthAnchor.constraint(lessThanOrEqualTo:cover.widthAnchor,constant:-48)])
   let title=UILabel();title.text="Vibefy";title.font = .systemFont(ofSize:34,weight:.bold);title.textColor = .white;stack.addArrangedSubview(title)
   progress.tintColor=UIColor(red:0,green:0.83,blue:0.75,alpha:1);progress.translatesAutoresizingMaskIntoConstraints=false;view.addSubview(progress);NSLayoutConstraint.activate([progress.topAnchor.constraint(equalTo:web.topAnchor),progress.leadingAnchor.constraint(equalTo:web.leadingAnchor),progress.trailingAnchor.constraint(equalTo:web.trailingAnchor)])
-  loading=web.observe(.estimatedProgress,options:[.new]){[weak self] web,_ in self?.progress.progress=Float(web.estimatedProgress);self?.progress.isHidden=web.estimatedProgress>=1}
+  loading=web.observe(\.estimatedProgress,options:[.new]){[weak self] web,_ in self?.progress.progress=Float(web.estimatedProgress);self?.progress.isHidden=web.estimatedProgress>=1}
   web.load(URLRequest(url:home,cachePolicy:.useProtocolCachePolicy,timeoutInterval:25))
  }
  @discardableResult func openJam(_ url:URL)->Bool {
