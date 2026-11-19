@@ -1,4 +1,4 @@
-# Vibefy mobile 0.2.1 hybrid preview
+# Vibefy mobile 0.2.2 hybrid preview
 
 The user authorized a lightweight hybrid app after the native-only port began. The current entry points use Android WebView and Apple WKWebView with app-style navigation and the existing mobile interface. Native-only prototype screens and player code are retained for later engine integration; they are not the active playback engine in this build.
 
@@ -12,7 +12,7 @@ The user authorized a lightweight hybrid app after the native-only port began. T
 
 ## Important remaining limitations
 
-Google account connection inside the embedded app is not implemented. Opening a separate browser does not connect this app's storage. JuiceVault's existing account form remains subject to provider acceptance. Account tokens can expire; persistent website data is not a guarantee of permanent login.
+Google connection opens the registered Vibefy website in the system browser, then returns an encrypted, single-use grant to the waiting app. Tap Return to Vibefy after consent. Reloading or killing the app during authorization requires restarting the connection. Grants remain in memory and expire according to Google; reconnect when requested. Google verification, consent and user limits still apply. JuiceVault's existing account form remains subject to provider acceptance. Account tokens can expire; persistent website data is not a guarantee of permanent login.
 
 YouTube uses the existing official player, including its visible video. Background/lock-screen YouTube playback is not guaranteed. Native Media3/AVPlayer prototype source is not presented as an integrated YouTube engine. Physical Android/iPhone flow, battery and frame-time measurement are still required before describing performance as proven.
 
