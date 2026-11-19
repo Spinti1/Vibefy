@@ -1,0 +1,51 @@
+name: Build Vibefy mobile preview
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - run: gradle -p mobile/android --no-daemon assembleDebug assembleRelease lintRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vibefy-Android-preview
+          path: |
+            mobile/android/app/build/outputs/apk/debug/*.apk
+            mobile/android/app/build/outputs/apk/release/*.apk
+            mobile/android/app/build/reports/lint-results-release.html
+          retention-days: 7
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - name: Build device application without signing credentials
+        working-directory: mobile/ios
+        run: |
+          xcodegen generate
+          xcodebuild -project Vibefy.xcodeproj -scheme Vibefy -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+          mkdir -p package/Payload
+          cp -R build/Build/Products/Release-iphoneos/Vibefy.app package/Payload/
+          cd package
+          /usr/bin/zip -r -y ../Vibefy-0.1.0.ipa Payload
+      - name: Validate IPA and create SideStore source
+        run: python3 mobile/tools/source.py mobile/ios/Vibefy-0.1.0.ipa --url https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.1.0/Vibefy-0.1.0.ipa --output mobile/ios/source.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vibefy-iOS-preview
+          path: |
+            mobile/ios/Vibefy-0.1.0.ipa
+            mobile/ios/source.json
+            mobile/ios/source.sha256
+          retention-days: 7
