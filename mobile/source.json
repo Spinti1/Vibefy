@@ -1,6 +1,24 @@
 {
   "name": "Vibefy",
   "identifier": "online.usevibefy.source",
-  "apps": [],
+  "apps": [
+    {
+      "name": "Vibefy Preview",
+      "bundleIdentifier": "online.usevibefy.mobile",
+      "developerName": "Spinti1 and contributors",
+      "localizedDescription": "Optimized hybrid mobile preview. Persistent local playlists and native backup export. Google connection inside the app and reliable background YouTube playback are not yet available.",
+      "iconURL": "https://raw.githubusercontent.com/Spinti1/Vibefy/main/web/public/assets/icon.png",
+      "versions": [
+        {
+          "version": "0.2.1",
+          "date": "2026-11-19",
+          "downloadURL": "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.1/Vibefy-0.2.1.ipa",
+          "size": 1280300,
+          "minOSVersion": "15.0",
+          "localizedDescription": "Optimized hybrid mobile preview. Persistent local playlists and native backup export. Google connection inside the app and reliable background YouTube playback are not yet available."
+        }
+      ]
+    }
+  ],
   "news": []
 }
