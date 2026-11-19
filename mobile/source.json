@@ -6,16 +6,16 @@
       "name": "Vibefy Preview",
       "bundleIdentifier": "online.usevibefy.mobile",
       "developerName": "Spinti1 and contributors",
-      "localizedDescription": "Optimized hybrid mobile preview. Persistent local playlists and native backup export. Google connection inside the app and reliable background YouTube playback are not yet available.",
+      "localizedDescription": "Hybrid mobile preview with system-browser Google authorization and encrypted return to the app. Persistent local playlists and native backup export. Google permissions and verification rules apply; reliable background YouTube playback is not guaranteed.",
       "iconURL": "https://raw.githubusercontent.com/Spinti1/Vibefy/main/web/public/assets/icon.png",
       "versions": [
         {
-          "version": "0.2.1",
+          "version": "0.2.2",
           "date": "2026-11-19",
-          "downloadURL": "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.1/Vibefy-0.2.1.ipa",
-          "size": 1280300,
+          "downloadURL": "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.2/Vibefy-0.2.2.ipa",
+          "size": 1283641,
           "minOSVersion": "15.0",
-          "localizedDescription": "Optimized hybrid mobile preview. Persistent local playlists and native backup export. Google connection inside the app and reliable background YouTube playback are not yet available."
+          "localizedDescription": "Hybrid mobile preview with system-browser Google authorization and encrypted return to the app. Persistent local playlists and native backup export. Google permissions and verification rules apply; reliable background YouTube playback is not guaranteed."
         }
       ]
     }
