@@ -21,6 +21,7 @@ public final class MainActivity extends Activity {
  private WebView web;private FrameLayout frame;private LinearLayout cover;private ProgressBar progress;
  private android.webkit.ValueCallback<Uri[]> chooser;private String export;private String script="";private boolean closed;private boolean mainFailed;private boolean rendererGone;
  private final java.util.concurrent.ExecutorService writer=Executors.newSingleThreadExecutor();
+ private final java.util.concurrent.ExecutorService accounts=Executors.newSingleThreadExecutor();
  private boolean trusted(Uri uri){return uri!=null&&"https".equals(uri.getScheme())&&"vibefy-neon.vercel.app".equals(uri.getHost())&&uri.getPort()==-1&&uri.getUserInfo()==null;}
  @Override public void onCreate(Bundle state){super.onCreate(state);
   frame=new FrameLayout(this);frame.setBackgroundColor(Color.rgb(14,18,21));web=new WebView(this);web.setBackgroundColor(Color.rgb(14,18,21));frame.addView(web,new FrameLayout.LayoutParams(-1,-1));
@@ -49,7 +50,7 @@ public final class MainActivity extends Activity {
   });
   web.loadUrl(jamLink(getIntent().getData()));new Handler(Looper.getMainLooper()).postDelayed(()->{if(!closed)updates.check(false);},1500);
  }
- private boolean handleSession(JSONObject packet){String action=packet.optString("action"),id=packet.optString("id");if(!java.util.Arrays.asList("readSession","saveSession","clearSession").contains(action))return false;if(!id.matches("session-[a-f0-9]{32}-[0-9]{1,12}"))return true;writer.execute(()->{Object result=JSONObject.NULL;String error=null;try{SecureAccountSession store=new SecureAccountSession(this);if(action.equals("readSession")){JSONObject record=store.load();result=record==null?JSONObject.NULL:record;}else if(action.equals("saveSession")){store.save(packet.getJSONObject("value"));result=true;}else{store.clear();result=true;}}catch(Exception e){error="storage-unavailable";}Object value=result;String failure=error;runOnUiThread(()->{if(!closed&&trusted(Uri.parse(web.getUrl()==null?"":web.getUrl())))web.evaluateJavascript("window.vibefyMobileSessionResult?.("+JSONObject.quote(id)+","+String.valueOf(value)+","+(failure==null?"null":JSONObject.quote(failure))+")",null);});});return true;}
+ private boolean handleSession(JSONObject packet){String action=packet.optString("action"),id=packet.optString("id");if(!java.util.Arrays.asList("readSession","saveSession","clearSession").contains(action))return false;if(!id.matches("session-[a-f0-9]{32}-[0-9]{1,12}"))return true;accounts.execute(()->{Object result=JSONObject.NULL;String error=null;try{SecureAccountSession store=new SecureAccountSession(this);if(action.equals("readSession")){JSONObject record=store.load();result=record==null?JSONObject.NULL:record;}else if(action.equals("saveSession")){store.save(packet.getJSONObject("value"));result=true;}else{store.clear();result=true;}}catch(Exception e){error="storage-unavailable";}Object value=result;String failure=error;runOnUiThread(()->{if(!closed&&trusted(Uri.parse(web.getUrl()==null?"":web.getUrl())))web.evaluateJavascript("window.vibefyMobileSessionResult?.("+JSONObject.quote(id)+","+String.valueOf(value)+","+(failure==null?"null":JSONObject.quote(failure))+")",null);});});return true;}
  private String jamLink(Uri uri){if(uri==null||!"vibefy".equals(uri.getScheme())||!"jam".equals(uri.getHost()))return HOME;String code=uri.getQueryParameter("code");return code!=null&&code.matches("[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}")?HOME+"?jam="+code:HOME;}
  @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if(!finishGoogle(intent.getData()))web.loadUrl(jamLink(intent.getData()));}
  private String googleState;private long googleStarted;
@@ -64,5 +65,5 @@ public final class MainActivity extends Activity {
  @Override public void onBackPressed(){if(rendererGone){moveTaskToBack(true);return;}web.evaluateJavascript("(()=>{const d=document.querySelector('dialog[open]');if(d){d.close();return true;}return false;})()",answer->{if("true".equals(answer))return;if(web.canGoBack())web.goBack();else moveTaskToBack(true);});}
  @Override protected void onPause(){super.onPause();web.onPause();}
  @Override protected void onResume(){super.onResume();if(web!=null)web.onResume();if(updates!=null)updates.resumed();}
- @Override protected void onDestroy(){closed=true;if(chooser!=null)chooser.onReceiveValue(null);if(web!=null){web.stopLoading();web.destroy();}writer.shutdown();super.onDestroy();}
+ @Override protected void onDestroy(){closed=true;if(chooser!=null)chooser.onReceiveValue(null);if(web!=null){web.stopLoading();web.destroy();}writer.shutdown();accounts.shutdown();super.onDestroy();}
 }

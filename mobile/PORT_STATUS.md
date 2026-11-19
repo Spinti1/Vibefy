@@ -45,3 +45,10 @@ Checks: Android release build and lint; shared queue/backup tests; actual browse
 ## 0.2.3 regression investigation
 
 Reproduced the 0.2.2 failure from the actual tagged app-shell.js with documentElement=null for both native bridges. The live hosted repair recovers that failed initialized state and sends connectGoogle to the native browser handler. Added document-start/repair/ordinary-browser tests and four Android update-policy tests (version ordering, trusted HTTPS hosts, release asset metadata, exact size+SHA-256). Google itself remains in the system browser; the embedded app never falls back to a Google popup when its bridge is unavailable. Real account consent/2FA on a physical phone remains unverified; synthetic tests do not claim to replace that check.
+
+
+## 0.2.4 account persistence
+
+Google grants now survive app process exit while unexpired: device-bound iOS Keychain and authenticated Android Keystore encryption. Stored sessions retain the original absolute expiry and granted scopes; no token goes into browser storage or playlist backups. Explicit logout and Google 401 clear protected storage, while network failure does not. Per-page nonces prevent stale bridge replies across reloads; Android account I/O is independent from updater network work.
+
+The current implicit/token-model authorization does not issue refresh tokens. No matching web-client secret is configured, so automatic offline renewal is not implemented. Reconnection after Google expiry remains required; this release fixes loss on every reopen rather than promising indefinite authorization.

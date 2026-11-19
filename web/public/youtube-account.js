@@ -3,13 +3,13 @@
 (() => {
  const $=id=>document.getElementById(id),readScope='https://www.googleapis.com/auth/youtube.readonly',writeScope='https://www.googleapis.com/auth/youtube.force-ssl',identityScope='openid profile';
  let client,token='',expires=0,writable=false,pending,expiryTimer,loading=false,initializing,displayName='',generation=0,grantedScopes='',restored=false,restoreAttempt;
- let sessionWrites=Promise.resolve(),sessionSaveFailed=false;
+ let sessionWrites=Promise.resolve(),sessionSaveFailed=false,sessionReadFailed=false;
  const storage=()=>window.vibefyMobileSession;
  function persist(){if(!storage()||!connected())return Promise.resolve();const record={version:1,access_token:token,expires_at:expires,scope:grantedScopes,display_name:displayName};sessionWrites=sessionWrites.catch(()=>{}).then(()=>storage().write(record)).then(()=>{sessionSaveFailed=false;},error=>{sessionSaveFailed=true;throw error;});return sessionWrites;}
  function clearStored(){if(storage())sessionWrites=sessionWrites.catch(()=>{}).then(()=>storage().clear()).catch(()=>{});}
  function applyGrant(record){if(!record||record.version!==1||typeof record.access_token!=='string'||record.access_token.length<1||record.access_token.length>8192||typeof record.expires_at!=='number'||record.expires_at<=Date.now()+5000||record.expires_at>Date.now()+86400000||!String(record.scope||'').split(' ').includes(readScope))return false;token=record.access_token;expires=record.expires_at;grantedScopes=String(record.scope);writable=grantedScopes.split(' ').includes(writeScope);displayName=String(record.display_name||'').slice(0,256);armExpiry();return true;}
  function armExpiry(){clearTimeout(expiryTimer);expiryTimer=setTimeout(()=>{clearStored();update();status('Google access needs renewal. Connect again to refresh your YouTube library. Your playlists are preserved.');},Math.max(0,expires-Date.now()));}
- function restore(){if(!storage()||restored)return Promise.resolve();if(restoreAttempt)return restoreAttempt;const ticket=generation;restoreAttempt=(async()=>{let record;try{record=await storage().read();}catch{status('Saved account could not be read. Your playlists are safe; try restarting Vibefy.');return;}restored=true;if(ticket!==generation||pending||connected())return;if(!applyGrant(record)){if(record)clearStored();return;}update();try{await refresh();}catch(error){status(error.message);}})().finally(()=>{restoreAttempt=null;});return restoreAttempt;}
+ function restore(){if(!storage()||restored)return Promise.resolve();if(restoreAttempt)return restoreAttempt;const ticket=generation;restoreAttempt=(async()=>{let record;try{record=await storage().read();}catch{sessionReadFailed=true;status('Saved account could not be read. Your playlists are safe; try restarting Vibefy.');return;}restored=true;if(ticket!==generation||pending||connected())return;if(!applyGrant(record)){if(record)clearStored();return;}update();try{await refresh();}catch(error){status(error.message);}})().finally(()=>{restoreAttempt=null;});return restoreAttempt;}
 
  const connected=()=>!!token&&Date.now()<expires;
  const status=message=>{$('youtube-status').textContent=message;};
@@ -76,7 +76,7 @@
   const restoreTask=restore();
   initializing=(async()=>{ $('google-connect').disabled=true;status('Preparing Google connection…');const r=await fetch('/api/google-config',{signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error();const data=await r.json();if(!data.clientId)throw Error('Google connection is unavailable.');
    if(!window.vibefyMobileAuthorize&&!window.google?.accounts?.oauth2)await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';const timer=setTimeout(()=>{script.remove();reject(Error('Google connection timed out.'));},10000);script.onload=()=>{clearTimeout(timer);resolve();};script.onerror=()=>{clearTimeout(timer);script.remove();reject(Error('Google connection could not load.'));};document.head.append(script);});
-   client={client_id:data.clientId};$('google-connect').onclick=connect;update();status('');await restoreTask;
+   client={client_id:data.clientId};$('google-connect').onclick=connect;update();status('');await restoreTask;if(sessionReadFailed)status('Saved account could not be read. Your playlists are safe; try restarting Vibefy.');
   })().catch(async()=>{await restoreTask;unavailable();}).finally(()=>{initializing=null;});return initializing;
  }
  update();initialize();
