@@ -16,3 +16,13 @@ test('clear queue also removes persistent checkpoint',()=>{const p=page({resume:
 test('unrelated session keys and iframe/foreign origins are not bridged',()=>{const p=page();p.sessionStorage.setItem('token','private');assert.equal(p.localStorage.getItem('token'),null);for(const opts of [{frame:true},{origin:'https://other.example'}]){const q=page(opts);assert.equal(q.window.vibefyMobileShell,undefined);q.sessionStorage.setItem('vibefy-resume',queue);assert.equal(q.localStorage.getItem(key),null)}});
 
 test('queue persistence respects opt out',()=>{const p=page({resume:queue,preferences:{rememberQueue:false}});assert.equal(p.localStorage.getItem(key),null);assert.equal(p.sessionStorage.getItem('vibefy-resume'),null);p.sessionStorage.setItem('vibefy-resume',queue);assert.equal(p.localStorage.getItem(key),null)});
+
+test('native export includes live unsaved metadata when storage quota was reached',()=>{
+ class Storage {constructor(){this.items=new Map()}getItem(k){return this.items.get(k)||null}setItem(k,v){this.items.set(k,v)}removeItem(k){this.items.delete(k)}}
+ const localStorage=new Storage(),sessionStorage=new Storage();localStorage.setItem('vibefy-web-v1',JSON.stringify({likes:[],collections:[]}));
+ const live={likes:[],collections:[{id:'new-local',title:'New playlist',tracks:[]}]};let packet;const button={dataset:{},onclick(){throw Error('fallback unexpected')}};
+ const window={addEventListener(){},VibefyMobile:{postMessage(value){packet=JSON.parse(value)}}};window.top=window;window.self=window;
+ const document={documentElement:{dataset:{}},readyState:'complete',head:{append(){}},createElement(){return{}},getElementById(id){return id==='export-library'?button:null},querySelector(){return null},querySelectorAll(){return[]}};
+ vm.runInNewContext(script,{Storage,window,document,localStorage,sessionStorage,state:live,location:{origin:'https://vibefy-neon.vercel.app'}});
+ button.onclick();assert.deepEqual(JSON.parse(packet.content),live);assert.equal(packet.action,'exportBackup');
+});

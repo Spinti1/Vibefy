@@ -28,7 +28,7 @@
    [data-mobile-app=true] .app-header{padding-top:max(10px,env(safe-area-inset-top))}
   `;document.head.append(style);}
   const exporter=document.getElementById('export-library');
-  if(exporter&&!exporter.dataset.nativeExport){exporter.dataset.nativeExport='true';const previous=exporter.onclick;exporter.onclick=()=>{try{const raw=localStorage.getItem('vibefy-web-v1');if(!raw||raw.length>6000000)throw Error();const value=JSON.parse(raw);if(!Array.isArray(value.collections)||!Array.isArray(value.likes))throw Error();if(!send({action:'exportBackup',content:raw}))previous?.();}catch{window.vibefyWebLibrary?.toast('No saved library is available to export.');}};}
+  if(exporter&&!exporter.dataset.nativeExport){exporter.dataset.nativeExport='true';const previous=exporter.onclick;exporter.onclick=()=>{try{const raw=typeof state==='object'&&state!==null?JSON.stringify(state):localStorage.getItem('vibefy-web-v1');if(!raw||raw.length>6000000)throw Error();const value=JSON.parse(raw);if(!Array.isArray(value.collections)||!Array.isArray(value.likes))throw Error();if(!send({action:'exportBackup',content:raw}))previous?.();}catch{window.vibefyWebLibrary?.toast('No saved library is available to export.');}};}
   const clearButton=document.querySelector('#clear-data-dialog .dialog-header h2');if(clearButton)clearButton.textContent='Clear app data';
   for(const label of document.querySelectorAll('button'))if(label.textContent.trim()==='Clear cookies & site data')label.textContent='Clear app data';
  }
