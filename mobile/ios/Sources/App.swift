@@ -60,7 +60,7 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
  func userContentController(_ controller:WKUserContentController,didReceive message:WKScriptMessage){
   guard message.frameInfo.isMainFrame,trusted(message.frameInfo.request.url),let packet=message.body as? [String:Any] else{return}
   if packet["action"] as? String=="connectGoogle",let raw=packet["url"] as? String {openGoogle(raw);return}
-  if let action=packet["action"] as? String,["readSession","saveSession","clearSession"].contains(action),let id=packet["id"] as? String,id.range(of:"^session-[0-9]{1,12}$",options:.regularExpression) != nil {
+  if let action=packet["action"] as? String,["readSession","saveSession","clearSession"].contains(action),let id=packet["id"] as? String,id.range(of:"^session-[a-f0-9]{32}-[0-9]{1,12}$",options:.regularExpression) != nil {
    do {var result:Any=NSNull();if action=="readSession"{if let saved=try SecureAccountSession.load(){result=saved}}else if action=="saveSession",let value=packet["value"] as? [String:Any]{try SecureAccountSession.save(value);result=true}else if action=="clearSession"{try SecureAccountSession.clear();result=true}else{throw NSError(domain:"SecureAccountSession",code:1)};replySession(id,result,nil)}catch{replySession(id,NSNull(),"storage-unavailable")};return
   }
   guard packet["action"] as? String=="exportBackup",let content=packet["content"] as? String,content.utf8.count<=6_000_000,let data=content.data(using:.utf8),let json=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any],json["collections"] is [Any],json["likes"] is [Any],temporaryExport==nil else{return}

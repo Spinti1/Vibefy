@@ -16,7 +16,8 @@
 
  const sessionJobs=new Map();let sessionSequence=0;
  if(window.vibefyNativeInfo?.secureSession){
-  const call=(action,value)=>new Promise((resolve,reject)=>{const id='session-'+(++sessionSequence);const timer=setTimeout(()=>{sessionJobs.delete(id);reject(Error('Secure account storage is unavailable.'));},8000);sessionJobs.set(id,{resolve,reject,timer});if(!send({action,id,...(value?{value}: {})})){clearTimeout(timer);sessionJobs.delete(id);reject(Error('Secure account storage is unavailable.'));}});
+  const epoch=Array.from(crypto.getRandomValues(new Uint8Array(16)),v=>v.toString(16).padStart(2,'0')).join('');
+  const call=(action,value)=>new Promise((resolve,reject)=>{const id='session-'+epoch+'-'+(++sessionSequence);const timer=setTimeout(()=>{sessionJobs.delete(id);reject(Error('Secure account storage is unavailable.'));},8000);sessionJobs.set(id,{resolve,reject,timer});if(!send({action,id,...(value?{value}: {})})){clearTimeout(timer);sessionJobs.delete(id);reject(Error('Secure account storage is unavailable.'));}});
   window.vibefyMobileSession={read:()=>call('readSession'),write:value=>call('saveSession',value),clear:()=>call('clearSession')};
   window.vibefyMobileSessionResult=(id,value,error)=>{const job=sessionJobs.get(id);if(!job)return;sessionJobs.delete(id);clearTimeout(job.timer);if(error)job.reject(Error('Secure account storage is unavailable.'));else job.resolve(value);};
  }

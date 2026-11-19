@@ -15,7 +15,7 @@
  const status=message=>{$('youtube-status').textContent=message;};
  function update(){
   const active=connected(),compact=window.vibefyPhone||window.matchMedia?.('(max-width:900px)').matches;
-  for(const name of ['header']){const button=$(name+'-connect');button.disabled=loading||!client;button.classList.toggle('connected',active);button.setAttribute('aria-label',active?'YouTube connected. Open account':loading?'Connecting YouTube':'Connect YouTube');$(name+'-connect-label').textContent=loading?'Connecting…':active?(compact?'Connected':'YouTube connected'):(compact?'Sign in':'Connect YouTube');}
+  for(const name of ['header']){const button=$(name+'-connect');button.disabled=loading||(!client&&!active);button.classList.toggle('connected',active);button.setAttribute('aria-label',active?'YouTube connected. Open account':loading?'Connecting YouTube':'Connect YouTube');$(name+'-connect-label').textContent=loading?'Connecting…':active?(compact?'Connected':'YouTube connected'):(compact?'Sign in':'Connect YouTube');}
   $('google-connect').disabled=loading||!client;$('google-connect').hidden=active;$('google-connect-label').textContent=loading?'Connecting…':'Continue to Google';
   $('google-disconnect').hidden=!active;$('youtube-refresh').hidden=!active;$('youtube-refresh').disabled=loading;
   $('account-identity').textContent=active?(displayName||'YouTube connected'):'Not connected';
@@ -70,13 +70,14 @@
   async add(id,track){if(!/^[A-Za-z0-9_-]{11}$/.test(track.id))return;if(!writable||!connected())await authorize(true);await api('playlistItems',{part:'snippet'},'POST',{snippet:{playlistId:id,resourceId:{kind:'youtube#video',videoId:track.id}}});},
   async rename(id,title){if(!writable||!connected())await authorize(true);const data=await api('playlists',{part:'snippet',id});const p=data.items?.[0];if(!p)throw Error('This playlist is unavailable.');await api('playlists',{part:'snippet'},'PUT',{id,snippet:{title,description:p.snippet.description||'',...(p.snippet.defaultLanguage?{defaultLanguage:p.snippet.defaultLanguage}:{})}});}
  };
- function unavailable(){status('Google connection could not load. Retry below, or continue with local playlists.');for(const id of ['header-connect'])$(id).disabled=false;$('google-connect').hidden=false;$('google-connect').disabled=false;$('google-connect-label').textContent='Retry connection';$('google-connect').onclick=()=>initialize();}
+ function unavailable(){if(connected()){update();$('header-connect').disabled=false;status('YouTube connected. Your library could not refresh; check your connection.');return;}status('Google connection could not load. Retry below, or continue with local playlists.');for(const id of ['header-connect'])$(id).disabled=false;$('google-connect').hidden=false;$('google-connect').disabled=false;$('google-connect-label').textContent='Retry connection';$('google-connect').onclick=()=>initialize();}
  function initialize(){
   if(initializing)return initializing;
+  const restoreTask=restore();
   initializing=(async()=>{ $('google-connect').disabled=true;status('Preparing Google connection…');const r=await fetch('/api/google-config',{signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error();const data=await r.json();if(!data.clientId)throw Error('Google connection is unavailable.');
    if(!window.vibefyMobileAuthorize&&!window.google?.accounts?.oauth2)await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';const timer=setTimeout(()=>{script.remove();reject(Error('Google connection timed out.'));},10000);script.onload=()=>{clearTimeout(timer);resolve();};script.onerror=()=>{clearTimeout(timer);script.remove();reject(Error('Google connection could not load.'));};document.head.append(script);});
-   client={client_id:data.clientId};$('google-connect').onclick=connect;update();status('');await restore();
-  })().catch(unavailable).finally(()=>{initializing=null;});return initializing;
+   client={client_id:data.clientId};$('google-connect').onclick=connect;update();status('');await restoreTask;
+  })().catch(async()=>{await restoreTask;unavailable();}).finally(()=>{initializing=null;});return initializing;
  }
  update();initialize();
 })();
