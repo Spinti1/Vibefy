@@ -1,4 +1,4 @@
-# Vibefy mobile 0.2.2 hybrid preview
+# Vibefy mobile 0.2.3 hybrid preview
 
 The user authorized a lightweight hybrid app after the native-only port began. The current entry points use Android WebView and Apple WKWebView with app-style navigation and the existing mobile interface. Native-only prototype screens and player code are retained for later engine integration; they are not the active playback engine in this build.
 
@@ -23,3 +23,10 @@ The app requires the hosted Vibefy service. It is not an offline player. Device-
 Use the mobile workflow on the development branch. Android uses SDK 35/Gradle 8.9/JDK 21. APK release signing uses the existing locally retained publisher key. iOS device builds run on macOS and produce an unsigned IPA for SideStore/iLoader signing. No signing credentials or account data are committed.
 
 See PORT_STATUS.md and the repository's CREDITS.md. AndroidX WebKit and Media3 are Apache-2.0; iOS WebKit and AVFoundation are system frameworks. The hybrid design is disclosed rather than advertised as fully native.
+
+
+## 0.2.3 mobile account fix and Android updates
+
+The 0.2.2 document-start script read document.documentElement before WebKit/WebView created it, set its initialized flag, then aborted. The web page therefore fell back to the embedded Google popup. Initialization now installs the native authorization bridge without accessing DOM nodes, and delays styling until DOMContentLoaded. The initialized flag is set only after bridge setup. The hosted repair also recovers partially initialized 0.2.2 profiles without clearing their data. Ordinary browsers and foreign frames are excluded.
+
+Android 0.2.3 adds automatic GitHub release checks (at most once per six hours), a manual check in Settings, bounded HTTPS downloads, GitHub release size/SHA-256 checks, and an Android installer handoff through a narrowly scoped FileProvider. Android itself requires the user's installation permission and confirmation. Older APKs did not contain this updater; users must install this update once, over the existing app. A hosted Android notice links to the current APK for those versions.
