@@ -9,7 +9,7 @@ import AVFAudio
   try? AVAudioSession.sharedInstance().setCategory(.playback,mode:.default)
   let window=UIWindow(frame:UIScreen.main.bounds);let controller=MobileController();window.rootViewController=controller;window.makeKeyAndVisible();self.window=window;self.controller=controller;return true
  }
- func application(_ application:UIApplication,open url:URL,options:[UIApplication.OpenURLOptionsKey:Any]=[:])->Bool {controller?.openJam(url) ?? false}
+ func application(_ application:UIApplication,open url:URL,options:[UIApplication.OpenURLOptionsKey:Any]=[:])->Bool {controller?.openLink(url) ?? false}
 }
 private final class WeakShellHandler:NSObject,WKScriptMessageHandler {
  weak var target:WKScriptMessageHandler?
@@ -34,6 +34,9 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
   loading=web.observe(\.estimatedProgress,options:[.new]){[weak self] web,_ in self?.progress.progress=Float(web.estimatedProgress);self?.progress.isHidden=web.estimatedProgress>=1}
   web.load(URLRequest(url:home,cachePolicy:.useProtocolCachePolicy,timeoutInterval:25))
  }
+ @discardableResult func openLink(_ url:URL)->Bool {
+  if url.scheme=="vibefy" && url.host=="connect" {finishGoogle(url);return true};return openJam(url)
+ }
  @discardableResult func openJam(_ url:URL)->Bool {
   guard url.scheme=="vibefy",url.host=="jam",let code=URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name=="code"})?.value,code.range(of:"^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$",options:.regularExpression) != nil else{return false}
   loadViewIfNeeded();web.load(URLRequest(url:URL(string:home.absoluteString+"?jam="+code)!));return true
@@ -47,7 +50,7 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
  }
  func webView(_ webView:WKWebView,createWebViewWith configuration:WKWebViewConfiguration,for action:WKNavigationAction,windowFeatures:WKWindowFeatures)->WKWebView? {
   if action.navigationType == .linkActivated,let url=action.request.url,url.scheme=="https" {UIApplication.shared.open(url);return nil}
-  let alert=UIAlertController(title:"Google connection",message:"Google sign-in is not yet connected to this app. Guest playlists and public imports remain available. Signing in in a separate browser does not sign this app in.",preferredStyle:.alert);alert.addAction(UIAlertAction(title:"OK",style:.default));present(alert,animated:true);return nil
+  return nil
  }
  func webView(_ webView:WKWebView,didFailProvisionalNavigation navigation:WKNavigation!,withError error:Error){if (error as NSError).code != NSURLErrorCancelled{offline()}}
  func webView(_ webView:WKWebView,didFail navigation:WKNavigation!,withError error:Error){if (error as NSError).code != NSURLErrorCancelled{offline()}}
@@ -55,9 +58,21 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
  private func offline(){failed=true;progress.isHidden=true;for child in stack.arrangedSubviews{stack.removeArrangedSubview(child);child.removeFromSuperview()};let label=UILabel();label.text="Cannot connect right now. Your saved playlists are kept.";label.textColor = .white;label.numberOfLines=0;label.textAlignment = .center;stack.addArrangedSubview(label);let retry=UIButton(type:.system);retry.setTitle("Try again",for:.normal);retry.addTarget(self,action:#selector(reload),for:.touchUpInside);stack.addArrangedSubview(retry);cover.isHidden=false}
  @objc private func reload(){web.load(URLRequest(url:home))}
  func userContentController(_ controller:WKUserContentController,didReceive message:WKScriptMessage){
-  guard message.frameInfo.isMainFrame,trusted(message.frameInfo.request.url),let packet=message.body as? [String:Any],packet["action"] as? String=="exportBackup",let content=packet["content"] as? String,content.utf8.count<=6_000_000,let data=content.data(using:.utf8),let json=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any],json["collections"] is [Any],json["likes"] is [Any],temporaryExport==nil else{return}
+  guard message.frameInfo.isMainFrame,trusted(message.frameInfo.request.url),let packet=message.body as? [String:Any] else{return}
+  if packet["action"] as? String=="connectGoogle",let raw=packet["url"] as? String {openGoogle(raw);return}
+  guard packet["action"] as? String=="exportBackup",let content=packet["content"] as? String,content.utf8.count<=6_000_000,let data=content.data(using:.utf8),let json=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any],json["collections"] is [Any],json["likes"] is [Any],temporaryExport==nil else{return}
   let file=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+"-vibefy-library.json");temporaryExport=file
   DispatchQueue.global(qos:.userInitiated).async {do {try data.write(to:file,options:.atomic);DispatchQueue.main.async {let picker=UIDocumentPickerViewController(forExporting:[file],asCopy:true);picker.delegate=self;self.present(picker,animated:true)}}catch{DispatchQueue.main.async{self.temporaryExport=nil}}}
+ }
+ private var googleState:String?;private var googleStarted=Date.distantPast
+ private func openGoogle(_ raw:String){
+  guard raw.count<1000,let url=URL(string:raw),trusted(url),url.path=="/mobile-connect.html",let fragment=url.fragment,let parts=URLComponents(string:"https://local/?"+fragment),let state=parts.queryItems?.first(where:{$0.name=="state"})?.value,state.range(of:"^[A-Za-z0-9_-]{32}$",options:.regularExpression) != nil else{return}
+  googleState=state;googleStarted=Date();UIApplication.shared.open(url)
+ }
+ private func finishGoogle(_ url:URL){
+  guard url.absoluteString.count<16000,Date().timeIntervalSince(googleStarted)<300,let state=googleState,let fragment=url.fragment,let parts=URLComponents(string:"https://local/?"+fragment),parts.queryItems?.first(where:{$0.name=="state"})?.value==state else{return}
+  googleState=nil;guard trusted(web.url),let data=try? JSONSerialization.data(withJSONObject:[url.absoluteString]),let array=String(data:data,encoding:.utf8) else{return}
+  web.evaluateJavaScript("window.vibefyMobileAuthResult?.("+array+"[0])",completionHandler:nil)
  }
  private func cleanExport(){if let file=temporaryExport{try? FileManager.default.removeItem(at:file);temporaryExport=nil}}
  func documentPickerWasCancelled(_ controller:UIDocumentPickerViewController){cleanExport()}

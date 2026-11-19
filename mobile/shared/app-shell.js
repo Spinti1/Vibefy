@@ -14,6 +14,26 @@
   Storage.prototype.removeItem=function(key){originalRemove.call(this,key);if(this===sessionStorage&&key==='vibefy-resume')try{originalRemove.call(localStorage,resumeKey);}catch{}};
  }catch{}
  function send(packet){try{if(window.VibefyMobile?.postMessage)window.VibefyMobile.postMessage(JSON.stringify(packet));else if(window.webkit?.messageHandlers?.vibefyMobile)window.webkit.messageHandlers.vibefyMobile.postMessage(packet);else return false;return true;}catch{return false;}}
+
+ let authJob;
+ const enc=bytes=>btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+ const dec=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
+ window.vibefyMobileAuthorize=write=>new Promise((resolve,reject)=>{
+  if(authJob)return reject(Error('Finish connecting in your browser first.'));
+  const key=crypto.getRandomValues(new Uint8Array(32)),state=enc(crypto.getRandomValues(new Uint8Array(24)));
+  const job={key,state,resolve,reject};authJob=job;job.timer=setTimeout(()=>{if(authJob===job){authJob=null;reject(Error('Connection expired. Tap Connect YouTube to try again.'));}},300000);
+  if(!send({action:'connectGoogle',url:location.origin+'/mobile-connect.html#'+new URLSearchParams({key:enc(key),state,write:write?'1':'0'})})){clearTimeout(job.timer);authJob=null;reject(Error('The browser could not open.'));}
+ });
+ window.vibefyMobileAuthResult=async raw=>{
+  const job=authJob;if(!job)return;
+  try{const u=new URL(raw);if(u.protocol!=='vibefy:'||u.hostname!=='connect'||raw.length>16000)return;
+   const p=new URLSearchParams(u.hash.slice(1));if(p.get('state')!==job.state)return;
+   const key=await crypto.subtle.importKey('raw',job.key,'AES-GCM',false,['decrypt']);
+   const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv:dec(p.get('iv')),additionalData:new TextEncoder().encode(job.state)},key,dec(p.get('data')));
+   const grant=JSON.parse(new TextDecoder().decode(plain));if(!grant.access_token||!Number.isFinite(grant.expires_in)||grant.expires_in<=0)throw Error();
+   authJob=null;clearTimeout(job.timer);job.key.fill(0);job.resolve(grant);
+  }catch{authJob=null;clearTimeout(job.timer);job.key.fill(0);job.reject(Error('The connection could not be verified. Please connect again.'));}
+ };
  function install(){
   if(!document.getElementById('vibefy-mobile-style')){const style=document.createElement('style');style.id='vibefy-mobile-style';style.textContent=`
    html[data-mobile-app=true]{color-scheme:dark;background:#0e1215;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}

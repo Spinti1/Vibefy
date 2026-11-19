@@ -1,0 +1,20 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
+const script=fs.readFileSync('mobile/shared/app-shell.js','utf8'),browser=fs.readFileSync('web/public/mobile-connect.js','utf8');
+function environment(){
+ class Storage {getItem(){return null}setItem(){}removeItem(){}}
+ let packet;const timers=new Map();let n=0;
+ const window={addEventListener(){},VibefyMobile:{postMessage(raw){packet=JSON.parse(raw)}}};window.top=window;window.self=window;
+ const c={window,crypto:globalThis.crypto,btoa,atob,Uint8Array,URL,URLSearchParams,TextEncoder,TextDecoder,Storage,localStorage:new Storage(),sessionStorage:new Storage(),location:{origin:'https://vibefy-neon.vercel.app'},document:{documentElement:{dataset:{}},readyState:'loading',addEventListener(){}},setTimeout(fn){timers.set(++n,fn);return n},clearTimeout(id){timers.delete(id)}};
+ vm.runInNewContext(script,c);return {c,window,timers,get packet(){return packet}};
+}
+async function browserGrant(e,grant){
+ const nodes={status:{},connect:{},return:{}};let options;const loc=new URL(e.packet.url);let cleared=false;
+ vm.runInNewContext(browser,{crypto:globalThis.crypto,URLSearchParams,Uint8Array,TextEncoder,btoa,atob,AbortSignal,location:loc,history:{replaceState(){cleared=true}},document:{getElementById:id=>nodes[id],createElement:()=>({}),head:{append(s){s.onload()}}},fetch:async()=>({ok:true,json:async()=>({clientId:'test-client'})}),google:{accounts:{oauth2:{initTokenClient(o){options=o;return{requestAccessToken(){}}}}}}});
+ for(let i=0;i<30&&!options;i++)await new Promise(r=>setImmediate(r));assert.ok(cleared);assert.ok(options);await options.callback(grant);return nodes;
+}
+const grant={access_token:'test-token-not-real',expires_in:3600,scope:'openid profile https://www.googleapis.com/auth/youtube.readonly'};
+test('actual browser page encrypts grant and application decrypts it, one time only',async()=>{const e=environment(),pending=e.window.vibefyMobileAuthorize(false);const nodes=await browserGrant(e,grant);assert.equal(nodes.return.hidden,false);const url=nodes.return.href;assert.ok(!url.includes(grant.access_token));await e.window.vibefyMobileAuthResult(url);assert.deepEqual(JSON.parse(JSON.stringify(await pending)),grant);await e.window.vibefyMobileAuthResult(url);assert.equal(e.timers.size,0)});
+test('callback with wrong state is ignored; correct grant still completes',async()=>{const e=environment(),pending=e.window.vibefyMobileAuthorize(true);assert.equal(new URL(e.packet.url).hash.includes('write=1'),true);const nodes=await browserGrant(e,grant);const bad=new URL(nodes.return.href);const p=new URLSearchParams(bad.hash.slice(1));p.set('state','wrong');bad.hash=p;await e.window.vibefyMobileAuthResult(bad.href);await e.window.vibefyMobileAuthResult(nodes.return.href);assert.equal((await pending).access_token,grant.access_token)});
+test('tampered ciphertext fails rather than accepting account data',async()=>{const e=environment(),pending=e.window.vibefyMobileAuthorize(false),rejected=assert.rejects(pending,/verified/);const nodes=await browserGrant(e,grant),url=new URL(nodes.return.href),p=new URLSearchParams(url.hash.slice(1));p.set('data','AAAA');url.hash=p;await e.window.vibefyMobileAuthResult(url.href);await rejected;assert.equal(e.timers.size,0)});
+test('timeout clears pending operation and permits retry',async()=>{const e=environment(),pending=e.window.vibefyMobileAuthorize(false),rejected=assert.rejects(pending,/expired/);[...e.timers.values()][0]();await rejected;const next=e.window.vibefyMobileAuthorize(false),again=assert.rejects(next,/expired/);[...e.timers.values()].at(-1)();await again});
+test('Google denial leaves retry available and never creates callback',async()=>{const e=environment(),pending=e.window.vibefyMobileAuthorize(false),nodes=await browserGrant(e,{error:'access_denied'});assert.equal(nodes.return.href,undefined);assert.equal(nodes.connect.disabled,false);const rejected=assert.rejects(pending);[...e.timers.values()][0]();await rejected});
