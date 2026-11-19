@@ -34,6 +34,7 @@ jobs:
       - name: Build device application without signing credentials
         working-directory: mobile/ios
         run: |
+          python3 ../tools/icons.py
           xcodegen generate
           xcodebuild -project Vibefy.xcodeproj -scheme Vibefy -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
           mkdir -p package/Payload
