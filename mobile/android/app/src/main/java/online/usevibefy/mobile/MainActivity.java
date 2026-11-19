@@ -25,8 +25,8 @@ public final class MainActivity extends Activity {
   super.onCreate(state);
   LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);layout.setBackgroundColor(Color.rgb(16,20,18));
   LinearLayout toolbar=new LinearLayout(this);
-  Button reload=new Button(this);reload.setText("Reload");reload.setOnClickListener(v->web.loadUrl(HOME));toolbar.addView(reload);
-  Button browser=new Button(this);browser.setText("Open in browser");browser.setOnClickListener(v->external(Uri.parse(web.getUrl()!=null&&internal(Uri.parse(web.getUrl()))?web.getUrl():HOME)));toolbar.addView(browser);
+  Button reload=new Button(this);reload.setText(R.string.reload);reload.setOnClickListener(v->web.loadUrl(HOME));toolbar.addView(reload);
+  Button browser=new Button(this);browser.setText(R.string.open_browser);browser.setOnClickListener(v->external(Uri.parse(web.getUrl()!=null&&internal(Uri.parse(web.getUrl()))?web.getUrl():HOME)));toolbar.addView(browser);
   layout.addView(toolbar);
   web=new WebView(this);layout.addView(web,new LinearLayout.LayoutParams(-1,0,1));setContentView(layout);
   web.setBackgroundColor(Color.rgb(16,20,18));
