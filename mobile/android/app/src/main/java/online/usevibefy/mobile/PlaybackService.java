@@ -5,6 +5,7 @@ import androidx.media3.session.MediaSessionService;
 import androidx.media3.common.AudioAttributes;
 import androidx.media3.common.C;
 
+@androidx.media3.common.util.UnstableApi
 public final class PlaybackService extends MediaSessionService {
  private MediaSession session;
  @Override public void onCreate(){super.onCreate();ExoPlayer player=new ExoPlayer.Builder(this).build();player.setAudioAttributes(new AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),true);player.setHandleAudioBecomingNoisy(true);session=new MediaSession.Builder(this,player).build();}

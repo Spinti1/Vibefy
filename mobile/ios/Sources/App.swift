@@ -64,7 +64,7 @@ struct PlaylistResponse:Decodable {var title:String;var tracks:[Song]}
 
    catch {Task{@MainActor in self.error="Playlist changes could not be saved."}}
 
-  }}catch {error="Playlist data could not be encoded."}
+  }}catch {self.error="Playlist data could not be encoded."}
 
  }
 
