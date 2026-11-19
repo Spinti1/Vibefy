@@ -1,0 +1,24 @@
+{
+  "name": "Vibefy",
+  "identifier": "online.usevibefy.source",
+  "apps": [
+    {
+      "name": "Vibefy Preview",
+      "bundleIdentifier": "online.usevibefy.mobile",
+      "developerName": "Spinti1 and contributors",
+      "localizedDescription": "Vibefy mobile preview. Requires internet. Native Google connection and background playback are not included.",
+      "iconURL": "https://raw.githubusercontent.com/Spinti1/Vibefy/main/web/public/assets/icon.png",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "date": "2026-11-19",
+          "downloadURL": "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.1.0/Vibefy-0.1.0.ipa",
+          "size": 1263694,
+          "minOSVersion": "15.0",
+          "localizedDescription": "Vibefy mobile preview. Requires internet. Native Google connection and background playback are not included."
+        }
+      ]
+    }
+  ],
+  "news": []
+}
