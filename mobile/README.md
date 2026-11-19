@@ -1,27 +1,20 @@
-# Vibefy mobile preview 0.1.0
+# Native Vibefy mobile port (in development)
 
-Small native Android and iOS hosts for the existing HTTPS Vibefy web player. This preview requires internet and the deployed Vibefy backend. It is not a port of the Windows Rust playback engine. It shares the web player's search, public playlist imports, local playlist metadata, browser mods and Jam. No audio library or desktop speech model is bundled.
+The 0.1.0 WebView preview did not meet the requested native-mobile design. It is superseded; no further WebView app releases are planned.
 
-## Current limits
+## Native implementation
 
-Google does not support its authorization flow in embedded WebViews. The preview offers **Open in browser** for the existing web connection. This does not log the native app in, and browser storage is separate from the app's storage. Export/import playlist metadata to transfer guest collections. Native account authorization is still pending; do not advertise desktop account parity.
+- Android: Java native Android views, Media3 ExoPlayer/MediaSessionService, Android audio focus, headset handling and media notification integration. No WebView or JavaScript UI runtime.
+- iOS: SwiftUI native views, AVPlayer, playback audio session, background audio entitlement and system media commands. No WKWebView or HTML UI.
+- Native Home, search-on-submit, playlist creation and metadata storage, song list, queue and transport. Local metadata is stored as an atomic JSON file, separate from the retired WebView's untouched storage.
+- Public metadata requests reuse the existing Vibefy HTTPS API; using an API does not render or embed the website.
 
-YouTube still uses its official embedded player. Background/lock-screen playback is not guaranteed. JuiceVault and SoundCloud availability remains subject to providers. Native download, external file import/export behavior, autoplay and Jam timing need physical-device testing before a stable release. Local playlists belong to the app installation and can be lost when uninstalling. Existing desktop data is untouched.
+## Outstanding work, not release-ready
 
-## Android
+The desktop playback engine uses an external yt-dlp process. iOS cannot run that desktop process, and the current hosted browser deployment disables direct YouTube audio. A mobile-compatible source resolver is still required. The current native players accept the existing direct JuiceVault audio endpoint; YouTube audio cannot be described as working yet.
 
-Requires JDK 17 or 21, Gradle 8.9, Android SDK 35 and build tools. Run `gradle -p mobile/android assembleDebug assembleRelease lintRelease` from the repository root.
+Account connection, full playlist imports and matching/pagination, backups, Jam, mods, lyrics, visual polish and physical-device validation are still being ported. Existing wrapper storage is not auto-deleted or overwritten. Do not publish this build as desktop feature parity.
 
-`app-debug.apk` is installable for testing. `app-release-unsigned.apk` is deliberately unsigned: a stable release needs a persistent publisher signing key stored outside source control. Do not ship repeatedly changing debug keys as production updates.
+Build checks are in `.github/workflows/mobile-native.yml`. These are development artifacts, not a new SideStore release. Version 0.2.0 is reserved for this native development line. APK signing continues to use the locally retained publisher key when a release is ready; iOS unsigned device IPA packaging is for SideStore/iLoader signing.
 
-## iOS, SideStore and iLoader
-
-Use **Build Vibefy mobile preview** in GitHub Actions. Its macOS runner creates a real device `.app`, packages `Payload/Vibefy.app` in an unsigned IPA, and generates a source from the IPA's actual bundle ID, version and byte count. No Apple password, certificate or provisioning profile is needed for this unsigned build. SideStore/iLoader handles device signing; Apple's sideloading restrictions and refresh requirements still apply.
-
-The IPA can be imported directly into iLoader or SideStore. For a source link, first attach the exact IPA to the `mobile-v0.1.0` GitHub prerelease, then publish the generated `source.json` at a stable HTTPS URL. Do not list an IPA that has not been uploaded. The generated download URL is version-specific, not `latest`. Bundle ID is `online.usevibefy.mobile` on both platforms.
-
-## Security and credits
-
-Main-frame navigation stays on the fixed Vibefy HTTPS host. External HTTPS links open in the system browser. No native JavaScript bridge, filesystem access, arbitrary URL loader, cleartext exception, or certificate bypass is included. The operating system owns WebView storage. Embedded provider frames remain part of the existing player.
-
-Vibefy and the web interface retain the repository's MIT license and existing [credits](../CREDITS.md). Android uses the system WebView; iOS uses Apple's WebKit. SideStore and iLoader are third-party installation tools, not authors of Vibefy. No new artwork or third-party app source was copied.
+Credits and licenses remain in the repository root. Native playback uses AndroidX Media3 (Apache-2.0) and Apple system frameworks. Desktop sources, credentials, playlists and listening data are unaffected.

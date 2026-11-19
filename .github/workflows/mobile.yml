@@ -1,4 +1,4 @@
-name: Build Vibefy mobile preview
+name: Build native Vibefy mobile development
 on:
   workflow_dispatch:
 permissions:
@@ -21,7 +21,7 @@ jobs:
       - run: gradle -p mobile/android --no-daemon assembleDebug assembleRelease lintRelease
       - uses: actions/upload-artifact@v4
         with:
-          name: Vibefy-Android-preview
+          name: Vibefy-Android-native-development
           path: |
             mobile/android/app/build/outputs/apk/debug/*.apk
             mobile/android/app/build/outputs/apk/release/*.apk
@@ -41,14 +41,14 @@ jobs:
           mkdir -p package/Payload
           cp -R build/Build/Products/Release-iphoneos/Vibefy.app package/Payload/
           cd package
-          /usr/bin/zip -r -y ../Vibefy-0.1.0.ipa Payload
+          /usr/bin/zip -r -y ../Vibefy-0.2.0.ipa Payload
       - name: Validate IPA and create SideStore source
-        run: python3 mobile/tools/source.py mobile/ios/Vibefy-0.1.0.ipa --url https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.1.0/Vibefy-0.1.0.ipa --output mobile/ios/source.json
+        run: python3 mobile/tools/source.py mobile/ios/Vibefy-0.2.0.ipa --url https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.0/Vibefy-0.2.0.ipa --output mobile/ios/source.json
       - uses: actions/upload-artifact@v4
         with:
-          name: Vibefy-iOS-preview
+          name: Vibefy-iOS-native-development
           path: |
-            mobile/ios/Vibefy-0.1.0.ipa
+            mobile/ios/Vibefy-0.2.0.ipa
             mobile/ios/source.json
             mobile/ios/source.sha256
           retention-days: 7
