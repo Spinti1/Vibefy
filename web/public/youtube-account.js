@@ -6,8 +6,8 @@
  const connected=()=>!!token&&Date.now()<expires;
  const status=message=>{$('youtube-status').textContent=message;};
  function update(){
-  const active=connected();
-  for(const name of ['header']){const button=$(name+'-connect');button.disabled=loading||!client;button.classList.toggle('connected',active);button.setAttribute('aria-label',active?'YouTube connected. Open account':loading?'Connecting YouTube':'Connect YouTube');$(name+'-connect-label').textContent=loading?'Connecting…':active?'YouTube connected':'Connect YouTube';}
+  const active=connected(),compact=window.vibefyPhone||window.matchMedia?.('(max-width:900px)').matches;
+  for(const name of ['header']){const button=$(name+'-connect');button.disabled=loading||!client;button.classList.toggle('connected',active);button.setAttribute('aria-label',active?'YouTube connected. Open account':loading?'Connecting YouTube':'Connect YouTube');$(name+'-connect-label').textContent=loading?'Connecting…':active?(compact?'Connected':'YouTube connected'):(compact?'Sign in':'Connect YouTube');}
   $('google-connect').disabled=loading||!client;$('google-connect').hidden=active;$('google-connect-label').textContent=loading?'Connecting…':'Continue to Google';
   $('google-disconnect').hidden=!active;$('youtube-refresh').hidden=!active;$('youtube-refresh').disabled=loading;
   $('account-identity').textContent=active?(displayName||'YouTube connected'):'Not connected';

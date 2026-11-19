@@ -1,4 +1,4 @@
-// Repair document-start initialization in already installed mobile 0.2.2 apps.
+// Repair and maintain app navigation in installed mobile clients.
 if(window.VibefyMobile?.postMessage||window.webkit?.messageHandlers?.vibefyMobile){
 (() => {
  'use strict';
@@ -36,6 +36,12 @@ if(window.VibefyMobile?.postMessage||window.webkit?.messageHandlers?.vibefyMobil
    authJob=null;clearTimeout(job.timer);job.key.fill(0);job.resolve(grant);
   }catch{authJob=null;clearTimeout(job.timer);job.key.fill(0);job.reject(Error('The connection could not be verified. Please connect again.'));}
  };
+ function routeHome(event){
+  const anchor=event.target?.closest?.('a[href]');if(!anchor)return;
+  const url=new URL(anchor.href,location.origin);
+  if(anchor.matches('.brand,[data-app-home]')||(url.origin===location.origin&&['/','/index.html','/download'].includes(url.pathname))){event.preventDefault();event.stopImmediatePropagation();document.querySelector('.toolbar-home')?.click();}
+ }
+ document.addEventListener('click',routeHome,true);window.vibefyMobileNavigationReady=true;
  window.vibefyMobileShellReady=true;
  function install(){
   if(document.documentElement)document.documentElement.dataset.mobileApp='true';
@@ -44,7 +50,7 @@ if(window.VibefyMobile?.postMessage||window.webkit?.messageHandlers?.vibefyMobil
    [data-mobile-app=true] body{overscroll-behavior-y:none}
    [data-mobile-app=true] .app-header,[data-mobile-app=true] .bottom-nav,[data-mobile-app=true] .mini-player{backdrop-filter:none;-webkit-backdrop-filter:none}
    [data-mobile-app=true] button,[data-mobile-app=true] .icon-button{touch-action:manipulation}
-   [data-mobile-app=true] .app-header .download-link,[data-mobile-app=true] .rail-bottom{display:none!important}
+   [data-mobile-app=true] .app-header .download-link,[data-mobile-app=true] .app-header .github-link,[data-mobile-app=true] .web-label,[data-mobile-app=true] .rail-bottom{display:none!important}
    [data-mobile-app=true] .collection-tile{content-visibility:auto;contain-intrinsic-size:auto 180px}
    [data-mobile-app=true] input,[data-mobile-app=true] select,[data-mobile-app=true] textarea{font-size:16px}
    [data-mobile-app=true] dialog{max-height:calc(100dvh - 36px);overscroll-behavior:contain}

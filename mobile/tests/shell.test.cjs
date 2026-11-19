@@ -22,7 +22,7 @@ test('native export includes live unsaved metadata when storage quota was reache
  const localStorage=new Storage(),sessionStorage=new Storage();localStorage.setItem('vibefy-web-v1',JSON.stringify({likes:[],collections:[]}));
  const live={likes:[],collections:[{id:'new-local',title:'New playlist',tracks:[]}]};let packet;const button={dataset:{},onclick(){throw Error('fallback unexpected')}};
  const window={addEventListener(){},VibefyMobile:{postMessage(value){packet=JSON.parse(value)}}};window.top=window;window.self=window;
- const document={documentElement:{dataset:{}},readyState:'complete',head:{append(){}},createElement(){return{}},getElementById(id){return id==='export-library'?button:null},querySelector(){return null},querySelectorAll(){return[]}};
+ const document={documentElement:{dataset:{}},readyState:'complete',addEventListener(){},head:{append(){}},createElement(){return{}},getElementById(id){return id==='export-library'?button:null},querySelector(){return null},querySelectorAll(){return[]}};
  vm.runInNewContext(script,{Storage,window,document,localStorage,sessionStorage,state:live,location:{origin:'https://vibefy-neon.vercel.app'}});
  button.onclick();assert.deepEqual(JSON.parse(packet.content),live);assert.equal(packet.action,'exportBackup');
 });
