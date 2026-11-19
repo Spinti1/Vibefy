@@ -8,8 +8,8 @@ function environment(){
  vm.runInNewContext(script,c);return {c,window,timers,get packet(){return packet}};
 }
 async function browserGrant(e,grant){
- const nodes={status:{},connect:{},return:{}};let options;const loc=new URL(e.packet.url);let cleared=false;
- vm.runInNewContext(browser,{crypto:globalThis.crypto,URLSearchParams,Uint8Array,TextEncoder,btoa,atob,AbortSignal,location:loc,history:{replaceState(){cleared=true}},document:{getElementById:id=>nodes[id],createElement:()=>({}),head:{append(s){s.onload()}}},fetch:async()=>({ok:true,json:async()=>({clientId:'test-client'})}),google:{accounts:{oauth2:{initTokenClient(o){options=o;return{requestAccessToken(){}}}}}}});
+ const nodes={status:{},connect:{},return:{},retry:{}};let options;const loc=new URL(e.packet.url);let cleared=false;
+ vm.runInNewContext(browser,{setTimeout,clearTimeout,crypto:globalThis.crypto,URLSearchParams,Uint8Array,TextEncoder,btoa,atob,AbortSignal,location:loc,history:{replaceState(){cleared=true}},document:{getElementById:id=>nodes[id],createElement:()=>({}),head:{append(s){s.onload()}}},fetch:async()=>({ok:true,json:async()=>({clientId:'test-client'})}),google:{accounts:{oauth2:{initTokenClient(o){options=o;return{requestAccessToken(){}}}}}}});
  for(let i=0;i<30&&!options;i++)await new Promise(r=>setImmediate(r));assert.ok(cleared);assert.ok(options);await options.callback(grant);return nodes;
 }
 const grant={access_token:'test-token-not-real',expires_in:3600,scope:'openid profile https://www.googleapis.com/auth/youtube.readonly'};
@@ -18,3 +18,5 @@ test('callback with wrong state is ignored; correct grant still completes',async
 test('tampered ciphertext fails rather than accepting account data',async()=>{const e=environment(),pending=e.window.vibefyMobileAuthorize(false),rejected=assert.rejects(pending,/verified/);const nodes=await browserGrant(e,grant),url=new URL(nodes.return.href),p=new URLSearchParams(url.hash.slice(1));p.set('data','AAAA');url.hash=p;await e.window.vibefyMobileAuthResult(url.href);await rejected;assert.equal(e.timers.size,0)});
 test('timeout clears pending operation and permits retry',async()=>{const e=environment(),pending=e.window.vibefyMobileAuthorize(false),rejected=assert.rejects(pending,/expired/);[...e.timers.values()][0]();await rejected;const next=e.window.vibefyMobileAuthorize(false),again=assert.rejects(next,/expired/);[...e.timers.values()].at(-1)();await again});
 test('Google denial leaves retry available and never creates callback',async()=>{const e=environment(),pending=e.window.vibefyMobileAuthorize(false),nodes=await browserGrant(e,{error:'access_denied'});assert.equal(nodes.return.href,undefined);assert.equal(nodes.connect.disabled,false);const rejected=assert.rejects(pending);[...e.timers.values()][0]();await rejected});
+
+test('cancelling allows an immediate fresh authorization rather than blocking retries',async()=>{const e=environment(),one=e.window.vibefyMobileAuthorize(false),failed=assert.rejects(one,/cancelled/);e.window.vibefyMobileCancelAuth();await failed;const next=e.window.vibefyMobileAuthorize(false),rejected=assert.rejects(next,/cancelled/);e.window.vibefyMobileCancelAuth();await rejected;assert.equal(e.timers.size,0)});

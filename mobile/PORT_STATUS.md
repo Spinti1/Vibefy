@@ -31,3 +31,12 @@ Native Android APK and iOS IPA, with the desktop app's workflows adapted to touc
 Android local assembleDebug, assembleRelease and lintRelease succeeded (0 errors, 25 warnings primarily native text/resource lint). iOS checked via macOS GitHub Actions; final native build is tracked in .cache/native-mobile-verification.md.
 
 The historical 0.1.0 release is marked superseded, and main/mobile/source.json now has no installable entries. Historical files remain available; no user device data was deleted.
+
+
+## Mobile 0.2.2: Google browser handoff
+
+The current published mobile architecture is hybrid, following the user's later authorization to use an optimized WebView. Earlier native prototype notes above are historical; those screens are not the distribution target.
+
+Google consent now runs on the existing registered web origin in the system browser, with a deliberate Return to Vibefy link. A fresh 256-bit AES-GCM key and random 192-bit state bind the response to the waiting app page. The return URL contains only authenticated ciphertext; the key is sent in the initial fragment and immediately removed from browser history. Neither grant nor key is sent to Vibefy's server or saved in localStorage. Foreign frames/origins cannot launch the native bridge. Responses expire after five minutes and are accepted once. A killed/reloaded app must restart the connection. Tokens expire according to Google and require reconnection; this does not add refresh tokens or bypass Google verification/user limits.
+
+Checks: Android release build and lint; shared queue/backup tests; actual browser-page encryption round trip, wrong state, tampering, timeout, permission denial; hosted account-controller integration including connected label and playlist API load without GIS inside WebView. iOS is compiled by macOS CI. Account-specific consent, 2FA and physical phone/browser transitions require a real device and remain explicitly unverified in this unattended session.

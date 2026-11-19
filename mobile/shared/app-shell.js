@@ -16,6 +16,7 @@
  function send(packet){try{if(window.VibefyMobile?.postMessage)window.VibefyMobile.postMessage(JSON.stringify(packet));else if(window.webkit?.messageHandlers?.vibefyMobile)window.webkit.messageHandlers.vibefyMobile.postMessage(packet);else return false;return true;}catch{return false;}}
 
  let authJob;
+ window.vibefyMobileCancelAuth=()=>{const job=authJob;if(!job)return;authJob=null;clearTimeout(job.timer);job.key.fill(0);job.reject(Error('Connection cancelled. Tap Connect YouTube to try again.'));};
  const enc=bytes=>btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
  const dec=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
  window.vibefyMobileAuthorize=write=>new Promise((resolve,reject)=>{
