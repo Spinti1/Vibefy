@@ -12,7 +12,7 @@ with zipfile.ZipFile(a.ipa) as z:
  info=plistlib.loads(z.read(plists[0]));root=plists[0].rsplit("/",1)[0]
  if root+"/"+info["CFBundleExecutable"] not in names:p.error("App executable is missing")
  if info["CFBundleIdentifier"]!="online.usevibefy.mobile":p.error("Unexpected bundle identity")
-version={"version":info["CFBundleShortVersionString"],"date":datetime.now(timezone.utc).date().isoformat(),"downloadURL":a.url,"size":a.ipa.stat().st_size,"minOSVersion":info.get("MinimumOSVersion","15.0"),"localizedDescription":"Vibefy mobile preview. Requires internet. Native Google connection and background playback are not included."}
+version={"version":info["CFBundleShortVersionString"],"date":datetime.now(timezone.utc).date().isoformat(),"downloadURL":a.url,"size":a.ipa.stat().st_size,"minOSVersion":info.get("MinimumOSVersion","15.0"),"localizedDescription":"Optimized hybrid mobile preview. Persistent local playlists and native backup export. Google connection inside the app and reliable background YouTube playback are not yet available."}
 source={"name":"Vibefy","identifier":"online.usevibefy.source","apps":[{"name":"Vibefy Preview","bundleIdentifier":info["CFBundleIdentifier"],"developerName":"Spinti1 and contributors","localizedDescription":version["localizedDescription"],"iconURL":"https://raw.githubusercontent.com/Spinti1/Vibefy/main/web/public/assets/icon.png","versions":[version]}],"news":[]}
 a.output.write_text(json.dumps(source,indent=2)+"\n",encoding="utf-8")
 a.output.with_suffix(".sha256").write_text(hashlib.sha256(a.ipa.read_bytes()).hexdigest()+"  "+a.ipa.name+"\n",encoding="utf-8")

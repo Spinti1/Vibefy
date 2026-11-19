@@ -1,10 +1,12 @@
 import UIKit
 import WebKit
 import UniformTypeIdentifiers
+import AVFAudio
 
 @main final class AppDelegate:UIResponder,UIApplicationDelegate {
  var window:UIWindow?;private var controller:MobileController?
  func application(_ app:UIApplication,didFinishLaunchingWithOptions options:[UIApplication.LaunchOptionsKey:Any]?) -> Bool {
+  try? AVAudioSession.sharedInstance().setCategory(.playback,mode:.default)
   let window=UIWindow(frame:UIScreen.main.bounds);let controller=MobileController();window.rootViewController=controller;window.makeKeyAndVisible();self.window=window;self.controller=controller;return true
  }
  func application(_ application:UIApplication,open url:URL,options:[UIApplication.OpenURLOptionsKey:Any]=[:])->Bool {controller?.openJam(url) ?? false}
@@ -44,6 +46,7 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
   if trusted(url){decisionHandler(.allow)}else{decisionHandler(.cancel);if action.navigationType == .linkActivated && url.scheme=="https"{UIApplication.shared.open(url)}}
  }
  func webView(_ webView:WKWebView,createWebViewWith configuration:WKWebViewConfiguration,for action:WKNavigationAction,windowFeatures:WKWindowFeatures)->WKWebView? {
+  if action.navigationType == .linkActivated,let url=action.request.url,url.scheme=="https" {UIApplication.shared.open(url);return nil}
   let alert=UIAlertController(title:"Google connection",message:"Google sign-in is not yet connected to this app. Guest playlists and public imports remain available. Signing in in a separate browser does not sign this app in.",preferredStyle:.alert);alert.addAction(UIAlertAction(title:"OK",style:.default));present(alert,animated:true);return nil
  }
  func webView(_ webView:WKWebView,didFailProvisionalNavigation navigation:WKNavigation!,withError error:Error){if (error as NSError).code != NSURLErrorCancelled{offline()}}

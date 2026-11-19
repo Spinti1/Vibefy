@@ -1,3 +1,7 @@
+# Current mobile direction
+
+The user subsequently authorized an optimized hybrid app. Current app entry points are WebView/WKWebView plus native app navigation and document export. The native-only work below is retained as a development foundation, not advertised as the current released engine. See README.md for the exact 0.2.1 feature/limitation list. Automatic same-network desktop discovery and complete Google/native audio integration remain pending.
+
 # Native mobile port status
 
 ## Requested product

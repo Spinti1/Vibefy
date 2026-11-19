@@ -1,20 +1,25 @@
-# Native Vibefy mobile port (in development)
+# Vibefy mobile 0.2.1 hybrid preview
 
-The 0.1.0 WebView preview did not meet the requested native-mobile design. It is superseded; no further WebView app releases are planned.
+The user authorized a lightweight hybrid app after the native-only port began. The current entry points use Android WebView and Apple WKWebView with app-style navigation and the existing mobile interface. Native-only prototype screens and player code are retained for later engine integration; they are not the active playback engine in this build.
 
-## Native implementation
+## Implemented
 
-- Android: Java native Android views, Media3 ExoPlayer/MediaSessionService, Android audio focus, headset handling and media notification integration. No WebView or JavaScript UI runtime.
-- iOS: SwiftUI native views, AVPlayer, playback audio session, background audio entitlement and system media commands. No WKWebView or HTML UI.
-- Native Home, search-on-submit, playlist creation and metadata storage, song list, queue and transport. Local metadata is stored as an atomic JSON file, separate from the retired WebView's untouched storage.
-- Public metadata requests reuse the existing Vibefy HTTPS API; using an API does not render or embed the website.
+- No browser address bar or persistent Reload/Open in browser toolbar. Native launch cover, dark surfaces and Android Back/dialog navigation.
+- Persistent WebView/WKWebsiteDataStore profiles. Existing 0.1.0 local libraries on the same hosted origin are not wiped. Queue metadata now survives a cold app launch; it does not include music files or account secrets.
+- Browser HTTP caching stays enabled. Rendering expensive offscreen playlist tiles can be skipped. Active animation frame pacing is not capped; heavyweight desktop visualizers/Track Peek/Oneko are absent from the mobile web interface.
+- Native document export for metadata-only playlist backups, main-frame/origin-restricted bridge, and platform document selection for JSON imports.
+- Jam code/link joining uses the existing relay and desktop protocol. `vibefy://jam?code=...` opens the app's Join screen. This works across networks; automatic same-Wi-Fi discovery/Spotify Connect-style playback transfer is not implemented yet.
 
-## Outstanding work, not release-ready
+## Important remaining limitations
 
-The desktop playback engine uses an external yt-dlp process. iOS cannot run that desktop process, and the current hosted browser deployment disables direct YouTube audio. A mobile-compatible source resolver is still required. The current native players accept the existing direct JuiceVault audio endpoint; YouTube audio cannot be described as working yet.
+Google account connection inside the embedded app is not implemented. Opening a separate browser does not connect this app's storage. JuiceVault's existing account form remains subject to provider acceptance. Account tokens can expire; persistent website data is not a guarantee of permanent login.
 
-Account connection, full playlist imports and matching/pagination, backups, Jam, mods, lyrics, visual polish and physical-device validation are still being ported. Existing wrapper storage is not auto-deleted or overwritten. Do not publish this build as desktop feature parity.
+YouTube uses the existing official player, including its visible video. Background/lock-screen YouTube playback is not guaranteed. Native Media3/AVPlayer prototype source is not presented as an integrated YouTube engine. Physical Android/iPhone flow, battery and frame-time measurement are still required before describing performance as proven.
 
-Build checks are in `.github/workflows/mobile-native.yml`. These are development artifacts, not a new SideStore release. Version 0.2.0 is reserved for this native development line. APK signing continues to use the locally retained publisher key when a release is ready; iOS unsigned device IPA packaging is for SideStore/iLoader signing.
+The app requires the hosted Vibefy service. It is not an offline player. Device-local playlists can be lost when app data is cleared or the app is uninstalled; export a metadata backup first.
 
-Credits and licenses remain in the repository root. Native playback uses AndroidX Media3 (Apache-2.0) and Apple system frameworks. Desktop sources, credentials, playlists and listening data are unaffected.
+## Builds and signing
+
+Use the mobile workflow on the development branch. Android uses SDK 35/Gradle 8.9/JDK 21. APK release signing uses the existing locally retained publisher key. iOS device builds run on macOS and produce an unsigned IPA for SideStore/iLoader signing. No signing credentials or account data are committed.
+
+See PORT_STATUS.md and the repository's CREDITS.md. AndroidX WebKit and Media3 are Apache-2.0; iOS WebKit and AVFoundation are system frameworks. The hybrid design is disclosed rather than advertised as fully native.

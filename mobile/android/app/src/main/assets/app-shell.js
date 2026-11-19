@@ -4,11 +4,13 @@
  window.vibefyMobileShell=true;
  document.documentElement.dataset.mobileApp='true';
  const resumeKey='vibefy-mobile-resume-v1';
+ const remembering=()=>{try{return JSON.parse(localStorage.getItem('vibefy-web-preferences')||'{}').rememberQueue!==false;}catch{return true;}};
  const originalSet=Storage.prototype.setItem,originalRemove=Storage.prototype.removeItem;
  const validResume=raw=>{if(typeof raw!=='string'||raw.length>1000000)return false;try{const v=JSON.parse(raw);return Array.isArray(v.queue)&&v.queue.length<=1000&&Number.isInteger(v.index)&&(v.queue.length===0?v.index===-1:v.index>=0&&v.index<v.queue.length)&&v.queue.every(t=>t&&typeof t.id==='string'&&/^(?:[A-Za-z0-9_-]{11}|jv:[0-9a-fA-F-]{36}|sc:\d{1,20})$/.test(t.id));}catch{return false;}};
  try {
-  if(!sessionStorage.getItem('vibefy-resume')) {const held=localStorage.getItem(resumeKey);if(validResume(held))originalSet.call(sessionStorage,'vibefy-resume',held);}
-  Storage.prototype.setItem=function(key,value){originalSet.call(this,key,value);if(this===sessionStorage&&key==='vibefy-resume')try{if(validResume(String(value)))originalSet.call(localStorage,resumeKey,String(value));else originalRemove.call(localStorage,resumeKey);}catch{}};
+  if(!remembering()){originalRemove.call(localStorage,resumeKey);originalRemove.call(sessionStorage,'vibefy-resume');}
+  if(remembering()&&!sessionStorage.getItem('vibefy-resume')) {const held=localStorage.getItem(resumeKey);if(validResume(held))originalSet.call(sessionStorage,'vibefy-resume',held);}
+  Storage.prototype.setItem=function(key,value){originalSet.call(this,key,value);if(this===sessionStorage&&key==='vibefy-resume')try{if(remembering()&&validResume(String(value)))originalSet.call(localStorage,resumeKey,String(value));else originalRemove.call(localStorage,resumeKey);}catch{}};
   Storage.prototype.removeItem=function(key){originalRemove.call(this,key);if(this===sessionStorage&&key==='vibefy-resume')try{originalRemove.call(localStorage,resumeKey);}catch{}};
  }catch{}
  function send(packet){try{if(window.VibefyMobile?.postMessage)window.VibefyMobile.postMessage(JSON.stringify(packet));else if(window.webkit?.messageHandlers?.vibefyMobile)window.webkit.messageHandlers.vibefyMobile.postMessage(packet);else return false;return true;}catch{return false;}}

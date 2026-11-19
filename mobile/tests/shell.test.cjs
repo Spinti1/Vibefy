@@ -3,7 +3,7 @@ const script=fs.readFileSync(require('node:path').join(__dirname,'../shared/app-
 const key='vibefy-mobile-resume-v1';
 function page(options={}){
  class Storage {constructor(){this.items=new Map()}getItem(k){return this.items.get(k)??null}setItem(k,v){this.items.set(String(k),String(v))}removeItem(k){this.items.delete(k)}}
- const localStorage=new Storage(),sessionStorage=new Storage();if(options.resume)localStorage.setItem(key,options.resume);localStorage.setItem('account-data','untouched');
+ const localStorage=new Storage(),sessionStorage=new Storage();if(options.resume)localStorage.setItem(key,options.resume);if(options.preferences)localStorage.setItem('vibefy-web-preferences',JSON.stringify(options.preferences));localStorage.setItem('account-data','untouched');
  const window={addEventListener(){}};window.top=window;window.self=options.frame?{}:window;
  const context={Storage,window,localStorage,sessionStorage,location:{origin:options.origin||'https://vibefy-neon.vercel.app'},document:{documentElement:{dataset:{}},readyState:'loading',addEventListener(){}}};
  vm.runInNewContext(script,context);return context;
@@ -14,3 +14,5 @@ test('persists new queue and explicit empty queue without touching accounts',()=
 test('malformed queue does not restore or resurrect a stale queue',()=>{for(const resume of ['{','[]',JSON.stringify({queue:[{id:'https://bad.example'}],index:0}),JSON.stringify({queue:[{id:'abcdefghijk'}],index:9})])assert.equal(page({resume}).sessionStorage.getItem('vibefy-resume'),null);const p=page({resume:queue});p.sessionStorage.setItem('vibefy-resume','bad');assert.equal(p.localStorage.getItem(key),null)});
 test('clear queue also removes persistent checkpoint',()=>{const p=page({resume:queue});p.sessionStorage.removeItem('vibefy-resume');assert.equal(p.localStorage.getItem(key),null)});
 test('unrelated session keys and iframe/foreign origins are not bridged',()=>{const p=page();p.sessionStorage.setItem('token','private');assert.equal(p.localStorage.getItem('token'),null);for(const opts of [{frame:true},{origin:'https://other.example'}]){const q=page(opts);assert.equal(q.window.vibefyMobileShell,undefined);q.sessionStorage.setItem('vibefy-resume',queue);assert.equal(q.localStorage.getItem(key),null)}});
+
+test('queue persistence respects opt out',()=>{const p=page({resume:queue,preferences:{rememberQueue:false}});assert.equal(p.localStorage.getItem(key),null);assert.equal(p.sessionStorage.getItem('vibefy-resume'),null);p.sessionStorage.setItem('vibefy-resume',queue);assert.equal(p.localStorage.getItem(key),null)});
