@@ -1,8 +1,7 @@
 (() => {
  'use strict';
- if(window.top!==window.self||location.origin!=='https://vibefy-neon.vercel.app'||window.vibefyMobileShell)return;
+ if(window.top!==window.self||location.origin!=='https://vibefy-neon.vercel.app'||window.vibefyMobileShellReady)return;
  window.vibefyMobileShell=true;
- document.documentElement.dataset.mobileApp='true';
  const resumeKey='vibefy-mobile-resume-v1';
  const remembering=()=>{try{return JSON.parse(localStorage.getItem('vibefy-web-preferences')||'{}').rememberQueue!==false;}catch{return true;}};
  const originalSet=Storage.prototype.setItem,originalRemove=Storage.prototype.removeItem;
@@ -35,7 +34,9 @@
    authJob=null;clearTimeout(job.timer);job.key.fill(0);job.resolve(grant);
   }catch{authJob=null;clearTimeout(job.timer);job.key.fill(0);job.reject(Error('The connection could not be verified. Please connect again.'));}
  };
+ window.vibefyMobileShellReady=true;
  function install(){
+  if(document.documentElement)document.documentElement.dataset.mobileApp='true';
   if(!document.getElementById('vibefy-mobile-style')){const style=document.createElement('style');style.id='vibefy-mobile-style';style.textContent=`
    html[data-mobile-app=true]{color-scheme:dark;background:#0e1215;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
    [data-mobile-app=true] body{overscroll-behavior-y:none}
@@ -50,6 +51,7 @@
   `;document.head.append(style);}
   const exporter=document.getElementById('export-library');
   if(exporter&&!exporter.dataset.nativeExport){exporter.dataset.nativeExport='true';const previous=exporter.onclick;exporter.onclick=()=>{try{const raw=typeof state==='object'&&state!==null?JSON.stringify(state):localStorage.getItem('vibefy-web-v1');if(!raw||raw.length>6000000)throw Error();const value=JSON.parse(raw);if(!Array.isArray(value.collections)||!Array.isArray(value.likes))throw Error();if(!send({action:'exportBackup',content:raw}))previous?.();}catch{window.vibefyWebLibrary?.toast('No saved library is available to export.');}};}
+  if(window.vibefyNativeInfo?.platform==='android'&&!document.getElementById('native-update-check')){const area=document.getElementById('settings-dialog');if(area){const check=document.createElement('button');check.id='native-update-check';check.className='button small';check.textContent='Check for app updates';check.onclick=()=>send({action:'checkUpdates'});area.append(check);}}
   const clearButton=document.querySelector('#clear-data-dialog .dialog-header h2');if(clearButton)clearButton.textContent='Clear app data';
   for(const label of document.querySelectorAll('button'))if(label.textContent.trim()==='Clear cookies & site data')label.textContent='Clear app data';
  }

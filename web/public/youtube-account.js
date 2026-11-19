@@ -28,6 +28,7 @@
   if(!client)return reject(Error('Google connection is still loading. Retry in a moment.'));if(pending)return reject(Error('Finish the open Google window first.'));
   const job={resolve,reject,write};pending=job;job.timer=setTimeout(()=>finishJob(Error('Google did not finish connecting. Close the popup and try again.'),null,job),90000);
   if(window.vibefyMobileAuthorize){clearTimeout(job.timer);job.timer=setTimeout(()=>finishJob(Error('Connection expired. Try again.'),null,job),310000);window.vibefyMobileAuthorize(write).then(r=>finishJob(null,r,job),e=>finishJob(e,null,job));return;}
+  if(window.vibefyMobileShell||window.VibefyMobile||window.webkit?.messageHandlers?.vibefyMobile){finishJob(Error('The app connection could not initialize. Restart Vibefy or install the latest mobile update.'),null,job);return;}
   try{const oauth=google.accounts.oauth2.initTokenClient({client_id:client.client_id,scope:readScope,include_granted_scopes:false,callback:response=>finishJob(null,response,job),error_callback:()=>finishJob(Error('Google sign-in was closed or blocked. Allow the popup and try again.'),null,job)});oauth.requestAccessToken({scope:write?readScope+' '+writeScope:identityScope+' '+readScope,include_granted_scopes:false,prompt:''});}catch{finishJob(Error('Google could not open. Allow popups for Vibefy and try again.'),null,job);}
  });}
  async function api(path,query={},method='GET',body){

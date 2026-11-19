@@ -17,6 +17,7 @@ import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
  private static final String ORIGIN="https://vibefy-neon.vercel.app",HOME=ORIGIN+"/web";
+ private NativeUpdates updates;
  private WebView web;private FrameLayout frame;private LinearLayout cover;private ProgressBar progress;
  private android.webkit.ValueCallback<Uri[]> chooser;private String export;private String script="";private boolean closed;private boolean mainFailed;private boolean rendererGone;
  private final java.util.concurrent.ExecutorService writer=Executors.newSingleThreadExecutor();
@@ -28,9 +29,10 @@ public final class MainActivity extends Activity {
   progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xff00d4bf));FrameLayout.LayoutParams progressLayout=new FrameLayout.LayoutParams(-1,4,Gravity.TOP);frame.addView(progress,progressLayout);setContentView(frame);
   try(InputStream in=getAssets().open("app-shell.js")){ByteArrayOutputStream bytes=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1)bytes.write(buffer,0,n);script=bytes.toString("UTF-8");}catch(IOException ignored){}
   WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(false);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setMediaPlaybackRequiresUserGesture(true);settings.setSupportMultipleWindows(true);
+  updates=new NativeUpdates(this,writer);script="window.vibefyNativeInfo={platform:'android',version:'0.2.3'};\n"+script;
   web.setOverScrollMode(View.OVER_SCROLL_NEVER);
   if(WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT))WebViewCompat.addDocumentStartJavaScript(web,script,Collections.singleton(ORIGIN));
-  if(WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER))WebViewCompat.addWebMessageListener(web,"VibefyMobile",Collections.singleton(ORIGIN),(view,message,source,main,reply)->{if(!main||!trusted(source))return;try{JSONObject packet=new JSONObject(message.getData());if("connectGoogle".equals(packet.optString("action")))openGoogle(packet.optString("url"));else if("exportBackup".equals(packet.optString("action")))exportBackup(packet.optString("content"));}catch(Exception ignored){}});
+  if(WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER))WebViewCompat.addWebMessageListener(web,"VibefyMobile",Collections.singleton(ORIGIN),(view,message,source,main,reply)->{if(!main||!trusted(source))return;try{JSONObject packet=new JSONObject(message.getData());if("checkUpdates".equals(packet.optString("action")))updates.check(true);else if("connectGoogle".equals(packet.optString("action")))openGoogle(packet.optString("url"));else if("exportBackup".equals(packet.optString("action")))exportBackup(packet.optString("content"));}catch(Exception ignored){}});
   web.setWebChromeClient(new WebChromeClient(){
    @Override public void onProgressChanged(WebView view,int value){progress.setVisibility(value<100?View.VISIBLE:View.GONE);progress.setProgress(value);}
    @Override public boolean onShowFileChooser(WebView view,android.webkit.ValueCallback<Uri[]> callback,FileChooserParams params){if(chooser!=null)chooser.onReceiveValue(null);chooser=callback;Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json");try{startActivityForResult(pick,91);return true;}catch(ActivityNotFoundException e){chooser=null;callback.onReceiveValue(null);return false;}}
@@ -45,7 +47,7 @@ public final class MainActivity extends Activity {
    @Override public void onReceivedError(WebView v,WebResourceRequest request,WebResourceError error){if(request.isForMainFrame()){mainFailed=true;offline();}}
    @Override public boolean onRenderProcessGone(WebView v,RenderProcessGoneDetail detail){rendererGone=true;v.destroy();offline();return true;}
   });
-  web.loadUrl(jamLink(getIntent().getData()));
+  web.loadUrl(jamLink(getIntent().getData()));new Handler(Looper.getMainLooper()).postDelayed(()->{if(!closed)updates.check(false);},1500);
  }
  private String jamLink(Uri uri){if(uri==null||!"vibefy".equals(uri.getScheme())||!"jam".equals(uri.getHost()))return HOME;String code=uri.getQueryParameter("code");return code!=null&&code.matches("[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}")?HOME+"?jam="+code:HOME;}
  @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if(!finishGoogle(intent.getData()))web.loadUrl(jamLink(intent.getData()));}
@@ -60,6 +62,6 @@ public final class MainActivity extends Activity {
  @Override protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==91){if(chooser!=null){chooser.onReceiveValue(result==RESULT_OK&&data!=null&&data.getData()!=null?new Uri[]{data.getData()}:null);chooser=null;}}else if(request==92){String raw=export;export=null;if(result==RESULT_OK&&data!=null&&data.getData()!=null&&raw!=null){Uri target=data.getData();writer.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(target,"wt")){if(out==null)throw new IOException();out.write(raw.getBytes(StandardCharsets.UTF_8));runOnUiThread(()->Toast.makeText(this,"Playlist backup saved",Toast.LENGTH_SHORT).show());}catch(Exception e){runOnUiThread(()->Toast.makeText(this,"Backup could not be saved",Toast.LENGTH_LONG).show());}});}}}
  @Override public void onBackPressed(){if(rendererGone){moveTaskToBack(true);return;}web.evaluateJavascript("(()=>{const d=document.querySelector('dialog[open]');if(d){d.close();return true;}return false;})()",answer->{if("true".equals(answer))return;if(web.canGoBack())web.goBack();else moveTaskToBack(true);});}
  @Override protected void onPause(){super.onPause();web.onPause();}
- @Override protected void onResume(){super.onResume();if(web!=null)web.onResume();}
+ @Override protected void onResume(){super.onResume();if(web!=null)web.onResume();if(updates!=null)updates.resumed();}
  @Override protected void onDestroy(){closed=true;if(chooser!=null)chooser.onReceiveValue(null);if(web!=null){web.stopLoading();web.destroy();}writer.shutdown();super.onDestroy();}
 }
