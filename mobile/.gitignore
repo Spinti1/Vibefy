@@ -8,3 +8,4 @@ ios/*.xcodeproj/
 ios/Info.plist
 ios/source.json
 ios/source.sha256
+ios/Sources/Assets.xcassets/

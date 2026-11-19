@@ -17,11 +17,14 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: online.usevibefy.mobile
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         TARGETED_DEVICE_FAMILY: '1,2'
     info:
       path: Info.plist
       properties:
         CFBundleDisplayName: Vibefy
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         NSAppTransportSecurity:
