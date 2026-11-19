@@ -14,6 +14,12 @@
  }catch{}
  function send(packet){try{if(window.VibefyMobile?.postMessage)window.VibefyMobile.postMessage(JSON.stringify(packet));else if(window.webkit?.messageHandlers?.vibefyMobile)window.webkit.messageHandlers.vibefyMobile.postMessage(packet);else return false;return true;}catch{return false;}}
 
+ const sessionJobs=new Map();let sessionSequence=0;
+ if(window.vibefyNativeInfo?.secureSession){
+  const call=(action,value)=>new Promise((resolve,reject)=>{const id='session-'+(++sessionSequence);const timer=setTimeout(()=>{sessionJobs.delete(id);reject(Error('Secure account storage is unavailable.'));},8000);sessionJobs.set(id,{resolve,reject,timer});if(!send({action,id,...(value?{value}: {})})){clearTimeout(timer);sessionJobs.delete(id);reject(Error('Secure account storage is unavailable.'));}});
+  window.vibefyMobileSession={read:()=>call('readSession'),write:value=>call('saveSession',value),clear:()=>call('clearSession')};
+  window.vibefyMobileSessionResult=(id,value,error)=>{const job=sessionJobs.get(id);if(!job)return;sessionJobs.delete(id);clearTimeout(job.timer);if(error)job.reject(Error('Secure account storage is unavailable.'));else job.resolve(value);};
+ }
  let authJob;
  window.vibefyMobileCancelAuth=()=>{const job=authJob;if(!job)return;authJob=null;clearTimeout(job.timer);job.key.fill(0);job.reject(Error('Connection cancelled. Tap Connect YouTube to try again.'));};
  const enc=bytes=>btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');

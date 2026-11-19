@@ -1,8 +1,16 @@
 'use strict';
-// Google consent opens only from a user's click. Tokens remain in this tab's memory.
+// Native clients keep unexpired grants in protected platform storage; browsers use memory.
 (() => {
  const $=id=>document.getElementById(id),readScope='https://www.googleapis.com/auth/youtube.readonly',writeScope='https://www.googleapis.com/auth/youtube.force-ssl',identityScope='openid profile';
- let client,token='',expires=0,writable=false,pending,expiryTimer,loading=false,initializing,displayName='',generation=0;
+ let client,token='',expires=0,writable=false,pending,expiryTimer,loading=false,initializing,displayName='',generation=0,grantedScopes='',restored=false,restoreAttempt;
+ let sessionWrites=Promise.resolve(),sessionSaveFailed=false;
+ const storage=()=>window.vibefyMobileSession;
+ function persist(){if(!storage()||!connected())return Promise.resolve();const record={version:1,access_token:token,expires_at:expires,scope:grantedScopes,display_name:displayName};sessionWrites=sessionWrites.catch(()=>{}).then(()=>storage().write(record)).then(()=>{sessionSaveFailed=false;},error=>{sessionSaveFailed=true;throw error;});return sessionWrites;}
+ function clearStored(){if(storage())sessionWrites=sessionWrites.catch(()=>{}).then(()=>storage().clear()).catch(()=>{});}
+ function applyGrant(record){if(!record||record.version!==1||typeof record.access_token!=='string'||record.access_token.length<1||record.access_token.length>8192||typeof record.expires_at!=='number'||record.expires_at<=Date.now()+5000||record.expires_at>Date.now()+86400000||!String(record.scope||'').split(' ').includes(readScope))return false;token=record.access_token;expires=record.expires_at;grantedScopes=String(record.scope);writable=grantedScopes.split(' ').includes(writeScope);displayName=String(record.display_name||'').slice(0,256);armExpiry();return true;}
+ function armExpiry(){clearTimeout(expiryTimer);expiryTimer=setTimeout(()=>{clearStored();update();status('Google access needs renewal. Connect again to refresh your YouTube library. Your playlists are preserved.');},Math.max(0,expires-Date.now()));}
+ function restore(){if(!storage()||restored)return Promise.resolve();if(restoreAttempt)return restoreAttempt;const ticket=generation;restoreAttempt=(async()=>{let record;try{record=await storage().read();}catch{status('Saved account could not be read. Your playlists are safe; try restarting Vibefy.');return;}restored=true;if(ticket!==generation||pending||connected())return;if(!applyGrant(record)){if(record)clearStored();return;}update();try{await refresh();}catch(error){status(error.message);}})().finally(()=>{restoreAttempt=null;});return restoreAttempt;}
+
  const connected=()=>!!token&&Date.now()<expires;
  const status=message=>{$('youtube-status').textContent=message;};
  function update(){
@@ -14,14 +22,14 @@
   $('home-account-status').textContent=loading?'Finish connecting in the Google window…':active?'YouTube connected · Your local playlists and backups stay available.':'Saved on this device. Use the top bar to connect YouTube and load your playlists.';
   window.dispatchEvent(new Event('vibefy-account'));
  }
- function disconnect(){generation++;clearTimeout(expiryTimer);token='';expires=0;writable=false;displayName='';$('youtube-playlists').replaceChildren();status('Disconnected. Your imported and local playlists are preserved.');update();}
+ function disconnect(){generation++;clearStored();clearTimeout(expiryTimer);token='';expires=0;writable=false;displayName='';grantedScopes='';$('youtube-playlists').replaceChildren();status('Disconnected. Your imported and local playlists are preserved.');update();}
  function finishJob(error,response,job=pending){
   if(!job||pending!==job)return;pending=null;clearTimeout(job.timer);
   if(error){window.vibefyMobileCancelAuth?.();job.reject(error);return;}
   if(!response?.access_token||response.error){job.reject(Error('Google access was not granted. You can still use Vibefy as a guest.'));return;}
   if(!String(response.scope||'').split(' ').includes(readScope)){job.reject(Error('YouTube playlist permission was not granted. Your local library is unchanged.'));return;}
-  token=response.access_token;expires=Date.now()+Math.max(0,Number(response.expires_in||3600)-60)*1000;writable=String(response.scope||'').split(' ').includes(writeScope);
-  clearTimeout(expiryTimer);expiryTimer=setTimeout(()=>{update();status('Your Google access expired. Connect again to refresh your YouTube library.');},Math.max(0,expires-Date.now()));
+  grantedScopes=String(response.scope||'');token=response.access_token;expires=Date.now()+Math.max(0,Number(response.expires_in||3600)-60)*1000;writable=String(response.scope||'').split(' ').includes(writeScope);
+  armExpiry();persist().catch(()=>status('Connected for this session. Secure storage could not save the account; try connecting again.'));
   if(job.write&&!writable)job.reject(Error('Permission to save YouTube playlists was not granted. Your local playlist is safe.'));else job.resolve(response);
  }
  function authorize(write=false){return new Promise((resolve,reject)=>{
@@ -49,7 +57,7 @@
  }
  async function connect(){
   if(connected()||!client){if(!$('account-dialog').open)$('account-dialog').showModal();return;}if(loading)return;if(!$('account-dialog').open)$('account-dialog').showModal();loading=true;status('Finish connecting in the Google window…');update();
-  try{const response=await authorize();if(String(response.scope||'').split(' ').includes('openid')){try{const r=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(10000)});if(r.ok){const profile=await r.json();displayName=String(profile.name||'YouTube connected');}}catch{ /* Playlist access remains usable without profile metadata. */ }}update();await refresh();$('account-dialog').close();window.dispatchEvent(new Event('vibefy-youtube-ready'));}catch(error){status(error.message);}finally{loading=false;update();}
+  try{const response=await authorize();if(String(response.scope||'').split(' ').includes('openid')){try{const r=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(10000)});if(r.ok){const profile=await r.json();displayName=String(profile.name||'YouTube connected');}}catch{ /* Playlist access remains usable without profile metadata. */ }}await persist().catch(()=>{});update();await refresh();$('account-dialog').close();window.dispatchEvent(new Event('vibefy-youtube-ready'));}catch(error){status(error.message);}finally{loading=false;update();if(sessionSaveFailed)status('Connected, but secure storage could not save the account. Reopening may require connecting again.');}
  }
  $('google-connect').onclick=connect;
  // Show the testing and permission explanation before opening Google's consent window.
@@ -67,7 +75,7 @@
   if(initializing)return initializing;
   initializing=(async()=>{ $('google-connect').disabled=true;status('Preparing Google connection…');const r=await fetch('/api/google-config',{signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error();const data=await r.json();if(!data.clientId)throw Error('Google connection is unavailable.');
    if(!window.vibefyMobileAuthorize&&!window.google?.accounts?.oauth2)await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';const timer=setTimeout(()=>{script.remove();reject(Error('Google connection timed out.'));},10000);script.onload=()=>{clearTimeout(timer);resolve();};script.onerror=()=>{clearTimeout(timer);script.remove();reject(Error('Google connection could not load.'));};document.head.append(script);});
-   client={client_id:data.clientId};$('google-connect').onclick=connect;update();status('');
+   client={client_id:data.clientId};$('google-connect').onclick=connect;update();status('');await restore();
   })().catch(unavailable).finally(()=>{initializing=null;});return initializing;
  }
  update();initialize();

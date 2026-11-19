@@ -23,7 +23,7 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
  private func trusted(_ url:URL?)->Bool {guard let url else{return false};return url.scheme=="https" && url.host=="vibefy-neon.vercel.app" && url.port==nil && url.user==nil && url.password==nil}
  override func viewDidLoad(){super.viewDidLoad();view.backgroundColor=UIColor(red:0.055,green:0.071,blue:0.082,alpha:1)
   let config=WKWebViewConfiguration();config.websiteDataStore = .default();config.allowsInlineMediaPlayback=true
-  let script="window.vibefyNativeInfo={platform: 'ios',version: '0.2.3'};\n" + ((try? String(contentsOf:Bundle.main.url(forResource:"app-shell",withExtension:"js")!,encoding:.utf8)) ?? "")
+  let script="window.vibefyNativeInfo={platform: 'ios',version: '0.2.4',secureSession: true};\n" + ((try? String(contentsOf:Bundle.main.url(forResource:"app-shell",withExtension:"js")!,encoding:.utf8)) ?? "")
   config.userContentController.addUserScript(WKUserScript(source:script,injectionTime:.atDocumentStart,forMainFrameOnly:true));config.userContentController.add(WeakShellHandler(self),name:"vibefyMobile")
   web=WKWebView(frame:.zero,configuration:config);web.navigationDelegate=self;web.uiDelegate=self;web.isOpaque=false;web.backgroundColor=view.backgroundColor;web.scrollView.backgroundColor=view.backgroundColor;web.scrollView.bounces=false;web.allowsBackForwardNavigationGestures=true;web.translatesAutoresizingMaskIntoConstraints=false
   view.addSubview(web);NSLayoutConstraint.activate([web.topAnchor.constraint(equalTo:view.safeAreaLayoutGuide.topAnchor),web.bottomAnchor.constraint(equalTo:view.bottomAnchor),web.leadingAnchor.constraint(equalTo:view.safeAreaLayoutGuide.leadingAnchor),web.trailingAnchor.constraint(equalTo:view.safeAreaLayoutGuide.trailingAnchor)])
@@ -60,6 +60,9 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
  func userContentController(_ controller:WKUserContentController,didReceive message:WKScriptMessage){
   guard message.frameInfo.isMainFrame,trusted(message.frameInfo.request.url),let packet=message.body as? [String:Any] else{return}
   if packet["action"] as? String=="connectGoogle",let raw=packet["url"] as? String {openGoogle(raw);return}
+  if let action=packet["action"] as? String,["readSession","saveSession","clearSession"].contains(action),let id=packet["id"] as? String,id.range(of:"^session-[0-9]{1,12}$",options:.regularExpression) != nil {
+   do {var result:Any=NSNull();if action=="readSession"{if let saved=try SecureAccountSession.load(){result=saved}}else if action=="saveSession",let value=packet["value"] as? [String:Any]{try SecureAccountSession.save(value);result=true}else if action=="clearSession"{try SecureAccountSession.clear();result=true}else{throw NSError(domain:"SecureAccountSession",code:1)};replySession(id,result,nil)}catch{replySession(id,NSNull(),"storage-unavailable")};return
+  }
   guard packet["action"] as? String=="exportBackup",let content=packet["content"] as? String,content.utf8.count<=6_000_000,let data=content.data(using:.utf8),let json=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any],json["collections"] is [Any],json["likes"] is [Any],temporaryExport==nil else{return}
   let file=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString+"-vibefy-library.json");temporaryExport=file
   DispatchQueue.global(qos:.userInitiated).async {do {try data.write(to:file,options:.atomic);DispatchQueue.main.async {let picker=UIDocumentPickerViewController(forExporting:[file],asCopy:true);picker.delegate=self;self.present(picker,animated:true)}}catch{DispatchQueue.main.async{self.temporaryExport=nil}}}
@@ -73,6 +76,10 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
   guard url.absoluteString.count<16000,Date().timeIntervalSince(googleStarted)<300,let state=googleState,let fragment=url.fragment,let parts=URLComponents(string:"https://local/?"+fragment),parts.queryItems?.first(where:{$0.name=="state"})?.value==state else{return}
   googleState=nil;guard trusted(web.url),let data=try? JSONSerialization.data(withJSONObject:[url.absoluteString]),let array=String(data:data,encoding:.utf8) else{return}
   web.evaluateJavaScript("window.vibefyMobileAuthResult?.("+array+"[0])",completionHandler:nil)
+ }
+ private func replySession(_ id:String,_ value:Any,_ error:String?){
+  guard trusted(web.url),let data=try? JSONSerialization.data(withJSONObject:[id,value,error as Any? ?? NSNull()]),let args=String(data:data,encoding:.utf8) else{return}
+  web.evaluateJavaScript("((a)=>window.vibefyMobileSessionResult?.(...a))("+args+")",completionHandler:nil)
  }
  private func cleanExport(){if let file=temporaryExport{try? FileManager.default.removeItem(at:file);temporaryExport=nil}}
  func documentPickerWasCancelled(_ controller:UIDocumentPickerViewController){cleanExport()}
