@@ -1,0 +1,10 @@
+android/.gradle/
+android/local.properties
+android/app/build/
+ios/build/
+ios/package/
+ios/*.ipa
+ios/*.xcodeproj/
+ios/Info.plist
+ios/source.json
+ios/source.sha256
