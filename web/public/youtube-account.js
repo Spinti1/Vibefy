@@ -10,7 +10,7 @@
  function clearStored(){if(storage())sessionWrites=sessionWrites.catch(()=>{}).then(()=>storage().clear()).catch(()=>{});}
  function validRefresh(value){return typeof value==='string'&&value.length>0&&value.length<=4096;}
  function applyGrant(record){if(!record||record.version!==1||typeof record.access_token!=='string'||record.access_token.length<1||record.access_token.length>8192||typeof record.expires_at!=='number'||!Number.isFinite(record.expires_at)||record.expires_at<=0||record.expires_at>Date.now()+86400000||(!validRefresh(record.refresh_token)&&record.expires_at<=Date.now()+5000)||!String(record.scope||'').split(' ').includes(readScope))return false;token=record.access_token;expires=record.expires_at;refreshToken=validRefresh(record.refresh_token)?record.refresh_token:'';grantedScopes=String(record.scope);writable=grantedScopes.split(' ').includes(writeScope);displayName=String(record.display_name||'').slice(0,256);armExpiry();return true;}
- function armExpiry(){clearTimeout(expiryTimer);expiryTimer=setTimeout(()=>{if(refreshToken)renewAccess().catch(error=>{status(error.message);});else{update();status('Google access needs renewal. Connect again to refresh your YouTube library. Your playlists are preserved.');}},Math.max(1000,expires-Date.now()-(refreshToken?60000:0)));}
+ function armExpiry(){clearTimeout(expiryTimer);expiryTimer=setTimeout(()=>{if(refreshToken)renewAccess().catch(error=>{status(error.message);});else{update();status('Google access needs renewal. Connect again to refresh your YouTube library. Your playlists are preserved.');}},Math.max(1000,expires-Date.now()-(refreshToken?Math.min(60000,Math.max(0,(expires-Date.now())/2)):0)));}
  async function renewAccess(force=false){
   if(renewing)return renewing;if(!refreshToken)throw Error('Connect YouTube again to renew your access.');
   if(!force&&Date.now()<renewRetryAt)throw Error('Your account is saved. Google is temporarily unavailable; retry shortly.');
@@ -25,7 +25,7 @@
    renewRetryAt=0;armExpiry();await persist().catch(()=>{});update();
   }catch(error){if(ticket===generation&&refreshToken){clearTimeout(expiryTimer);expiryTimer=setTimeout(()=>renewAccess().catch(e=>status(e.message)),30000);}throw error;}})().finally(()=>{renewing=null;});return renewing;
  }
- async function ensureAccess(){if(refreshToken&&expires<=Date.now()+60000)await renewAccess();if(!token||expires<=Date.now())throw Error('Connect YouTube again to renew your access.');}
+ async function ensureAccess(){if(refreshToken&&expires<=Date.now()+5000)await renewAccess();if(!token||expires<=Date.now())throw Error('Connect YouTube again to renew your access.');}
  function restore(){if(!storage()||restored)return Promise.resolve();if(restoreAttempt)return restoreAttempt;const ticket=generation;restoreAttempt=(async()=>{let record;try{record=await storage().read();}catch{sessionReadFailed=true;status('Saved account could not be read. Your playlists are safe; try restarting Vibefy.');return;}restored=true;if(ticket!==generation||pending||connected())return;if(!applyGrant(record)){if(record)clearStored();return;}update();try{await refresh();}catch(error){status(error.message);}})().finally(()=>{restoreAttempt=null;});return restoreAttempt;}
 
  const connected=()=>!!token&&(Date.now()<expires||!!refreshToken);
@@ -58,9 +58,9 @@
  });}
  async function api(path,query={},method='GET',body){
   await ensureAccess();const ticket=generation,url=new URL('https://www.googleapis.com/youtube/v3/'+path);for(const [k,v]of Object.entries(query))url.searchParams.set(k,v);
-  const request=()=>fetch(url,{method,headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});
+  let sentToken;const request=()=>{sentToken=token;return fetch(url,{method,headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});};
   let r=await request();
-  if(r.status===401&&refreshToken){await renewAccess(true);if(ticket!==generation)throw Error('Connection changed. Retry this action.');r=await request();}
+  if(r.status===401&&refreshToken){if(sentToken===token)await renewAccess(true);if(ticket!==generation)throw Error('Connection changed. Retry this action.');r=await request();}
   if(r.status===401){expires=0;update();throw Error(refreshToken?'Google could not authorize this request. Your account is saved; retry shortly.':'Google access needs renewal. Connect again. Your playlists are preserved.');}if(!r.ok)throw Error(r.status===403?'YouTube could not authorize this action. Check Google account access or try again later.':'YouTube could not complete the request. Try again.');return r.status===204?{}:r.json();
  }
  async function importPlaylist(p,button){

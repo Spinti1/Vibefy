@@ -1,4 +1,4 @@
-# Vibefy mobile 0.2.4 hybrid preview
+# Vibefy mobile 0.2.5 hybrid preview
 
 The user authorized a lightweight hybrid app after the native-only port began. The current entry points use Android WebView and Apple WKWebView with app-style navigation and the existing mobile interface. Native-only prototype screens and player code are retained for later engine integration; they are not the active playback engine in this build.
 
@@ -12,7 +12,7 @@ The user authorized a lightweight hybrid app after the native-only port began. T
 
 ## Important remaining limitations
 
-Google connection opens the registered Vibefy website in the system browser, then returns an encrypted, single-use grant to the waiting app. Tap Return to Vibefy after consent. Reloading or killing the app during authorization requires restarting the connection. Mobile 0.2.4 stores unexpired grants in device-protected storage and restores them after relaunch. Grants still expire according to Google; reconnect when requested. Google verification, consent and user limits still apply. JuiceVault's existing account form remains subject to provider acceptance. Account tokens can expire; persistent website data is not a guarantee of permanent login.
+Google connection opens the registered Vibefy website in the system browser, then returns an encrypted, single-use grant to the waiting app. Tap Return to Vibefy after consent. Reloading or killing the app during authorization requires restarting the connection. Mobile 0.2.5 stores renewable grants in device-protected storage, renews access before expiry and retries renewal after returning from the background. Connect once after updating to enable this; existing access-only grants cannot be converted automatically. Google verification, consent and user limits still apply. JuiceVault's existing account form remains subject to provider acceptance. Account tokens can expire; persistent website data is not a guarantee of permanent login.
 
 YouTube uses the existing official player, including its visible video. Background/lock-screen YouTube playback is not guaranteed. Native Media3/AVPlayer prototype source is not presented as an integrated YouTube engine. Physical Android/iPhone flow, battery and frame-time measurement are still required before describing performance as proven.
 
@@ -32,8 +32,10 @@ The 0.2.2 document-start script read document.documentElement before WebKit/WebV
 Android 0.2.3 adds automatic GitHub release checks (at most once per six hours), a manual check in Settings, bounded HTTPS downloads, GitHub release size/SHA-256 checks, and an Android installer handoff through a narrowly scoped FileProvider. Android itself requires the user's installation permission and confirmation. Older APKs did not contain this updater; users must install this update once, over the existing app. A hosted Android notice links to the current APK for those versions.
 
 
-## 0.2.4 protected account persistence
+## Protected account persistence and renewal (0.2.5)
 
-iOS stores the Google grant in a device-bound Keychain item; Android encrypts it with an app-specific Android Keystore AES-256-GCM key. Neither grant is saved in WebKit localStorage, plaintext preferences or playlist backups. Only the trusted main-frame bridge can read/write/clear that one account record. Restoring does not extend the Google expiry. Explicit disconnect and Google 401 remove the stored record; ordinary network errors do not. A failed save is reported rather than silently promising persistence.
+iOS uses a device-bound Keychain item; Android uses app-specific Android Keystore AES-256-GCM encryption. Credentials are excluded from browser storage and playlist backups. The trusted main-frame bridge reads/writes only that account record.
 
-The current web-token flow has no refresh token, and no matching web-client secret is configured for an offline authorization-code flow. This fixes loss on each app restart while access remains valid, not permanent authorization after Google's token expiry (typically around one hour). First connect once after installing 0.2.4.
+New mobile connections use Google's authorization-code model through the system browser. The Vercel endpoint exchanges the code using the existing Vibefy Web client; only its secret is held in protected server configuration. The server does not persist user tokens. The encrypted one-time app callback carries the grant to the waiting app, which stores the refresh credential locally. Renewal submits that credential over HTTPS to the fixed same-origin endpoint and on to Google. API calls use the access token directly with Google.
+
+Expired access is renewed before library requests and after background suspension. Concurrent renewal is shared. Network/server/configuration errors keep the protected credential; only explicit disconnect or confirmed Google invalid_grant clears it. A YouTube API 401 triggers one renewal/retry instead of deleting the account. Reconnect once (Keep me signed in) after updating from an access-only version. Google can still revoke access or require consent; permanent authorization is not guaranteed. Physical-device authentication and background suspension remain to be validated on an iPhone and Android phone.
