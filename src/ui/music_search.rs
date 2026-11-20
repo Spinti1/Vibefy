@@ -103,7 +103,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let top = entries
         .iter()
         .find(|e| {
-            e.kind == Kind::Artist && e.title.eq_ignore_ascii_case(app.search.committed.trim())
+            matches!(e.kind, Kind::Artist | Kind::Channel)
+                && e.title.eq_ignore_ascii_case(app.search.committed.trim())
         })
         .or_else(|| entries.first());
     if all && let Some(top) = top {
@@ -130,6 +131,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         ui.add_space(20.0);
     }
     for (kind, label) in [
+        (Kind::Channel, "YouTube channels"),
         (Kind::Artist, "Artists"),
         (Kind::Album, "Albums"),
         (Kind::Playlist, "Playlists"),
@@ -213,7 +215,13 @@ fn browse_header(app: &App, ui: &mut egui::Ui) {
         x,
         right,
         rect.top() + 48.0,
-        if artist { "ARTIST" } else { "MUSIC LIBRARY" },
+        if matches!(app.page(),crate::model::Page::MusicBrowse(id) if id.starts_with("YTUC")) {
+            "YOUTUBE CHANNEL"
+        } else if artist {
+            "ARTIST"
+        } else {
+            "MUSIC LIBRARY"
+        },
         theme::semibold(11.0),
         p.secondary,
     );

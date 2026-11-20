@@ -15,7 +15,8 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
         return;
     }
     let config = app.settings.addons.visual(id);
-    let mut input = vec![0.; if visual { 512 + 24 * 128 } else { 32 }];
+    let mut storage = [0.; 512 + 24 * 128];
+    let input = &mut storage[..if visual { 512 + 24 * 128 } else { 32 }];
     input[..4].copy_from_slice(&[rect.left(), rect.top(), rect.width(), rect.height()]);
     if let Some(now) = app.now_playing() {
         input[4] = now.position_ms as f32 / 1000.;
@@ -41,6 +42,11 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
     input[25] = theme::PLAYER_BAR_HEIGHT;
     input[26] = config.fps as f32;
     if visual {
+        input[4] *= config.speed;
+        input[20] = config.detail as f32;
+        input[21] = config.cover_scale;
+    }
+    if visual {
         for (i, v) in app.addons.bands.iter().take(128).enumerate() {
             input[64 + i] = *v;
         }
@@ -59,9 +65,9 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
         }
     }
     let commands = if visual {
-        crate::visualizers::render(id, &input)
+        crate::visualizers::render(id, input)
     } else {
-        let Ok(commands) = guest.unwrap().render(input) else {
+        let Ok(commands) = guest.unwrap().render(input.to_vec()) else {
             return;
         };
         commands
@@ -72,8 +78,14 @@ pub fn render(app: &App, ui: &egui::Ui, id: Id, rect: Rect, extra: &[(usize, f32
         .unwrap_or(app.palette.accent)
         .gamma_multiply(config.brightness.clamp(0.2, 1.));
     let mut points = Vec::new();
-    let colors =
-        super::visualizer_style::Colors::from_art(app.visualizer_art_palette(), app.palette.accent);
+    let colors = super::visualizer_style::Colors::from_art(
+        if config.artwork_colors {
+            app.visualizer_art_palette()
+        } else {
+            None
+        },
+        app.palette.accent,
+    );
     let mut stroke: egui::epaint::PathStroke = (1., tint).into();
     for cmd in commands {
         let [a, b, c, d, e, f, g, _] = cmd.values;

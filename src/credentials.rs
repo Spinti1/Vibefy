@@ -464,7 +464,10 @@ pub(crate) fn music_account_secret(
     key: &str,
     write: Option<Option<Vec<u8>>>,
 ) -> Result<Option<Vec<u8>>, Error> {
-    if !matches!(key, "youtube-music-library" | "juicevault-library") {
+    if !matches!(
+        key,
+        "youtube-music-library" | "juicevault-library" | "spotify-library"
+    ) && !key.strip_prefix("playlist-share-").is_some_and(|id| id.len()==64 && id.bytes().all(|b| b.is_ascii_hexdigit())) {
         return Err(Error::Invalid);
     }
     let mut store = SealedFiles {

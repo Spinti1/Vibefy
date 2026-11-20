@@ -146,6 +146,27 @@ const REFILL: Duration = Duration::from_millis(20);
 /// stream that has failed or stopped playing finishes no chunk to wake it.
 const QUEUE_WAIT: Duration = Duration::from_millis(50);
 
+/// A failed driver can remain open without consuming sound or reporting an
+/// error. Release the decoder so transport commands and reconnection can run.
+const OUTPUT_STALL_TIMEOUT: Duration = Duration::from_secs(3);
+
+struct QueueProgress {
+    frames: u64,
+    at: Instant,
+}
+impl QueueProgress {
+    fn new(frames: u64, now: Instant) -> Self {
+        Self { frames, at: now }
+    }
+    fn stalled(&mut self, frames: u64, now: Instant) -> bool {
+        if frames != self.frames {
+            self.frames = frames;
+            self.at = now;
+        }
+        now.saturating_duration_since(self.at) >= OUTPUT_STALL_TIMEOUT
+    }
+}
+
 /// Maximum time `stop` waits for the queue to drain.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -767,6 +788,10 @@ impl Render for MixerRender {
 }
 
 impl RodioSink {
+    pub(crate) fn reset_after_error(&mut self) {
+        self.output.take();
+        self.applied_volume = -1.0;
+    }
     /// Decoder progress includes audio queued ahead of the output. Report it
     /// separately so lyrics follow consumed sound rather than buffered samples.
     pub fn queued_ms(&self) -> u32 {
@@ -969,6 +994,7 @@ impl Sink for RodioSink {
         // decoded into memory at once. A full queue sleeps until rodio has
         // played `REFILL` of it, then is topped up in one go.
         let refill = u64::from(output.sample_rate) * REFILL.as_millis() as u64 / 1_000;
+        let mut progress = QueueProgress::new(output.queued.frames(), Instant::now());
         while queue_is_full(output.queued.frames(), output.sample_rate) {
             // Headphones that connect, a new default output, a device that
             // went away or a stream that stopped asking for sound: the
@@ -988,6 +1014,13 @@ impl Sink for RodioSink {
             }
             if !queue_is_full(output.queued.frames(), output.sample_rate) {
                 break;
+            }
+            if progress.stalled(output.queued.frames(), Instant::now()) {
+                let message = "The audio device stopped consuming sound".to_string();
+                output.sink.pause();
+                output.device.pause();
+                (self.on_error)(message.clone());
+                return Err(SinkError::OnWrite(message));
             }
             output.queued.wait_for_room(refill);
         }
@@ -1185,6 +1218,17 @@ fn open_output(
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[test]
+    fn playback_regression_output_wait_is_bounded_and_tracks_consumption() {
+        let now = Instant::now();
+        let mut progress = QueueProgress::new(20_000, now);
+        assert!(!progress.stalled(20_000, now + Duration::from_secs(2)));
+        assert!(!progress.stalled(19_000, now + Duration::from_secs(2)));
+        assert!(!progress.stalled(19_000, now + Duration::from_secs(4)));
+        assert!(progress.stalled(19_000, now + Duration::from_secs(5)));
+        assert!(!progress.stalled(18_000, now + Duration::from_secs(5)));
+    }
 
     #[test]
     fn underruns_are_logged_when_they_grow_at_most_every_ten_seconds() {

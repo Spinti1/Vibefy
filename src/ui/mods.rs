@@ -237,7 +237,6 @@ fn card(app: &mut App, ui: &mut egui::Ui, id: Id, width: f32) {
                         Id::YouTube => Icon::ListVideo,
                         Id::WaveLink => Icon::AudioLines,
                         Id::Vivy => Icon::AudioLines,
-                        Id::Backmusic => Icon::Disc,
                         _ => Icon::Sparkles,
                     };
                     let (rect, _) =
@@ -385,7 +384,7 @@ fn controls(app: &mut App, ui: &mut egui::Ui, id: Id) {
             );
         }
         Id::YouTube => {}
-        Id::Vivy | Id::Backmusic | Id::SoundVisualizer => {
+        Id::Vivy | Id::SoundVisualizer => {
             ui.small("Open Visualizers beside Lyrics. Display settings are available inside the visualizer; fullscreen is optional.");
         }
         Id::Oneko => {

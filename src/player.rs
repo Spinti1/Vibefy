@@ -285,6 +285,7 @@ pub struct LocalState {
     pub track: Option<LocalTrack>,
     pub previous_track: Option<LocalTrack>,
     pub shuffle_next: Option<LocalTrack>,
+    pub manual_queue_count: usize,
     pub position_ms: u32,
     pub position_at: Option<Instant>,
     pub volume: u16,
@@ -321,11 +322,35 @@ impl LocalState {
         self.shuffle_next = self.queue_tracks.get(index).cloned();
     }
 
+    /// The same upcoming recording used by transport Next, including manual inserts.
+    pub fn next_track(&self) -> Option<&LocalTrack> {
+        if self.manual_queue_count > 0 && self.queue_index + 1 < self.queue_tracks.len() {
+            return self.queue_tracks.get(self.queue_index + 1);
+        }
+        if self.shuffle {
+            return self.shuffle_next.as_ref().and_then(|planned| {
+                self.queue_tracks
+                    .iter()
+                    .enumerate()
+                    .find(|(i, t)| *i != self.queue_index && t.uri == planned.uri)
+                    .map(|(_, track)| track)
+            });
+        }
+        self.queue_tracks.get(self.queue_index + 1).or_else(|| {
+            (self.repeat == RepeatMode::Context)
+                .then(|| self.queue_tracks.first())
+                .flatten()
+        })
+    }
+
     pub fn is_active(&self) -> bool {
         self.connected && !matches!(self.playback, Playback::Stopped)
     }
 
     pub fn position_now(&self) -> u32 {
+        if self.playback != Playback::Playing || self.loading || !self.connected {
+            return self.position_ms;
+        }
         let Some(at) = self.position_at else {
             return self.position_ms;
         };
@@ -335,11 +360,11 @@ impl LocalState {
             .map(|source| source.duration_ms)
             .filter(|duration| *duration > 0)
             .unwrap_or_else(|| self.track.as_ref().map_or(0, |t| t.duration_ms));
-        let elapsed = at.elapsed().as_millis() as u32;
+        let elapsed = at.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
         if duration > 0 {
-            (self.position_ms + elapsed).min(duration)
+            self.position_ms.saturating_add(elapsed).min(duration)
         } else {
-            self.position_ms + elapsed
+            self.position_ms.saturating_add(elapsed)
         }
     }
 
@@ -348,6 +373,95 @@ impl LocalState {
             track: track.clone(),
             position_ms: self.position_now(),
         })
+    }
+}
+
+#[cfg(test)]
+mod shuffle_peek_tests {
+    use super::*;
+
+    fn tracks() -> Vec<LocalTrack> {
+        ["a", "b", "c", "d"]
+            .into_iter()
+            .map(|id| LocalTrack {
+                uri: id.into(),
+                title: id.into(),
+                ..Default::default()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn shuffle_peek_loading_a_shuffled_context_syncs_the_mode_and_reserved_next() {
+        let mut queue = QueueState {
+            tracks: tracks(),
+            shuffle: true,
+            repeat: RepeatMode::Context,
+            ..Default::default()
+        };
+        let mut state = LocalState::default();
+        for current in 0..queue.tracks.len() {
+            queue.current_index = current;
+            queue.sync_local(&mut state);
+            assert!(state.shuffle);
+            assert_eq!(state.repeat, RepeatMode::Context);
+            for _ in 0..32 {
+                state.plan_shuffle_next();
+                let shown = state
+                    .next_track()
+                    .expect("a different recording is available");
+                let index = queue
+                    .next_index(false, state.shuffle_next.as_ref().map(|t| t.uri.as_str()))
+                    .unwrap();
+                assert_ne!(index, current);
+                assert_eq!(shown.uri, queue.tracks[index].uri);
+            }
+        }
+    }
+
+    #[test]
+    fn shuffle_peek_manual_queue_precedes_the_shuffle_reservation() {
+        let mut queue = QueueState {
+            tracks: tracks(),
+            shuffle: true,
+            manual_queue_count: 2,
+            ..Default::default()
+        };
+        let mut state = LocalState::default();
+        queue.sync_local(&mut state);
+        state.shuffle_next = Some(queue.tracks[3].clone());
+        assert_eq!(state.next_track().unwrap().uri, "b");
+        assert_eq!(queue.next_index(false, Some("d")), Some(1));
+        queue.current_index = 1;
+        queue.manual_queue_count = 1;
+        queue.sync_local(&mut state);
+        assert_eq!(state.next_track().unwrap().uri, "c");
+        assert_eq!(queue.next_index(false, Some("d")), Some(2));
+    }
+
+    #[test]
+    fn shuffle_peek_rejects_stale_reservations_and_preserves_repeat_rules() {
+        let mut queue = QueueState {
+            tracks: tracks(),
+            shuffle: true,
+            current_index: 2,
+            ..Default::default()
+        };
+        for plan in [None, Some("missing"), Some("c")] {
+            for _ in 0..32 {
+                assert_ne!(queue.next_index(false, plan), Some(2));
+            }
+        }
+        queue.repeat = RepeatMode::Track;
+        assert_eq!(queue.next_index(true, Some("d")), Some(2));
+        assert_eq!(queue.next_index(false, Some("d")), Some(3));
+        queue.shuffle = false;
+        queue.current_index = 3;
+        assert_eq!(queue.next_index(false, None), None);
+        queue.repeat = RepeatMode::Context;
+        assert_eq!(queue.next_index(false, None), Some(0));
+        queue.tracks.clear();
+        assert_eq!(queue.next_index(false, None), None);
     }
 }
 
@@ -383,6 +497,8 @@ pub enum PlayerCommand {
     UpdateMetadata(LocalTrack),
     MetadataFailed(String),
     Toggle,
+    /// Idempotent shared playback intent; repeated commands cannot toggle it back.
+    SetPlaying(bool),
     Next,
     Previous,
     Seek(u32),
@@ -400,8 +516,39 @@ pub enum PlayerCommand {
 }
 
 #[derive(Clone, Debug)]
+pub struct LocalProgress {
+    pub track_sequence: u64,
+    pub seek_sequence: u64,
+    pub position_ms: u32,
+    pub at: Instant,
+}
+impl LocalProgress {
+    pub fn apply(&self, state: &mut LocalState) -> bool {
+        if state.playback != Playback::Playing
+            || state.loading
+            || !state.connected
+            || state.track_sequence != self.track_sequence
+            || state.seek_sequence != self.seek_sequence
+            || state.position_at.is_some_and(|at| at > self.at)
+        {
+            return false;
+        }
+        state.position_ms = self.position_ms;
+        state.position_at = Some(self.at);
+        true
+    }
+}
+pub fn replace_progress(slot: &Mutex<Option<LocalProgress>>, progress: LocalProgress) -> bool {
+    let mut latest = slot.lock().unwrap_or_else(|e| e.into_inner());
+    let wake = latest.is_none();
+    *latest = Some(progress);
+    wake
+}
+
+#[derive(Clone, Debug)]
 pub enum EngineEvent {
     State(LocalState),
+    Progress(LocalProgress),
     AudioDevice { name: String, id: String },
     SessionEnded,
 }
@@ -464,6 +611,53 @@ enum WorkerEvent {
     TrackEnded { generation: u64 },
 }
 
+fn publish_audio_position(
+    state: &mut LocalState,
+    current: u64,
+    expected: u64,
+    position: u32,
+) -> bool {
+    if current != expected || state.playback != Playback::Playing || state.loading {
+        return false;
+    }
+    state.position_ms = position;
+    state.position_at = Some(Instant::now());
+    true
+}
+
+fn audio_failed(
+    state: &Mutex<LocalState>,
+    notify: &Notify,
+    generation: &AtomicU64,
+    expected: u64,
+    message: &str,
+) {
+    let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+    if generation.load(Ordering::SeqCst) != expected {
+        return;
+    }
+    // Keep the last confirmed audible position, rather than advancing a clock
+    // while an unresponsive output was not consuming sound.
+    state.position_at = None;
+    state.playback = Playback::Stopped;
+    state.loading = false;
+    state.source = None;
+    state.error = Some(message.into());
+    notify(EngineEvent::State(state.clone()));
+}
+
+fn audio_ended(state: &mut LocalState, current: u64, expected: u64) -> bool {
+    if current != expected {
+        return false;
+    }
+    if state.playback == Playback::Paused {
+        state.source = None;
+        state.position_at = None;
+        return false;
+    }
+    state.playback == Playback::Playing
+}
+
 /// Continue past unavailable recordings, but stop after three consecutive failures.
 /// A generation is handled once so polling cannot skip multiple queue entries.
 #[derive(Default)]
@@ -502,6 +696,100 @@ pub struct QueueState {
     pub shuffle: bool,
     pub repeat: RepeatMode,
     pub manual_queue_count: usize,
+}
+
+impl QueueState {
+    fn sync_local(&self, state: &mut LocalState) {
+        state.queue_tracks = self.tracks.clone();
+        state.queue_index = self.current_index;
+        state.manual_queue_count = self.manual_queue_count;
+        state.shuffle = self.shuffle;
+        state.repeat = self.repeat;
+        state.queue = self
+            .tracks
+            .iter()
+            .skip(self.current_index + 1)
+            .map(|t| t.uri.clone())
+            .collect();
+        if !self.shuffle {
+            state.shuffle_next = None;
+        }
+    }
+
+    fn next_index(&self, autoplay: bool, planned: Option<&str>) -> Option<usize> {
+        if self.tracks.is_empty() {
+            return None;
+        }
+        if self.repeat == RepeatMode::Track && autoplay {
+            return Some(self.current_index);
+        }
+        if self.manual_queue_count > 0 && self.current_index + 1 < self.tracks.len() {
+            return Some(self.current_index + 1);
+        }
+        if self.shuffle && self.tracks.len() > 1 {
+            return Some(
+                planned
+                    .and_then(|uri| {
+                        self.tracks
+                            .iter()
+                            .enumerate()
+                            .position(|(i, t)| i != self.current_index && t.uri == uri)
+                    })
+                    .unwrap_or_else(|| {
+                        let pick = rand::random_range(0..self.tracks.len() - 1);
+                        if pick >= self.current_index {
+                            pick + 1
+                        } else {
+                            pick
+                        }
+                    }),
+            );
+        }
+        if self.current_index + 1 < self.tracks.len() {
+            return Some(self.current_index + 1);
+        }
+        (self.repeat == RepeatMode::Context).then_some(0)
+    }
+}
+
+fn prefetch_order(
+    queue: &QueueState,
+    planned: Option<&LocalTrack>,
+    count: usize,
+) -> Vec<LocalTrack> {
+    if count == 0 || queue.tracks.is_empty() {
+        return Vec::new();
+    }
+    if queue.manual_queue_count == 0 {
+        if queue.repeat == RepeatMode::Track {
+            return Vec::new();
+        }
+        if queue.shuffle {
+            return planned
+                .filter(|p| queue.tracks.iter().any(|t| t.uri == p.uri))
+                .cloned()
+                .into_iter()
+                .collect();
+        }
+    }
+    let count =
+        if (queue.shuffle || queue.repeat == RepeatMode::Track) && queue.manual_queue_count > 0 {
+            count.min(queue.manual_queue_count)
+        } else {
+            count
+        };
+    (1..=count.min(queue.tracks.len()))
+        .filter_map(|step| {
+            let index = queue.current_index.saturating_add(step);
+            if index < queue.tracks.len() {
+                queue.tracks.get(index).cloned()
+            } else if queue.repeat == RepeatMode::Context {
+                queue.tracks.get(index % queue.tracks.len()).cloned()
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// Hydrate placeholders without reordering the queue or resuming a paused or
@@ -599,6 +887,7 @@ pub struct MatchCache {
     entries: Arc<Mutex<HashMap<String, CachedMatch>>>,
     resolving: Arc<Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>>,
     audio_writes: Arc<Mutex<()>>,
+    match_writes: Arc<Mutex<()>>,
     compacting: Arc<Mutex<std::collections::HashSet<String>>>,
     compaction_worker: Arc<tokio::sync::Semaphore>,
 }
@@ -624,6 +913,7 @@ impl MatchCache {
             entries: Arc::new(Mutex::new(entries)),
             resolving: Default::default(),
             audio_writes: Default::default(),
+            match_writes: Default::default(),
             compacting: Default::default(),
             compaction_worker: Arc::new(tokio::sync::Semaphore::new(1)),
         }
@@ -640,14 +930,17 @@ impl MatchCache {
     }
 
     pub fn remove_match(&self, spotify_id: &str) {
+        let _persist = self.match_writes.lock().unwrap_or_else(|e| e.into_inner());
         let mut entries = match self.entries.lock() {
             Ok(e) => e,
             Err(p) => p.into_inner(),
         };
         if let Some(old) = entries.remove(spotify_id) {
+            let json = serde_json::to_string_pretty(&*entries).ok();
+            drop(entries);
             let old_file = self.audio_dir.join(format!("{}.m4a", old.youtube_id));
             let _ = std::fs::remove_file(old_file);
-            if let Ok(json) = serde_json::to_string_pretty(&*entries) {
+            if let Some(json) = json {
                 let _ = fastframe_file::write(&self.json_path, json);
             }
         }
@@ -660,6 +953,44 @@ impl MatchCache {
             .filter(|bytes| !bytes.is_empty())?;
         self.schedule_audio_compaction(youtube_id, &bytes);
         Some(bytes)
+    }
+    async fn read_audio(&self, keys: &[String]) -> Option<Vec<u8>> {
+        let cache = self.clone();
+        let keys = keys.to_vec();
+        tokio::task::spawn_blocking(move || keys.iter().find_map(|key| cache.get_cached_audio(key)))
+            .await
+            .ok()
+            .flatten()
+    }
+    async fn persist_audio(&self, key: &str, bytes: Vec<u8>) -> Result<Vec<u8>> {
+        let cache = self.clone();
+        let key = key.to_owned();
+        tokio::task::spawn_blocking(move || {
+            cache.save_audio(&key, &bytes);
+            bytes
+        })
+        .await
+        .context("Audio cache worker stopped")
+    }
+    async fn persist_match(&self, key: &str, matched: CachedMatch) -> Result<()> {
+        let cache = self.clone();
+        let key = key.to_owned();
+        tokio::task::spawn_blocking(move || cache.store_match(&key, matched))
+            .await
+            .context("Recording cache worker stopped")
+    }
+    async fn persist_verified(
+        &self,
+        track: &LocalTrack,
+        recording: &Recording,
+        source: SourceKind,
+    ) -> Result<()> {
+        let cache = self.clone();
+        let track = track.clone();
+        let recording = recording.clone();
+        tokio::task::spawn_blocking(move || cache.save_verified_match(&track, &recording, source))
+            .await
+            .context("Recording cache worker stopped")
     }
     /// Speculation only needs file presence, not a full allocation/read.
     pub fn has_cached_audio(&self, youtube_id: &str) -> bool {
@@ -716,6 +1047,7 @@ impl MatchCache {
     }
 
     fn store_match(&self, spotify_id: &str, matched: CachedMatch) {
+        let _persist = self.match_writes.lock().unwrap_or_else(|e| e.into_inner());
         let mut entries = match self.entries.lock() {
             Ok(e) => e,
             Err(p) => p.into_inner(),
@@ -725,7 +1057,9 @@ impl MatchCache {
         }
         entries.insert(spotify_id.to_string(), matched);
 
-        if let Ok(json) = serde_json::to_string_pretty(&*entries) {
+        let json = serde_json::to_string_pretty(&*entries).ok();
+        drop(entries);
+        if let Some(json) = json {
             let _ = fastframe_file::write(&self.json_path, json);
         }
     }
@@ -899,9 +1233,8 @@ async fn download_youtube_audio_by_url(
     Ok(output.stdout)
 }
 
-/// Highest available native AAC/M4A audio. Availability wins over a bitrate
-/// floor; a compatible MP4 audio stream is the last native-format fallback.
-pub const YOUTUBE_AUDIO_FORMAT: &str = "ba[ext=m4a]/b[ext=mp4][acodec^=mp4a]";
+/// Native AAC audio only. Never fall back to a combined audio/video file.
+pub const YOUTUBE_AUDIO_FORMAT: &str = "ba[ext=m4a][vcodec=none]/ba[acodec^=mp4a][vcodec=none]";
 
 async fn search_candidates_for_query(
     yt_dlp: &Path,
@@ -1126,23 +1459,22 @@ async fn resolve_track_audio_inner(
             .filter(|id| crate::addons::valid_video_id(id))
             .map(str::to_owned)
             .unwrap_or_else(|| legacy_key.clone());
-        cache.store_match(
-            &track.uri,
-            CachedMatch {
-                youtube_id: key.clone(),
-                title: track.title.clone(),
-                duration_secs: track.duration_ms / 1000,
-                matcher_version: crate::audio_match::MATCHER_VERSION,
-                reference_key: recording_reference_key(track),
-                source_kind: Some(SourceKind::MetadataMatch),
-                channel: track.artist_names(),
-                channel_id: String::new(),
-            },
-        );
-        if let Some(bytes) = cache
-            .get_cached_audio(&key)
-            .or_else(|| cache.get_cached_audio(&legacy_key))
-        {
+        cache
+            .persist_match(
+                &track.uri,
+                CachedMatch {
+                    youtube_id: key.clone(),
+                    title: track.title.clone(),
+                    duration_secs: track.duration_ms / 1000,
+                    matcher_version: crate::audio_match::MATCHER_VERSION,
+                    reference_key: recording_reference_key(track),
+                    source_kind: Some(SourceKind::MetadataMatch),
+                    channel: track.artist_names(),
+                    channel_id: String::new(),
+                },
+            )
+            .await?;
+        if let Some(bytes) = cache.read_audio(&[key.clone(), legacy_key]).await {
             return Ok(bytes);
         }
         if track.uri.starts_with("vibefy:juicevault:") {
@@ -1181,8 +1513,7 @@ async fn resolve_track_audio_inner(
                 !bytes.is_empty(),
                 "JuiceVault returned an empty audio stream"
             );
-            cache.save_audio(&key, &bytes);
-            return Ok(bytes);
+            return cache.persist_audio(&key, bytes).await;
         }
         let mut command = tokio::process::Command::new(yt_dlp);
         apply_yt_proxy(&mut command, proxy);
@@ -1224,8 +1555,7 @@ async fn resolve_track_audio_inner(
             output.stdout.len() <= 128 * 1024 * 1024,
             "This track exceeds the add-on audio cache limit (128 MB)."
         );
-        cache.save_audio(&key, &output.stdout);
-        return Ok(output.stdout);
+        return cache.persist_audio(&key, output.stdout).await;
     }
     anyhow::ensure!(
         track.has_recording_metadata(),
@@ -1237,7 +1567,7 @@ async fn resolve_track_audio_inner(
     let title = &track.title;
     if let Some(cached) = cache.get_match(&spotify_id) {
         if cached.matches_track(track) {
-            if let Some(bytes) = cache.get_cached_audio(&cached.youtube_id) {
+            if let Some(bytes) = cache.read_audio(&[cached.youtube_id.clone()]).await {
                 log::info!(
                     "Verified audio cache hit for '{artist} - {title}' ({})",
                     cached.youtube_id
@@ -1246,12 +1576,15 @@ async fn resolve_track_audio_inner(
             }
             let url = format!("https://www.youtube.com/watch?v={}", cached.youtube_id);
             if let Ok(bytes) = download_youtube_audio_by_url(yt_dlp, &url, proxy).await {
-                cache.save_audio(&cached.youtube_id, &bytes);
-                return Ok(bytes);
+                return cache.persist_audio(&cached.youtube_id, bytes).await;
             }
         } else {
             log::info!("Rechecking obsolete recording match for '{artist} - {title}'");
-            cache.remove_match(&spotify_id);
+            let worker = cache.clone();
+            let key = spotify_id.clone();
+            tokio::task::spawn_blocking(move || worker.remove_match(&key))
+                .await
+                .context("Recording cache worker stopped")?;
         }
     }
 
@@ -1376,8 +1709,10 @@ async fn resolve_track_audio_inner(
                         .await
                         {
                             Ok(bytes) => {
-                                cache.save_audio(&recording.id, &bytes);
-                                cache.save_verified_match(track, recording, matched.source);
+                                let bytes = cache.persist_audio(&recording.id, bytes).await?;
+                                cache
+                                    .persist_verified(track, recording, matched.source)
+                                    .await?;
                                 return Ok(bytes);
                             }
                             Err(error) => {
@@ -1438,8 +1773,10 @@ async fn resolve_track_audio_inner(
         .await
         {
             Ok(bytes) => {
-                cache.save_audio(&recording.id, &bytes);
-                cache.save_verified_match(track, &recording, matched.source);
+                let bytes = cache.persist_audio(&recording.id, bytes).await?;
+                cache
+                    .persist_verified(track, &recording, matched.source)
+                    .await?;
                 return Ok(bytes);
             }
             Err(error) => last_download_error = Some(error),
@@ -1484,7 +1821,18 @@ pub struct Engine {
     proxy: Arc<Mutex<crate::settings::ProxyConfig>>,
 }
 
+impl Drop for Engine {
+    fn drop(&mut self) {
+        self.active.store(false, Ordering::Relaxed);
+        self.generation.fetch_add(1, Ordering::SeqCst);
+        let _ = self.cmd_tx.send(AudioWorkerCmd::Stop);
+    }
+}
+
 impl Engine {
+    pub(crate) fn jam_state(&self) -> std::sync::Weak<Mutex<LocalState>> {
+        Arc::downgrade(&self.state)
+    }
     pub fn match_cache(&self) -> MatchCache {
         self.cache.clone()
     }
@@ -1553,6 +1901,7 @@ impl Engine {
             queue: Vec::new(),
             previous_track: None,
             shuffle_next: None,
+            manual_queue_count: 0,
             queue_tracks: Vec::new(),
             queue_index: 0,
             loading: false,
@@ -1584,6 +1933,7 @@ impl Engine {
         let worker_device = config.audio_device.clone();
         let worker_buffer_ms = config.buffer_ms;
         let worker_eq = Arc::clone(&config.eq);
+        let worker_generation = Arc::clone(&generation);
 
         std::thread::spawn(move || {
             let mut equalizer = crate::eq::Processor::new(worker_eq);
@@ -1596,13 +1946,20 @@ impl Engine {
             );
             let mut converter = Converter::new(None);
 
-            while let Ok(cmd) = cmd_rx.recv() {
+            let mut pending = None;
+            loop {
+                let Some(cmd) = pending.take().or_else(|| cmd_rx.recv().ok()) else {
+                    break;
+                };
                 match cmd {
                     AudioWorkerCmd::Play {
                         bytes,
                         start_pos_ms,
                         generation,
                     } => {
+                        if worker_generation.load(Ordering::SeqCst) != generation {
+                            continue;
+                        }
                         equalizer.reset();
                         let cursor = Cursor::new(bytes);
                         let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
@@ -1617,6 +1974,13 @@ impl Engine {
                             Ok(p) => p,
                             Err(e) => {
                                 log::error!("Failed to probe audio stream: {e}");
+                                audio_failed(
+                                    &worker_state,
+                                    &worker_notify,
+                                    &worker_generation,
+                                    generation,
+                                    "Cannot decode this audio stream. Try playing it again.",
+                                );
                                 continue;
                             }
                         };
@@ -1630,6 +1994,13 @@ impl Engine {
                             Some(t) => t,
                             None => {
                                 log::error!("No audio track found in stream");
+                                audio_failed(
+                                    &worker_state,
+                                    &worker_notify,
+                                    &worker_generation,
+                                    generation,
+                                    "This source does not contain an audio track.",
+                                );
                                 continue;
                             }
                         };
@@ -1641,14 +2012,22 @@ impl Engine {
                             let dur_ms = ((n_frames as f64 / track_rate as f64) * 1000.0) as u32;
                             if dur_ms > 0 {
                                 let mut s = worker_state.lock().unwrap();
+                                if worker_generation.load(Ordering::SeqCst) != generation {
+                                    continue;
+                                }
+                                let mut changed = false;
                                 if let Some(source) = &mut s.source {
+                                    changed |= source.duration_ms != dur_ms;
                                     source.duration_ms = dur_ms;
                                 }
                                 if let Some(t) = &mut s.track {
                                     if t.duration_ms == 0 {
                                         t.duration_ms = dur_ms;
-                                        worker_notify(EngineEvent::State(s.clone()));
+                                        changed = true;
                                     }
+                                }
+                                if changed {
+                                    worker_notify(EngineEvent::State(s.clone()));
                                 }
                             }
                         }
@@ -1664,6 +2043,13 @@ impl Engine {
                             Ok(d) => d,
                             Err(e) => {
                                 log::error!("Failed to initialize audio decoder: {e}");
+                                audio_failed(
+                                    &worker_state,
+                                    &worker_notify,
+                                    &worker_generation,
+                                    generation,
+                                    "Cannot initialize the audio decoder. Try another recording.",
+                                );
                                 continue;
                             }
                         };
@@ -1686,6 +2072,10 @@ impl Engine {
                         let mut playback_aborted = false;
 
                         'decode_loop: loop {
+                            if worker_generation.load(Ordering::SeqCst) != generation {
+                                playback_aborted = true;
+                                break;
+                            }
                             while let Ok(incoming) = cmd_rx.try_recv() {
                                 match incoming {
                                     AudioWorkerCmd::Stop => {
@@ -1717,7 +2107,8 @@ impl Engine {
                                             );
                                         }
                                     }
-                                    AudioWorkerCmd::Play { .. } => {
+                                    incoming @ AudioWorkerCmd::Play { .. } => {
+                                        pending = Some(incoming);
                                         let _ = sink.stop();
                                         playback_aborted = true;
                                         break 'decode_loop;
@@ -1751,7 +2142,12 @@ impl Engine {
                                             );
                                         }
                                     }
-                                    Ok(AudioWorkerCmd::Play { .. }) => {
+                                    Ok(incoming @ AudioWorkerCmd::Play { .. }) => {
+                                        pending = Some(incoming);
+                                        playback_aborted = true;
+                                        break 'decode_loop;
+                                    }
+                                    Err(_) => {
                                         playback_aborted = true;
                                         break 'decode_loop;
                                     }
@@ -1797,10 +2193,22 @@ impl Engine {
                                         worker_tap.push(&f64_samples, 1.0);
 
                                         // Push samples to audio output device
-                                        let _ = sink.write(
+                                        if let Err(error) = sink.write(
                                             AudioPacket::Samples(f64_samples),
                                             &mut converter,
-                                        );
+                                        ) {
+                                            log::error!("Audio output failed: {error}");
+                                            audio_failed(
+                                                &worker_state,
+                                                &worker_notify,
+                                                &worker_generation,
+                                                generation,
+                                                "The audio output stopped responding. Check your audio device, then press play again.",
+                                            );
+                                            sink.reset_after_error();
+                                            playback_aborted = true;
+                                            break 'decode_loop;
+                                        }
 
                                         let frames = samples_44k.len() / NUM_CHANNELS as usize;
                                         let current_pos_ms = crate::audio_match::audible_position(
@@ -1811,9 +2219,21 @@ impl Engine {
                                         if last_notify.elapsed() >= Duration::from_millis(250) {
                                             last_notify = Instant::now();
                                             let mut s = worker_state.lock().unwrap();
-                                            s.position_ms = current_pos_ms;
-                                            s.position_at = Some(Instant::now());
-                                            worker_notify(EngineEvent::State(s.clone()));
+                                            if publish_audio_position(
+                                                &mut s,
+                                                worker_generation.load(Ordering::SeqCst),
+                                                generation,
+                                                current_pos_ms,
+                                            ) {
+                                                worker_notify(EngineEvent::Progress(
+                                                    LocalProgress {
+                                                        track_sequence: s.track_sequence,
+                                                        seek_sequence: s.seek_sequence,
+                                                        position_ms: s.position_ms,
+                                                        at: s.position_at.unwrap(),
+                                                    },
+                                                ));
+                                            }
                                         }
                                     }
                                 }
@@ -1821,7 +2241,18 @@ impl Engine {
                                     log::trace!("Symphonia decode warning: {e}");
                                     continue;
                                 }
-                                Err(_) => break 'decode_loop,
+                                Err(error) => {
+                                    log::error!("Audio decoder stopped: {error}");
+                                    audio_failed(
+                                        &worker_state,
+                                        &worker_notify,
+                                        &worker_generation,
+                                        generation,
+                                        "Audio decoding stopped unexpectedly. Try playing this recording again.",
+                                    );
+                                    playback_aborted = true;
+                                    break 'decode_loop;
+                                }
                             }
                         }
 
@@ -1887,7 +2318,16 @@ impl Engine {
                 if !listener_active.load(Ordering::Relaxed) {
                     break;
                 }
-                if gen_ev.load(Ordering::SeqCst) == end_gen {
+                let advance = {
+                    let mut current = state_ev.lock().unwrap();
+                    let generation = gen_ev.load(Ordering::SeqCst);
+                    let advance = audio_ended(&mut current, generation, end_gen);
+                    if generation == end_gen && current.playback == Playback::Paused {
+                        notify_ev(EngineEvent::State(current.clone()));
+                    }
+                    advance
+                };
+                if advance {
                     log::info!("Track completed naturally, auto-advancing to next track");
                     Engine::advance_next(
                         &state_ev, &notify_ev, &cmd_tx_ev, &yt_dlp_ev, &gen_ev, &cache_ev,
@@ -1931,6 +2371,8 @@ impl Engine {
         self.generation.fetch_add(1, Ordering::SeqCst);
         let _ = self.cmd_tx.send(AudioWorkerCmd::Stop);
         let mut state = self.state.lock().unwrap();
+        state.position_ms = state.position_now();
+        state.position_at = None;
         state.connected = false;
         state.playback = Playback::Stopped;
         (self.notify)(EngineEvent::State(state.clone()));
@@ -2009,8 +2451,7 @@ impl Engine {
         track: LocalTrack,
         start_pos_ms: u32,
     ) {
-        let generation = generation_atomic.fetch_add(1, Ordering::SeqCst) + 1;
-        let _ = cmd_tx.send(AudioWorkerCmd::Stop);
+        let generation;
 
         let artist_name = track.artist_names();
         let track_title = track.title.clone();
@@ -2018,6 +2459,8 @@ impl Engine {
 
         {
             let mut s = state.lock().unwrap();
+            generation = generation_atomic.fetch_add(1, Ordering::SeqCst) + 1;
+            let _ = cmd_tx.send(AudioWorkerCmd::Stop);
             s.source = None;
             if s.track.as_ref().is_some_and(|old| old.uri != track.uri) {
                 s.previous_track = s.track.clone();
@@ -2052,12 +2495,13 @@ impl Engine {
             let yt_dlp = match yt_dlp_path {
                 Some(path) => path,
                 None => {
-                    let mut s = state_clone.lock().unwrap();
-                    s.playback = Playback::Stopped;
-                    s.loading = false;
-                    s.error =
-                        Some("yt-dlp is not available. Install yt-dlp for audio playback.".into());
-                    notify_clone(EngineEvent::State(s.clone()));
+                    audio_failed(
+                        &state_clone,
+                        &notify_clone,
+                        &current_gen,
+                        generation,
+                        "yt-dlp is not available. Install yt-dlp for audio playback.",
+                    );
                     return;
                 }
             };
@@ -2086,11 +2530,13 @@ impl Engine {
                     log::error!(
                         "Failed to fetch YouTube audio for '{artist_name} - {track_title}': {err}"
                     );
-                    let mut s = state_clone.lock().unwrap();
-                    s.playback = Playback::Stopped;
-                    s.loading = false;
-                    s.error = Some(format!("Playback failed: {err}"));
-                    notify_clone(EngineEvent::State(s.clone()));
+                    audio_failed(
+                        &state_clone,
+                        &notify_clone,
+                        &current_gen,
+                        generation,
+                        &format!("Playback failed: {err}"),
+                    );
                     return;
                 }
             };
@@ -2099,14 +2545,11 @@ impl Engine {
                 return;
             }
 
-            {
-                let mut state = state_clone.lock().unwrap();
-                state.source = cache.get_match(&spotify_id).map(|matched| PlaybackSource {
-                    youtube_id: matched.youtube_id,
-                    title: matched.title,
-                    duration_ms: matched.duration_secs.saturating_mul(1000),
-                });
-            }
+            let source = cache.get_match(&spotify_id).map(|matched| PlaybackSource {
+                youtube_id: matched.youtube_id,
+                title: matched.title,
+                duration_ms: matched.duration_secs.saturating_mul(1000),
+            });
 
             log::info!(
                 "Audio stream ready for '{artist_name} - {track_title}' ({} bytes), starting playback",
@@ -2115,6 +2558,10 @@ impl Engine {
 
             {
                 let mut s = state_clone.lock().unwrap();
+                if current_gen.load(Ordering::SeqCst) != generation {
+                    return;
+                }
+                s.source = source;
                 s.playback = Playback::Playing;
                 s.loading = false;
                 if let Some(t) = &mut s.track {
@@ -2123,14 +2570,23 @@ impl Engine {
                     }
                 }
                 s.position_at = Some(Instant::now());
+                // Order Play before a concurrent Pause/Stop. The command and
+                // published state must describe the same playback generation.
+                if cmd_tx_clone
+                    .send(AudioWorkerCmd::Play {
+                        bytes,
+                        start_pos_ms,
+                        generation,
+                    })
+                    .is_err()
+                {
+                    s.playback = Playback::Stopped;
+                    s.position_at = None;
+                    s.source = None;
+                    s.error = Some("The audio worker stopped. Restart local playback.".into());
+                }
                 notify_clone(EngineEvent::State(s.clone()));
             }
-
-            let _ = cmd_tx_clone.send(AudioWorkerCmd::Play {
-                bytes,
-                start_pos_ms,
-                generation,
-            });
         });
     }
 
@@ -2161,19 +2617,17 @@ impl Engine {
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(750)).await;
-            if state.lock().unwrap().track_sequence != expected {
-                return;
-            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let planned = {
+                let current = state.lock().unwrap();
+                if current.track_sequence != expected || current.playback != Playback::Playing {
+                    return;
+                }
+                current.shuffle_next.clone()
+            };
             let tracks: Vec<LocalTrack> = {
                 let q = queue.lock().unwrap();
-                let mut list = Vec::new();
-                for i in 1..=count {
-                    if let Some(track) = q.tracks.get(q.current_index + i) {
-                        list.push(track.clone());
-                    }
-                }
-                list
+                prefetch_order(&q, planned.as_ref(), count)
             };
 
             for track in tracks {
@@ -2192,9 +2646,9 @@ impl Engine {
                             loop {
                                 {
                                     let current = state.lock().unwrap();
-                                    if current.track_sequence != expected
+                                    if matches!(current.playback,Playback::Paused|Playback::Stopped) || (current.track_sequence != expected
                                         && current.track.as_ref().is_none_or(|selected| selected.uri != track.uri)
-                                    {
+                                    ) {
                                         return;
                                     }
                                 }
@@ -2226,44 +2680,24 @@ impl Engine {
             .map(|t| t.uri.clone());
         let next_track = {
             let mut q = queue.lock().unwrap();
-            if q.tracks.is_empty() {
-                None
-            } else if q.repeat == RepeatMode::Track && autoplay {
-                q.tracks.get(q.current_index).cloned()
-            } else if q.manual_queue_count > 0 && q.current_index + 1 < q.tracks.len() {
-                q.current_index += 1;
-                q.manual_queue_count -= 1;
-                q.tracks.get(q.current_index).cloned()
-            } else if q.shuffle && q.tracks.len() > 1 {
-                let next_idx = planned
-                    .as_ref()
-                    .and_then(|uri| q.tracks.iter().position(|t| &t.uri == uri))
-                    .unwrap_or_else(|| rand::random_range(0..q.tracks.len()));
-                q.current_index = next_idx;
-                q.tracks.get(q.current_index).cloned()
-            } else if q.current_index + 1 < q.tracks.len() {
-                q.current_index += 1;
-                q.tracks.get(q.current_index).cloned()
-            } else if q.repeat == RepeatMode::Context {
-                q.current_index = 0;
-                q.tracks.get(0).cloned()
-            } else {
-                None
-            }
+            q.next_index(autoplay, planned.as_deref())
+                .and_then(|index| {
+                    let consumes_manual = q.manual_queue_count > 0
+                        && !(q.repeat == RepeatMode::Track && autoplay)
+                        && index == q.current_index + 1;
+                    if consumes_manual {
+                        q.manual_queue_count -= 1;
+                    }
+                    q.current_index = index;
+                    q.tracks.get(index).cloned()
+                })
         };
 
         if let Some(track) = next_track {
             {
                 let q = queue.lock().unwrap();
                 let mut s = state.lock().unwrap();
-                s.queue_tracks = q.tracks.clone();
-                s.queue_index = q.current_index;
-                s.queue = q
-                    .tracks
-                    .iter()
-                    .skip(q.current_index + 1)
-                    .map(|t| t.uri.clone())
-                    .collect();
+                q.sync_local(&mut s);
             }
             Self::start_track(
                 Arc::clone(state),
@@ -2334,14 +2768,7 @@ impl Engine {
                 {
                     let q = queue.lock().unwrap();
                     let mut s = state.lock().unwrap();
-                    s.queue_tracks = q.tracks.clone();
-                    s.queue_index = q.current_index;
-                    s.queue = q
-                        .tracks
-                        .iter()
-                        .skip(q.current_index + 1)
-                        .map(|t| t.uri.clone())
-                        .collect();
+                    q.sync_local(&mut s);
                 }
                 Self::start_track(
                     Arc::clone(state),
@@ -2372,14 +2799,7 @@ impl Engine {
         q.tracks.insert(insert_idx, new_track);
         q.manual_queue_count += 1;
         let mut state = self.state.lock().unwrap();
-        state.queue_tracks = q.tracks.clone();
-        state.queue_index = q.current_index;
-        state.queue = q
-            .tracks
-            .iter()
-            .skip(q.current_index + 1)
-            .map(|t| t.uri.clone())
-            .collect();
+        q.sync_local(&mut state);
         (self.notify)(EngineEvent::State(state.clone()));
     }
     pub fn command(&self, command: PlayerCommand) -> Result<()> {
@@ -2471,14 +2891,7 @@ impl Engine {
                     });
                 {
                     let mut s = self.state.lock().unwrap();
-                    s.queue_tracks = q.tracks.clone();
-                    s.queue_index = q.current_index;
-                    s.queue = q
-                        .tracks
-                        .iter()
-                        .skip(q.current_index + 1)
-                        .map(|t| t.uri.clone())
-                        .collect();
+                    q.sync_local(&mut s);
                 }
                 drop(q);
 
@@ -2504,8 +2917,16 @@ impl Engine {
                     2,
                 );
             }
-            PlayerCommand::Toggle => {
+            PlayerCommand::Toggle | PlayerCommand::SetPlaying(_) => {
                 let mut state = self.state.lock().unwrap();
+                if let PlayerCommand::SetPlaying(playing) = command {
+                    if (playing && matches!(state.playback, Playback::Playing | Playback::Loading))
+                        || (!playing
+                            && matches!(state.playback, Playback::Paused | Playback::Stopped))
+                    {
+                        return Ok(());
+                    }
+                }
                 if state.playback == Playback::Loading {
                     self.generation.fetch_add(1, Ordering::SeqCst);
                     state.playback = Playback::Paused;
@@ -2513,10 +2934,15 @@ impl Engine {
                     (self.notify)(EngineEvent::State(state.clone()));
                     return Ok(());
                 } else if state.playback == Playback::Playing {
-                    state.playback = Playback::Paused;
                     state.position_ms = state.position_now();
+                    state.playback = Playback::Paused;
                     state.position_at = None;
-                    let _ = self.cmd_tx.send(AudioWorkerCmd::Pause);
+                    if self.cmd_tx.send(AudioWorkerCmd::Pause).is_err() {
+                        state.playback = Playback::Stopped;
+                        state.source = None;
+                        state.error =
+                            Some("The audio worker stopped. Restart local playback.".into());
+                    }
                 } else if state.playback == Playback::Paused || state.playback == Playback::Stopped
                 {
                     if state.source.is_none()
@@ -2539,7 +2965,13 @@ impl Engine {
                     }
                     state.playback = Playback::Playing;
                     state.position_at = Some(Instant::now());
-                    let _ = self.cmd_tx.send(AudioWorkerCmd::Resume);
+                    if self.cmd_tx.send(AudioWorkerCmd::Resume).is_err() {
+                        state.playback = Playback::Stopped;
+                        state.position_at = None;
+                        state.source = None;
+                        state.error =
+                            Some("The audio worker stopped. Restart local playback.".into());
+                    }
                 }
                 (self.notify)(EngineEvent::State(state.clone()));
             }
@@ -2612,14 +3044,7 @@ impl Engine {
                     q.manual_queue_count = 0;
                 }
                 let mut state = self.state.lock().unwrap();
-                state.queue_tracks = q.tracks.clone();
-                state.queue_index = q.current_index;
-                state.queue = q
-                    .tracks
-                    .iter()
-                    .skip(q.current_index + 1)
-                    .map(|t| t.uri.clone())
-                    .collect();
+                q.sync_local(&mut state);
                 (self.notify)(EngineEvent::State(state.clone()));
             }
             PlayerCommand::AddToQueue(uri) => self.enqueue_track(LocalTrack {
@@ -2636,14 +3061,7 @@ impl Engine {
                     let track = q.tracks[target_idx].clone();
                     {
                         let mut state = self.state.lock().unwrap();
-                        state.queue_tracks = q.tracks.clone();
-                        state.queue_index = q.current_index;
-                        state.queue = q
-                            .tracks
-                            .iter()
-                            .skip(q.current_index + 1)
-                            .map(|t| t.uri.clone())
-                            .collect();
+                        q.sync_local(&mut state);
                     }
                     drop(q);
                     Self::start_track(
@@ -2682,14 +3100,7 @@ impl Engine {
                     let track = q.tracks[target_idx].clone();
                     {
                         let mut state = self.state.lock().unwrap();
-                        state.queue_tracks = q.tracks.clone();
-                        state.queue_index = q.current_index;
-                        state.queue = q
-                            .tracks
-                            .iter()
-                            .skip(q.current_index + 1)
-                            .map(|t| t.uri.clone())
-                            .collect();
+                        q.sync_local(&mut state);
                     }
                     drop(q);
                     Self::start_track(
@@ -2898,5 +3309,184 @@ mod unavailable_recovery_tests {
         ] {
             assert!(!recovery.should_advance(2, Playback::Stopped, error));
         }
+    }
+}
+
+#[cfg(test)]
+mod playback_regression_tests {
+    use super::*;
+    fn state() -> LocalState {
+        LocalState {
+            connected: true,
+            playback: Playback::Playing,
+            position_ms: 1000,
+            position_at: Some(Instant::now() - Duration::from_secs(2)),
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn playback_regression_progress_is_coalesced_and_rejects_old_track_seek_or_pause() {
+        let slot = Mutex::new(None);
+        let at = Instant::now();
+        for i in 0..10000 {
+            assert_eq!(
+                replace_progress(
+                    &slot,
+                    LocalProgress {
+                        track_sequence: 4,
+                        seek_sequence: 2,
+                        position_ms: i,
+                        at
+                    }
+                ),
+                i == 0
+            );
+        }
+        let last = slot.lock().unwrap().take().unwrap();
+        assert_eq!(last.position_ms, 9999);
+        let mut s = state();
+        s.track_sequence = 4;
+        s.seek_sequence = 2;
+        s.position_at = None;
+        assert!(last.apply(&mut s));
+        assert_eq!(s.position_ms, 9999);
+        s.playback = Playback::Paused;
+        assert!(!last.apply(&mut s));
+        s.playback = Playback::Playing;
+        s.seek_sequence = 3;
+        assert!(!last.apply(&mut s));
+        s.seek_sequence = 2;
+        s.track_sequence = 5;
+        assert!(!last.apply(&mut s));
+        s.track_sequence = 4;
+        s.position_at = Some(at + Duration::from_secs(1));
+        assert!(!last.apply(&mut s));
+        assert!(std::mem::size_of::<LocalProgress>() < 128);
+        assert!(replace_progress(&slot, last));
+    }
+    #[test]
+    fn playback_regression_pause_stop_and_loading_freeze_the_clock() {
+        let mut s = state();
+        assert!(s.position_now() >= 3000);
+        for playback in [Playback::Paused, Playback::Stopped, Playback::Loading] {
+            s.playback = playback;
+            assert_eq!(s.position_now(), 1000);
+        }
+        s.playback = Playback::Playing;
+        s.loading = true;
+        assert_eq!(s.position_now(), 1000);
+        s.loading = false;
+        s.position_ms = u32::MAX - 10;
+        assert_eq!(s.position_now(), u32::MAX);
+    }
+    #[test]
+    fn playback_regression_late_decoder_ticks_cannot_resume_a_paused_clock() {
+        let mut s = state();
+        s.playback = Playback::Paused;
+        s.position_at = None;
+        assert!(!publish_audio_position(&mut s, 1, 1, 5000));
+        assert_eq!(s.position_ms, 1000);
+        assert!(s.position_at.is_none());
+        s.playback = Playback::Playing;
+        assert!(!publish_audio_position(&mut s, 2, 1, 5000));
+        assert_eq!(s.position_ms, 1000);
+        assert!(publish_audio_position(&mut s, 2, 2, 5000));
+        assert_eq!(s.position_ms, 5000);
+    }
+    #[test]
+    fn playback_regression_errors_stop_the_current_generation_only() {
+        let data = Mutex::new(state());
+        let generation = AtomicU64::new(2);
+        let notify: Notify = Arc::new(|_| {});
+        audio_failed(&data, &notify, &generation, 1, "old failure");
+        assert_eq!(data.lock().unwrap().playback, Playback::Playing);
+        audio_failed(&data, &notify, &generation, 2, "device failed");
+        let s = data.lock().unwrap();
+        assert_eq!(s.playback, Playback::Stopped);
+        assert!(s.position_at.is_none());
+        assert_eq!(s.error.as_deref(), Some("device failed"));
+        assert!(!s.loading);
+    }
+    #[test]
+    fn playback_regression_natural_end_does_not_advance_after_pause() {
+        let mut s = state();
+        s.playback = Playback::Paused;
+        s.source = Some(PlaybackSource {
+            youtube_id: "example".into(),
+            title: "example".into(),
+            duration_ms: 10000,
+        });
+        assert!(!audio_ended(&mut s, 2, 1));
+        assert!(s.source.is_some());
+        assert!(!audio_ended(&mut s, 2, 2));
+        assert!(s.source.is_none());
+        assert!(s.position_at.is_none());
+        assert_eq!(s.playback, Playback::Paused);
+        s.playback = Playback::Playing;
+        assert!(audio_ended(&mut s, 2, 2));
+    }
+    #[test]
+    fn playback_regression_prefetch_follows_shuffle_manual_queue_and_repeat() {
+        let songs: Vec<_> = ["a", "b", "c", "d"]
+            .into_iter()
+            .map(|id| LocalTrack {
+                uri: id.into(),
+                ..Default::default()
+            })
+            .collect();
+        let mut q = QueueState {
+            tracks: songs.clone(),
+            shuffle: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            prefetch_order(&q, Some(&songs[3]), 2),
+            vec![songs[3].clone()]
+        );
+        q.manual_queue_count = 1;
+        assert_eq!(
+            prefetch_order(&q, Some(&songs[3]), 2),
+            vec![songs[1].clone()]
+        );
+        q.shuffle = false;
+        q.manual_queue_count = 0;
+        q.current_index = 3;
+        q.repeat = RepeatMode::Context;
+        assert_eq!(prefetch_order(&q, None, 2), songs[..2]);
+        q.repeat = RepeatMode::Track;
+        assert!(prefetch_order(&q, None, 2).is_empty());
+    }
+    #[tokio::test]
+    async fn playback_regression_cache_io_keeps_bytes_and_metadata() {
+        let root = std::env::temp_dir().join(format!("vibefy-cache-057-{}", rand::random::<u64>()));
+        let cache = MatchCache::new(&root);
+        let bytes = vec![1, 2, 3, 4];
+        assert_eq!(
+            cache.persist_audio("example", bytes.clone()).await.unwrap(),
+            bytes
+        );
+        assert_eq!(
+            cache
+                .read_audio(&["missing".into(), "example".into()])
+                .await,
+            Some(bytes)
+        );
+        let matched = CachedMatch {
+            youtube_id: "example".into(),
+            title: "Example".into(),
+            duration_secs: 4,
+            matcher_version: 0,
+            reference_key: String::new(),
+            source_kind: None,
+            channel: String::new(),
+            channel_id: String::new(),
+        };
+        cache
+            .persist_match("source", matched.clone())
+            .await
+            .unwrap();
+        assert_eq!(cache.get_match("source"), Some(matched.clone()));
+        assert_eq!(MatchCache::new(&root).get_match("source"), Some(matched));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

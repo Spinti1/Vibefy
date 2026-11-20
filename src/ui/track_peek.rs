@@ -86,42 +86,19 @@ pub(super) fn paint_neighbour(app: &App, ui: &egui::Ui, rect: egui::Rect, next: 
         title
     ));
 }
-pub fn neighbour(app: &App, next: bool) -> Option<crate::player::LocalTrack> {
+pub fn neighbour(app: &App, next: bool) -> Option<&crate::player::LocalTrack> {
     if app.now_playing().is_some_and(|n| !n.local) {
         return None;
     }
     if !next {
-        return app.local.previous_track.clone().or_else(|| {
+        return app.local.previous_track.as_ref().or_else(|| {
             app.local
                 .queue_index
                 .checked_sub(1)
-                .and_then(|i| app.local.queue_tracks.get(i).cloned())
+                .and_then(|i| app.local.queue_tracks.get(i))
         });
     }
-    if let Some(uri) = app.manual_queue.first() {
-        return app.find_track_metadata(uri).or_else(|| {
-            app.local
-                .queue_tracks
-                .iter()
-                .find(|track| &track.uri == uri)
-                .cloned()
-        });
-    }
-    if app.local.shuffle {
-        return app.local.shuffle_next.clone();
-    }
-    let index = app.local.queue_index + 1;
-    app.local
-        .queue_tracks
-        .get(index)
-        .or_else(|| {
-            if app.local.repeat == crate::player::RepeatMode::Context {
-                app.local.queue_tracks.first()
-            } else {
-                None
-            }
-        })
-        .cloned()
+    app.local.next_track()
 }
 
 pub fn show(app: &mut App, ctx: &egui::Context) {

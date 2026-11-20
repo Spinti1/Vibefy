@@ -29,7 +29,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, _connecting: bool) {
                     ui.add_space(10.0);
                     if theme::pill_button(ui,&p,"Skip · Continue as guest",false).clicked(){app.actions.push(Action::Personal(crate::personal_library::Action::Continue));}
                     ui.add_space(14.0);
-                    ui.add(egui::Label::new(egui::RichText::new("Import public Spotify playlists from Home using their links. No Spotify login is required. Private playlists and Liked Songs are not supported.").size(12.0).color(p.secondary)).wrap());
+                    ui.add(egui::Label::new(egui::RichText::new("Import public Spotify playlists by link from Home, or choose Connect Spotify there to copy your own playlists and Liked Songs.").size(12.0).color(p.secondary)).wrap());
                 });
             });
         });

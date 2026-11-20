@@ -186,7 +186,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
                 &palette,
                 Icon::Mic,
                 &gettext(app.locale, "No lyrics"),
-                &gettext(app.locale, "No lyrics found for this track."),
+                "Lyrics are not available for this track.",
             );
             return;
         }
@@ -446,7 +446,7 @@ fn with_cover(app: &mut App, ui: &mut egui::Ui, rect: Rect, top: f32) {
             ),
             Loadable::Loaded(None) => (
                 gettext(app.locale, "No lyrics"),
-                gettext(app.locale, "No lyrics found for this track."),
+                "Lyrics are not available for this track.".into(),
             ),
             Loadable::Failed(error) => (
                 gettext(
@@ -706,7 +706,7 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
                 &palette,
                 Icon::Mic,
                 &gettext(app.locale, "No lyrics"),
-                &gettext(app.locale, "No lyrics found for this track."),
+                "Lyrics are not available for this track.",
             );
             return;
         }

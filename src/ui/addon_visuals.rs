@@ -9,25 +9,48 @@ fn playing(app: &App) -> bool {
     app.now_playing()
         .is_some_and(|n| n.local && n.playing && !n.loading)
 }
-fn audio(app: &mut App, ctx: &egui::Context) {
+pub(super) fn audio(app: &mut App, ctx: &egui::Context) {
     let time = ctx.input(|i| i.time);
     if time == app.addons.audio_time {
         return;
     }
     let elapsed = (time - app.addons.audio_time).clamp(0.0, 0.2) as f32;
     app.addons.audio_time = time;
-    let sounding = playing(app);
-    let samples = if sounding {
-        app.winamp
-            .tap
-            .window(crate::vis::WIDE_SAMPLES, crate::vis::LAG)
-    } else {
-        Vec::new()
-    };
-    let levels = app
+    let now = app.now_playing();
+    let sounding = now
+        .as_ref()
+        .is_some_and(|n| n.local && n.playing && !n.loading);
+    let track = now.map(|n| n.uri);
+    if app.addons.visual_track != track {
+        app.addons.visual_track = track;
+        app.addons.ridges.clear();
+        app.addons.bands.clear();
+        app.addons.waveform.clear();
+        app.addons.beat = Default::default();
+        app.addons.analyser = Default::default();
+    }
+    // Freeze the last real audio frame when paused, including ridgeline history.
+    if !sounding {
+        return;
+    }
+    let mut samples = [0.0; crate::vis::WIDE_SAMPLES];
+    app.winamp.tap.window_into(&mut samples, crate::vis::LAG);
+    let mut levels = app
         .addons
         .analyser
         .step(&samples, std::time::Instant::now());
+    let config = app
+        .settings
+        .addons
+        .visual(app.settings.addons.visualizer.unwrap_or(Id::Vivy));
+    let blend = if config.smoothing == 0. {
+        1.
+    } else {
+        1. - (-elapsed * (40. - config.smoothing * 36.)).exp()
+    };
+    for (target, previous) in levels.iter_mut().zip(&app.addons.bands) {
+        *target = *previous + (*target - *previous) * blend;
+    }
     let bass = levels.iter().take(10).copied().sum::<f32>() / 10.0;
     app.addons
         .beat
@@ -51,15 +74,20 @@ fn audio(app: &mut App, ctx: &egui::Context) {
     if keep_history {
         app.addons.history_time = time;
     }
-    if !sounding {
-        app.addons.ridges.clear();
-    }
     app.addons.update_visual_levels(&levels, keep_history);
 }
 
 pub fn fullscreen(app: &mut App, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     audio(app, &ctx);
+    if let Some(uri) = &app.spicy.background_pick {
+        let mut appearance = app.settings.visualizer_background.clone();
+        appearance.custom_image = Some(uri.clone());
+        appearance.background = crate::spicy_lyrics::Background::CustomImage;
+        app.actions.push(Action::SpicyBackgroundUsed);
+        app.actions
+            .push(Action::SetVisualizerBackground(appearance));
+    }
     if let Some(now) = app.now_playing()
         && let Some(url) = now.art_small.or(now.art_url)
     {
@@ -74,6 +102,8 @@ pub fn fullscreen(app: &mut App, ui: &mut egui::Ui) {
                 super::topbar::show(app, ui);
             }
             let rect = ui.available_rect_before_wrap();
+            let appearance = app.settings.visualizer_background.clone();
+            super::music_background::paint(app, ui, rect, &appearance);
             let painter = ui.painter().with_clip_rect(rect);
             super::mod_host::render(app, ui, mode, rect, &[]);
             fullscreen_controls(app, ui, mode);
@@ -130,7 +160,7 @@ fn effect_selector(
     let mut choice = None;
     let response = egui::ComboBox::from_id_salt("builtin-visualizer-effect")
         .selected_text(selected.label)
-        .width((ui.available_width() - 100.).clamp(110., 240.))
+        .width((ui.available_width() - 210.).clamp(110., 240.))
         .height(420.)
         .show_ui(ui, |ui| {
             for effect in crate::visualizers::EFFECTS {
@@ -147,54 +177,113 @@ fn effect_selector(
 }
 
 fn fullscreen_controls(app: &mut App, ui: &mut egui::Ui, mode: Id) {
-    ui.add_space(theme::top_bar_height() + 8.0);
-    ui.horizontal(|ui| {
+    let ctx = ui.ctx().clone();
+    let id = egui::Id::new("visualizer-customize");
+    let mut open = ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false));
+    ui.add_space(8.0);
+    ui.horizontal_wrapped(|ui| {
         ui.add_space(12.0);
-        egui::Frame::new()
-            .fill(Color32::from_black_alpha(215))
-            .corner_radius(10.0)
-            .inner_margin(8.0)
-            .show(ui, |ui| {
+        if let (_, Some(effect)) = effect_selector(ui, &app.settings.addons) {
+            app.actions.push(Action::Addon(Command::ChooseEffect {
+                id: effect.id,
+                style: effect.style,
+            }));
+        }
+        if ui.button("Customize").clicked() {
+            open = !open;
+        }
+    });
+    let mut tab = ctx.data(|d| d.get_temp::<bool>(id.with("background")).unwrap_or(false));
+    if open {
+        egui::Window::new("Visualizer appearance")
+            .id(id.with("window"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(360.0)
+            .default_pos(egui::pos2(24.0, 120.0))
+            .max_width((ctx.content_rect().width() - 40.0).max(260.0))
+            .max_height((ctx.content_rect().height() - 200.0).clamp(240.0, 600.0))
+            .vscroll(true)
+            .show(&ctx, |ui| {
                 *ui.visuals_mut() = egui::Visuals::dark();
+                ui.spacing_mut().item_spacing = egui::vec2(10.0, 10.0);
                 ui.horizontal(|ui| {
-                    if let (_, Some(effect)) = effect_selector(ui, &app.settings.addons) {
-                        app.actions.push(Action::Addon(Command::ChooseEffect {
-                            id: effect.id,
-                            style: effect.style,
-                        }));
+                    ui.selectable_value(&mut tab, false, "Visualizer");
+                    ui.selectable_value(&mut tab, true, "Background");
+                });
+                ui.separator();
+                if tab {
+                    let mut appearance = app.settings.visualizer_background.clone();
+                    super::spicy_lyrics::background_settings(app, ui, &mut appearance, false);
+                    let mut name =
+                        ctx.data(|d| d.get_temp::<String>(id.with("name")).unwrap_or_default());
+                    super::spicy_lyrics::saved_styles(app, ui, &mut appearance, &mut name);
+                    ctx.data_mut(|d| d.insert_temp(id.with("name"), name));
+                    if appearance != app.settings.visualizer_background {
+                        app.actions
+                            .push(Action::SetVisualizerBackground(appearance));
                     }
-                    ui.menu_button("Settings", |ui| {
-                        ui.set_max_width(300.0);
-                        let original = app.settings.addons.visual(mode);
-                        let mut config = original;
-                        ui.strong(mode.name());
+                } else {
+                    let original = app.settings.addons.visual(mode);
+                    let mut config = original;
+                    ui.add(
+                        egui::Slider::new(&mut config.intensity, 0.2..=3.0)
+                            .text("Strength")
+                            .show_value(false),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut config.speed, 0.25..=2.0)
+                            .text("Speed")
+                            .show_value(false),
+                    );
+                    ui.checkbox(&mut config.artwork_colors, "Match cover colors");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut config.show_title, "Song title");
+                        ui.checkbox(&mut config.show_cover, "Cover");
+                    });
+                    if config.show_cover {
                         ui.add(
-                            egui::Slider::new(&mut config.intensity, 0.2..=3.0).text("Intensity"),
+                            egui::Slider::new(&mut config.cover_scale, 0.5..=1.6)
+                                .text("Cover size")
+                                .show_value(false),
+                        );
+                    }
+                    if super::spicy_lyrics::details_toggle(ui, "visual-details", "More options") {
+                        ui.add(
+                            egui::Slider::new(&mut config.brightness, 0.2..=1.0)
+                                .text("Brightness")
+                                .show_value(false),
                         );
                         ui.add(
-                            egui::Slider::new(&mut config.brightness, 0.2..=1.0).text("Brightness"),
+                            egui::Slider::new(&mut config.smoothing, 0.0..=1.0)
+                                .text("Smoothness")
+                                .show_value(false),
                         );
-                        ui.add(egui::Slider::new(&mut config.fps, 15..=60).text("Animation FPS"));
-                        ui.small("Lower FPS reduces graphics work.");
-                        ui.checkbox(&mut config.show_title, "Song title and artist");
-                        ui.checkbox(&mut config.show_cover, "Album cover");
-                        if mode == Id::Backmusic {
-                            ui.checkbox(&mut config.particles, "Particles");
-                        }
-                        ui.separator();
-                        if ui.button("Restore defaults").clicked() {
+                        ui.add(
+                            egui::Slider::new(&mut config.detail, 24..=96)
+                                .text("Detail")
+                                .show_value(false),
+                        );
+                        ui.add(egui::Slider::new(&mut config.fps, 15..=60).text("FPS"))
+                            .on_hover_text("Lower values reduce graphics work.");
+                        if ui.small_button("Reset visualizer").clicked() {
                             config = crate::addons::VisualConfig {
                                 style: config.style,
                                 ..Default::default()
                             };
                         }
-                        if config != original {
-                            app.actions
-                                .push(Action::Addon(Command::ConfigureVisual(config)));
-                        }
-                    });
-                });
+                    }
+                    if config != original {
+                        app.actions
+                            .push(Action::Addon(Command::ConfigureVisual(config)));
+                    }
+                }
             });
+    }
+    ctx.data_mut(|d| {
+        d.insert_temp(id, open);
+        d.insert_temp(id.with("background"), tab);
     });
 }
 
@@ -232,7 +321,7 @@ mod release_update_tests {
         let mut p = crate::addons::Preferences::default();
         let mut selector = Rect::NOTHING;
         let mut frame = |events: Vec<egui::Event>| {
-            ctx.run_ui(
+            let mut output = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(Rect::from_min_size(
                         egui::Pos2::ZERO,
@@ -248,7 +337,10 @@ mod release_update_tests {
                         assert!(crate::visualizers::select(&mut p, effect.id, effect.style));
                     }
                 },
-            )
+            );
+            // This headless UI test has no renderer to upload font textures to.
+            output.textures_delta.clear();
+            output
         };
         frame(vec![]);
         // Capture the real arrow bounds in a separate draw; all clicks go through egui.

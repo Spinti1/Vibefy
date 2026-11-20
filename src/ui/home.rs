@@ -24,7 +24,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     super::personal_library::home(app, ui);
     let all = quick_access_tiles(app);
     for (group, title) in [(4, "Vibefy playlists"), (1, "Spotify")] {
-        if group == 1 && app.user_id().is_none() {
+        if group == 1
+            && app.user_id().is_none()
+            && app.personal.spotify.is_none()
+            && !all.iter().any(|tile| tile_group(tile) == 1)
+        {
             continue;
         }
         ui.label(
@@ -47,7 +51,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             ui.small(if group == 4 {
                 "Create a playlist above, then add songs from search using their right-click menu."
             } else {
-                "Your Spotify playlists appear here."
+                "Open Spotify connected above to choose playlists or Liked Songs to import."
             });
         }
         quick_access(app, ui, &tiles);
@@ -211,6 +215,12 @@ fn youtube_playlists(app: &mut App, ui: &mut egui::Ui, all: &[Tile]) {
 fn tile_group(tile: &Tile) -> u8 {
     match &tile.page {
         Page::Playlist(_) | Page::LikedSongs => 1,
+        Page::LocalCollection(source)
+            if source.starts_with("https://open.spotify.com/playlist/")
+                || source.starts_with("vibefy:spotify:liked:") =>
+        {
+            1
+        }
         Page::LocalCollection(source) if source.starts_with("https://api.juicevault.xyz/") => 3,
         Page::LocalCollection(source) if crate::addons::playlist_url(source).is_ok() => 2,
         _ => 4,
@@ -389,6 +399,23 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
         }
     }
     // Library playlists are never truncated, regardless of history availability.
+    if let Some(catalog) = &app.personal.spotify {
+        for entry in &catalog.entries {
+            let source = entry.source(&catalog.account);
+            let page = Page::LocalCollection(source.clone());
+            if seen.insert(page.clone()) {
+                tiles.push(Tile {
+                    image: entry.image.clone(),
+                    name: entry.title.clone(),
+                    page,
+                    uri: Some(source),
+                    liked: entry.id == "liked",
+                    owned_playlist: None,
+                    song: None,
+                });
+            }
+        }
+    }
     for playlist in app.library.playlists.get().into_iter().flatten() {
         let tile = playlist_tile(playlist);
         if seen.insert(tile.page.clone()) {
@@ -569,6 +596,8 @@ fn quick_access(app: &mut App, ui: &mut egui::Ui, tiles: &[Tile]) {
                                             tracks: saved.tracks.clone(),
                                             index: 0,
                                         }));
+                                } else {
+                                    open_tile(app, page);
                                 }
                             } else if song.is_some() {
                                 app.actions.push(Action::PlayUris {
@@ -1162,12 +1191,45 @@ mod tests {
             source: format!("https://open.spotify.com/playlist/{id}"),
             ..Default::default()
         });
+        app.personal.spotify = Some(crate::spotify_library::Catalog {
+            account: "example".into(),
+            name: "Example".into(),
+            loaded: true,
+            entries: vec![
+                crate::spotify_library::Entry {
+                    editable: false,
+                    id: id.into(),
+                    title: "Imported playlist".into(),
+                    image: None,
+                    count: None,
+                },
+                crate::spotify_library::Entry {
+                    editable: true,
+                    id: "liked".into(),
+                    title: "Liked Songs".into(),
+                    image: None,
+                    count: None,
+                },
+            ],
+            ..Default::default()
+        });
         assert_eq!(
             super::quick_access_tiles(&app)
                 .iter()
                 .filter(|t| t.name == "Imported playlist")
                 .count(),
             1
+        );
+        let tiles = super::quick_access_tiles(&app);
+        assert_eq!(
+            tiles.iter().filter(|t| super::tile_group(t) == 1).count(),
+            2
+        );
+        assert!(
+            tiles
+                .iter()
+                .filter(|t| super::tile_group(t) == 1)
+                .all(|t| matches!(t.page, Page::LocalCollection(_)))
         );
     }
     use super::*;
@@ -1367,6 +1429,23 @@ mod tests {
 pub(crate) fn open_tile(app: &mut App, page: &Page) {
     if let Page::LocalCollection(source) = page {
         if app.source_collection(source).is_none() {
+            if let Some(catalog) = &app.personal.spotify {
+                if let Some(entry) = catalog
+                    .entries
+                    .iter()
+                    .find(|e| e.source(&catalog.account) == *source)
+                {
+                    app.actions
+                        .push(Action::Personal(crate::personal_library::Action::Show(
+                            crate::personal_library::Dialog::Spotify {
+                                backup: false,
+                                selected: std::collections::BTreeSet::from([entry.id.clone()]),
+                                follow: false,
+                            },
+                        )));
+                    return;
+                }
+            }
             for index in 0..2 {
                 let playlist = app.music_accounts[index]
                     .playlists
@@ -1407,6 +1486,8 @@ pub(crate) fn source_menu(app: &mut App, ui: &mut egui::Ui, source: &str, name: 
         super::personal_library::menu(app, ui, source, name);
         return;
     }
+
+    if super::widgets::menu_item(ui,&app.palette,Some(Icon::Copy),"Share to phone · QR") {app.actions.push(Action::Personal(crate::personal_library::Action::PhoneShare{source:source.into(),revoke:false}));}
     ui.set_min_width(200.0);
     widgets::playlist_visibility_menu(ui, app, source);
     if widgets::menu_item(ui, &app.palette, Some(Icon::Play), "Open playlist") {

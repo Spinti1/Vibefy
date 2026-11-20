@@ -944,11 +944,10 @@ fn visualiser(app: &mut App, view: &mut View, now: Option<&NowPlaying>, area: Ar
     let sounding = now.is_some_and(|now| (now.playing || now.loading) && now.local);
     match mode {
         VisMode::Bars => {
-            let samples = if sounding {
-                app.winamp.tap.window(vis::FFT_SAMPLES, vis::LAG)
-            } else {
-                vec![0.0; vis::FFT_SAMPLES]
-            };
+            let mut samples = [0.0; vis::FFT_SAMPLES];
+            if sounding {
+                app.winamp.tap.window_into(&mut samples, vis::LAG);
+            }
             let bars = app.winamp.analyser.step(&samples, Instant::now());
             let stride = area.width / vis::BARS as u32;
             for (index, bar) in bars.iter().enumerate() {
@@ -970,11 +969,10 @@ fn visualiser(app: &mut App, view: &mut View, now: Option<&NowPlaying>, area: Ar
             sounding || !app.winamp.analyser.settled()
         }
         VisMode::Scope => {
-            let samples = if sounding {
-                app.winamp.tap.window(vis::SCOPE_SAMPLES, vis::LAG)
-            } else {
-                vec![0.0; vis::SCOPE_SAMPLES]
-            };
+            let mut samples = [0.0; vis::SCOPE_SAMPLES];
+            if sounding {
+                app.winamp.tap.window_into(&mut samples, vis::LAG);
+            }
             let rows = vis::scope(&samples);
             let columns = area.width.min(vis::COLUMNS as u32);
             let mut last = row_at(rows[0]);

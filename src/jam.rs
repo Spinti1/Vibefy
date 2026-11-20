@@ -50,11 +50,14 @@ pub fn parse_invite(text: &str) -> Result<String> {
         let url = reqwest::Url::parse(text)?;
         ensure!(
             url.scheme() == "https"
-                && url.host_str() == Some("usevibefy.online")
+                && matches!(
+                    url.host_str(),
+                    Some("usevibefy.online" | "www.usevibefy.online" | "vibefy-neon.vercel.app")
+                )
                 && url.username().is_empty()
                 && url.password().is_none()
                 && url.port().is_none()
-                && url.path() == "/app",
+                && matches!(url.path(), "/app" | "/web" | "/phone"),
             "Paste a Vibefy Jam link or code"
         );
         url.query_pairs()
@@ -74,18 +77,55 @@ pub fn parse_invite(text: &str) -> Result<String> {
     );
     Ok(code)
 }
+/// Public album art only. Never relay arbitrary hosts, query tokens or user artwork.
+fn public_cover_url(value: &str) -> Option<String> {
+    let url = reqwest::Url::parse(value).ok()?;
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || value.len() > 2000
+    {
+        return None;
+    }
+    let host = url.host_str()?;
+    let path = url.path();
+    let allowed = match host {
+        "api.juicevault.xyz" => {
+            path.starts_with("/cdn/")
+                && path
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"/-_.".contains(&b))
+        }
+        "i.ytimg.com" => path.starts_with("/vi/") || path.starts_with("/vi_webp/"),
+        "i.scdn.co" => path.starts_with("/image/"),
+        _ => host.ends_with(".googleusercontent.com") || host.ends_with(".ggpht.com"),
+    };
+    allowed.then(|| url.to_string())
+}
 fn relay_track(mut t: LocalTrack) -> Option<LocalTrack> {
-    if !t
+    let youtube = t
         .uri
         .strip_prefix("vibefy:youtube:")
-        .is_some_and(crate::addons::valid_video_id)
+        .is_some_and(crate::addons::valid_video_id);
+    let juice = t
+        .uri
+        .strip_prefix("vibefy:juicevault:")
+        .is_some_and(crate::music_accounts::uuid);
+    if !(youtube || juice)
         || t.title.trim().is_empty()
         || t.title.chars().count() > 300
         || t.artists.len() > 12
     {
         return None;
     }
-    t.cover_url = None;
+    let cover = [&t.cover_url, &t.art_url, &t.art_small_url]
+        .into_iter()
+        .filter_map(|v| v.as_deref())
+        .find_map(public_cover_url);
+    t.cover_url = cover;
     t.art_url = None;
     t.art_small_url = None;
     Some(t)
@@ -103,6 +143,179 @@ pub struct Shared {
     incoming: Vec<LocalTrack>,
     outgoing: Vec<LocalTrack>,
     published_queue: Vec<LocalTrack>,
+    notifications: Vec<String>,
+    pub latency_ms: u32,
+    pub last_seen: Option<Instant>,
+    pub controls_available: bool,
+    live: Option<std::sync::Weak<Mutex<crate::player::LocalState>>>,
+    sender: Option<tokio::sync::mpsc::UnboundedSender<crate::backend::Command>>,
+    controls: Vec<Value>,
+}
+impl Shared {
+    pub fn playback_notice(&self) -> &'static str {
+        let Some(live) = self.live.as_ref().and_then(|s| s.upgrade()) else {
+            return "Audio engine is connecting…";
+        };
+        let state = live.lock().unwrap();
+        if state.error.is_some() {
+            return "Audio unavailable. Choose another recording.";
+        }
+        if state.loading {
+            return "Loading recording…";
+        }
+        if state.track.is_none() {
+            return "Choose a song to begin.";
+        }
+        if Self::from_player(&state).is_none() {
+            return "Waiting for a YouTube or JuiceVault recording.";
+        }
+        "Audio ready · YouTube & JuiceVault"
+    }
+    pub(crate) fn attach(
+        &mut self,
+        state: std::sync::Weak<Mutex<crate::player::LocalState>>,
+        sender: tokio::sync::mpsc::UnboundedSender<crate::backend::Command>,
+    ) {
+        self.live = Some(state);
+        self.sender = Some(sender);
+    }
+    fn from_player(state: &crate::player::LocalState) -> Option<Snapshot> {
+        if !state.is_active() || state.loading {
+            return None;
+        }
+        let mut track = state.track.clone()?;
+        if let Some(duration) = state
+            .source
+            .as_ref()
+            .map(|s| s.duration_ms)
+            .filter(|d| *d > 0)
+        {
+            track.duration_ms = duration;
+        }
+        if !track.uri.starts_with("vibefy:juicevault:") {
+            if let Some(source) = &state.source {
+                if crate::addons::valid_video_id(&source.youtube_id) {
+                    track.uri = format!("vibefy:youtube:{}", source.youtube_id);
+                }
+            }
+        }
+        Some(Snapshot {
+            track: relay_track(track)?,
+            position_ms: state.position_now(),
+            playing: state.playback == crate::player::Playback::Playing,
+        })
+    }
+    fn live_queue(state: &crate::player::LocalState) -> Vec<(usize, LocalTrack)> {
+        state
+            .queue_tracks
+            .iter()
+            .enumerate()
+            .skip(state.queue_index.saturating_add(1))
+            .filter_map(|(index, t)| relay_track(t.clone()).map(|t| (index, t)))
+            .take(40)
+            .collect()
+    }
+    fn host_packet(&self) -> (Option<Snapshot>, Vec<LocalTrack>) {
+        if let Some(live) = &self.live {
+            let Some(live) = live.upgrade() else {
+                return (None, vec![]);
+            };
+            let state = live.lock().unwrap();
+            return (
+                Self::from_player(&state),
+                Self::live_queue(&state)
+                    .into_iter()
+                    .map(|(_, t)| t)
+                    .collect(),
+            );
+        }
+        let snapshot = self.published.as_ref().map(|(v, at)| {
+            let mut v = v.clone();
+            if v.playing {
+                v.position_ms = v
+                    .position_ms
+                    .saturating_add(at.elapsed().as_millis().min(u32::MAX as u128) as u32)
+                    .min(if v.track.duration_ms > 0 {
+                        v.track.duration_ms
+                    } else {
+                        86_400_000
+                    });
+            }
+            v
+        });
+        (snapshot, self.published_queue.clone())
+    }
+    fn apply_control(&self, packet: &Value) -> bool {
+        let Some(live) = self.live.as_ref().and_then(|s| s.upgrade()) else {
+            return false;
+        };
+        let state = live.lock().unwrap();
+        let command = match packet["action"].as_str() {
+            Some("set_playing") => {
+                let Some(current) = Self::from_player(&state) else {
+                    return false;
+                };
+                if packet["uri"].as_str() != Some(&current.track.uri) {
+                    return false;
+                }
+                let Some(playing) = packet["playing"].as_bool() else {
+                    return false;
+                };
+                crate::player::PlayerCommand::SetPlaying(playing)
+            }
+            Some("seek") => {
+                let Some(current) = Self::from_player(&state) else {
+                    return false;
+                };
+                if packet["uri"].as_str() != Some(&current.track.uri) {
+                    return false;
+                }
+                let Some(position) = packet["position_ms"].as_u64().filter(|p| *p <= 86_400_000)
+                else {
+                    return false;
+                };
+                crate::player::PlayerCommand::Seek((position as u32).min(
+                    if current.track.duration_ms > 0 {
+                        current.track.duration_ms
+                    } else {
+                        86_400_000
+                    },
+                ))
+            }
+            Some("play_queue") => {
+                let Some(index) = packet["index"].as_u64().filter(|i| *i < 40) else {
+                    return false;
+                };
+                let queue = Self::live_queue(&state);
+                let Some((absolute, track)) = queue.get(index as usize) else {
+                    return false;
+                };
+                if packet["uri"].as_str() != Some(&track.uri) {
+                    return false;
+                }
+                crate::player::PlayerCommand::SkipTo(*absolute)
+            }
+            _ => return false,
+        };
+        drop(state);
+        self.sender.as_ref().is_some_and(|sender| {
+            sender
+                .send(crate::backend::Command::Player(command))
+                .is_ok()
+        })
+    }
+    fn update_listeners(&mut self, listeners: usize) {
+        let listeners = listeners.min(24);
+        if listeners > self.listeners && self.notifications.len() < 8 {
+            let joined = listeners - self.listeners;
+            self.notifications.push(if joined == 1 {
+                "A listener joined your Jam.".into()
+            } else {
+                format!("{joined} listeners joined your Jam.")
+            });
+        }
+        self.listeners = listeners;
+    }
 }
 pub struct Session {
     pub host: bool,
@@ -161,6 +374,33 @@ impl Session {
     pub fn take_additions(&self) -> Vec<LocalTrack> {
         std::mem::take(&mut self.shared.lock().unwrap().incoming)
     }
+    pub fn take_notifications(&self) -> Vec<String> {
+        std::mem::take(&mut self.shared.lock().unwrap().notifications)
+    }
+    fn request_control(&self, packet: Value) -> bool {
+        let mut state = self.shared.lock().unwrap();
+        if !state.connected {
+            return false;
+        }
+        if self.host {
+            return state.apply_control(&packet);
+        }
+        if !state.controls_available || state.controls.len() >= 16 {
+            return false;
+        }
+        state.controls.push(packet);
+        true
+    }
+    pub fn seek(&self, uri: &str, position_ms: u32) -> bool {
+        self.request_control(
+            json!({"type":"control","action":"seek","uri":uri,"position_ms":position_ms}),
+        )
+    }
+    pub fn play_queue(&self, index: usize, uri: &str) -> bool {
+        self.request_control(
+            json!({"type":"control","action":"play_queue","uri":uri,"index":index}),
+        )
+    }
     pub fn add(&self, track: LocalTrack) -> bool {
         let Some(t) = relay_track(track) else {
             return false;
@@ -197,7 +437,7 @@ fn run(remote: Option<String>, shared: &Arc<Mutex<Shared>>, stop: &AtomicBool) -
             .to_owned();
         (code, Some(token))
     };
-    shared.lock().unwrap().invite = format!("https://usevibefy.online/app?jam={code}");
+    shared.lock().unwrap().invite = format!("https://vibefy-neon.vercel.app/web?jam={code}");
     let mut failures = 0;
     while !stop.load(Ordering::Relaxed) {
         match connected(&code, token.as_deref(), shared, stop) {
@@ -247,7 +487,7 @@ fn connected(
     socket.set_read_timeout(Some(Duration::from_millis(150)))?;
     socket.set_write_timeout(Some(Duration::from_secs(5)))?;
     ws.send(Message::Text(
-        json!({"type":"hello","protocol":PROTOCOL,"host_token":token,"name":"Vibefy"})
+        json!({"type":"hello","protocol":PROTOCOL,"host_token":token,"name":"Vibefy","shared_controls":true})
             .to_string()
             .into(),
     ))?;
@@ -258,19 +498,24 @@ fn connected(
     let mut rtt = 0u32;
     while !stop.load(Ordering::Relaxed) {
         if ready && last.elapsed() >= Duration::from_secs(1) {
-            let mut s = shared.lock().unwrap();
-            if token.is_some() {
-                let snapshot = s.published.as_ref().map(|(v, at)| {
-                    let mut v = v.clone();
-                    if v.playing {
-                        v.position_ms = v
-                            .position_ms
-                            .saturating_add(at.elapsed().as_millis().min(10_000) as u32)
-                            .min(86_400_000);
-                    }
-                    v
-                });
-                let mut queue = s.published_queue.clone();
+            let (host_packet, addition, control) = {
+                let mut s = shared.lock().unwrap();
+                (
+                    token.is_some().then(|| s.host_packet()),
+                    if s.outgoing.is_empty() {
+                        None
+                    } else {
+                        Some(s.outgoing.remove(0))
+                    },
+                    if s.controls.is_empty() {
+                        None
+                    } else {
+                        Some(s.controls.remove(0))
+                    },
+                )
+            };
+            // Slow socket writes must never hold a lock used by the UI.
+            if let Some((snapshot, mut queue)) = host_packet {
                 let data = loop {
                     let data =
                         json!({"type":"state","snapshot":snapshot,"queue":queue}).to_string();
@@ -283,11 +528,13 @@ fn connected(
                 };
                 ws.send(Message::Text(data.into()))?;
             }
-            if !s.outgoing.is_empty() {
-                let track = s.outgoing.remove(0);
+            if let Some(track) = addition {
                 ws.send(Message::Text(
                     json!({"type":"add","track":track}).to_string().into(),
                 ))?;
+            }
+            if let Some(packet) = control {
+                ws.send(Message::Text(packet.to_string().into()))?;
             }
             last = Instant::now();
         }
@@ -302,6 +549,7 @@ fn connected(
                 seen = Instant::now();
                 let p: Value = serde_json::from_str(&text)?;
                 let mut s = shared.lock().unwrap();
+                s.last_seen = Some(Instant::now());
                 match p["type"].as_str() {
                     Some("welcome") => {
                         ready = true;
@@ -313,9 +561,13 @@ fn connected(
                         }
                         .into();
                     }
-                    Some("pong") => rtt = (ping.elapsed().as_millis() / 2).min(1500) as u32,
+                    Some("pong") => {
+                        rtt = (ping.elapsed().as_millis() / 2).min(1500) as u32;
+                        s.latency_ms = rtt.saturating_mul(2);
+                    }
                     Some("state") => {
-                        s.listeners = p["listeners"].as_u64().unwrap_or(0) as usize;
+                        s.update_listeners(p["listeners"].as_u64().unwrap_or(0) as usize);
+                        s.controls_available = p["shared_controls"].as_bool().unwrap_or(false);
                         s.queue = serde_json::from_value::<Vec<LocalTrack>>(p["queue"].clone())
                             .unwrap_or_default()
                             .into_iter()
@@ -336,12 +588,27 @@ fn connected(
                         }
                     }
                     Some("add") if token.is_some() => {
+                        if let Some(sender) = &s.sender {
+                            if let Ok(t) = serde_json::from_value(p["track"].clone()) {
+                                if let Some(t) = relay_track(t) {
+                                    let _ = sender.send(crate::backend::Command::Player(
+                                        crate::player::PlayerCommand::AddResolvedToQueue(t),
+                                    ));
+                                }
+                            }
+                            continue;
+                        }
                         if s.incoming.len() < 100 {
                             if let Ok(t) = serde_json::from_value(p["track"].clone()) {
                                 if let Some(t) = relay_track(t) {
                                     s.incoming.push(t);
                                 }
                             }
+                        }
+                    }
+                    Some("control") if token.is_some() => {
+                        if s.apply_control(&p) {
+                            last = Instant::now() - Duration::from_secs(1);
                         }
                     }
                     Some("error") | Some("notice") => {
@@ -382,6 +649,132 @@ fn connected(
 #[cfg(test)]
 mod release_update_tests {
     use super::*;
+    fn song(uri: &str) -> LocalTrack {
+        LocalTrack {
+            uri: uri.into(),
+            title: "Synthetic Jam recording".into(),
+            duration_ms: 240_000,
+            ..Default::default()
+        }
+    }
+    #[test]
+    fn host_clock_and_track_changes_follow_the_engine_without_ui_frames() {
+        let state = Arc::new(Mutex::new(crate::player::LocalState {
+            connected: true,
+            playback: crate::player::Playback::Playing,
+            track: Some(song("vibefy:youtube:abcdefghijk")),
+            position_ms: 1000,
+            position_at: Some(Instant::now() - Duration::from_secs(75)),
+            ..Default::default()
+        }));
+        let (sender, _) = tokio::sync::mpsc::unbounded_channel();
+        let mut shared = Shared::default();
+        shared.attach(Arc::downgrade(&state), sender);
+        let snapshot = shared.host_packet().0.unwrap();
+        assert!(snapshot.position_ms >= 76_000 && snapshot.position_ms < 78_000);
+        {
+            let mut local = state.lock().unwrap();
+            local.track = Some(song(
+                "vibefy:juicevault:12345678-1234-1234-1234-123456789abc",
+            ));
+            local.playback = crate::player::Playback::Paused;
+            local.position_ms = 42_000;
+        }
+        let snapshot = shared.host_packet().0.unwrap();
+        assert!(!snapshot.playing);
+        assert_eq!(snapshot.position_ms, 42_000);
+        assert!(snapshot.track.uri.starts_with("vibefy:juicevault:"));
+        drop(state);
+        assert!(shared.host_packet().0.is_none());
+    }
+    #[test]
+    fn shared_controls_validate_recording_and_filtered_queue_before_dispatch() {
+        let current = song("vibefy:youtube:abcdefghijk");
+        let queued = song("vibefy:juicevault:12345678-1234-1234-1234-123456789abc");
+        let state = Arc::new(Mutex::new(crate::player::LocalState {
+            connected: true,
+            playback: crate::player::Playback::Paused,
+            track: Some(current.clone()),
+            queue_tracks: vec![current.clone(), song("file:///private"), queued.clone()],
+            ..Default::default()
+        }));
+        let (sender, mut received) = tokio::sync::mpsc::unbounded_channel();
+        let mut shared = Shared::default();
+        shared.attach(Arc::downgrade(&state), sender);
+        assert!(
+            !shared.apply_control(&json!({"action":"seek","uri":queued.uri,"position_ms":100}))
+        );
+        assert!(
+            !shared.apply_control(&json!({"action":"seek","uri":current.uri,"position_ms":-1}))
+        );
+        assert!(
+            shared.apply_control(&json!({"action":"seek","uri":current.uri,"position_ms":999999}))
+        );
+        assert!(matches!(
+            received.try_recv().unwrap(),
+            crate::backend::Command::Player(crate::player::PlayerCommand::Seek(240_000))
+        ));
+        assert!(!shared.apply_control(&json!({"action":"play_queue","index":0,"uri":current.uri})));
+        assert!(shared.apply_control(&json!({"action":"play_queue","index":0,"uri":queued.uri})));
+        assert!(matches!(
+            received.try_recv().unwrap(),
+            crate::backend::Command::Player(crate::player::PlayerCommand::SkipTo(2))
+        ));
+        assert!(received.try_recv().is_err());
+    }
+    #[test]
+    fn shared_pause_is_an_explicit_boolean_and_rejects_stale_recordings() {
+        let current = song("vibefy:youtube:abcdefghijk");
+        let live = Arc::new(Mutex::new(crate::player::LocalState {
+            connected: true,
+            track: Some(current.clone()),
+            playback: crate::player::Playback::Playing,
+            ..Default::default()
+        }));
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let mut shared = Shared::default();
+        shared.attach(Arc::downgrade(&live), sender);
+        for playing in [false, false, true] {
+            assert!(shared.apply_control(
+                &json!({"action":"set_playing","uri":current.uri,"playing":playing})
+            ));
+            assert!(
+                matches!(receiver.try_recv().unwrap(), crate::backend::Command::Player(crate::player::PlayerCommand::SetPlaying(value)) if value == playing)
+            );
+        }
+        assert!(!shared.apply_control(
+            &json!({"action":"set_playing","uri":"vibefy:youtube:bbbbbbbbbbb","playing":false})
+        ));
+        assert!(
+            !shared.apply_control(
+                &json!({"action":"set_playing","uri":current.uri,"playing":"false"})
+            )
+        );
+        assert!(receiver.try_recv().is_err());
+        assert_eq!(
+            crate::music_accounts::juice_search_query("Juice WRLD - Robbery"),
+            "Robbery"
+        );
+        assert_eq!(
+            crate::music_accounts::juice_search_query("Juice Man"),
+            "Juice Man"
+        );
+    }
+    #[test]
+    fn participant_notifications_are_bounded_and_only_report_new_listeners() {
+        let mut state = Shared::default();
+        state.update_listeners(0);
+        state.update_listeners(1);
+        state.update_listeners(1);
+        state.update_listeners(0);
+        assert_eq!(state.notifications, ["A listener joined your Jam."]);
+        for _ in 0..30 {
+            state.update_listeners(0);
+            state.update_listeners(usize::MAX);
+        }
+        assert_eq!(state.listeners, 24);
+        assert_eq!(state.notifications.len(), 8);
+    }
     #[test]
     fn codes_and_links_never_accept_peer_addresses_or_other_websites() {
         assert_eq!(parse_invite("abcd-efgh-jklm").unwrap(), "ABCDEFGHJKLM");
@@ -389,10 +782,16 @@ mod release_update_tests {
             parse_invite("https://usevibefy.online/app?jam=ABCDEFGHJKLM").unwrap(),
             "ABCDEFGHJKLM"
         );
+        assert_eq!(
+            parse_invite("https://vibefy-neon.vercel.app/web?jam=ABCDEFGHJKLM").unwrap(),
+            "ABCDEFGHJKLM"
+        );
         for bad in [
             "https://usevibefy.online.evil/app?jam=ABCDEFGHJKLM",
             "https://evil@usevibefy.online/app?jam=ABCDEFGHJKLM",
             "http://usevibefy.online/app?jam=ABCDEFGHJKLM",
+            "https://vibefy-neon.vercel.app.evil/web?jam=ABCDEFGHJKLM",
+            "https://vibefy-neon.vercel.app:1234/web?jam=ABCDEFGHJKLM",
             "vibefy-jam://127.0.0.1:123/secret",
             "ABCD-EFGH-IJKL",
         ] {
@@ -408,6 +807,25 @@ mod release_update_tests {
             ..Default::default()
         };
         assert!(relay_track(track.clone()).unwrap().cover_url.is_none());
+        let cover = "https://api.juicevault.xyz/cdn/covers/example.webp";
+        assert_eq!(
+            relay_track(LocalTrack {
+                cover_url: Some(cover.into()),
+                ..track.clone()
+            })
+            .unwrap()
+            .cover_url
+            .as_deref(),
+            Some(cover)
+        );
+        for bad in [
+            "https://api.juicevault.xyz/cdn/cover.webp?token=private",
+            "https://api.juicevault.xyz.evil/cdn/pixel.jpg",
+            "http://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg",
+            "https://user:secret@i.ytimg.com/vi/abcdefghijk/hqdefault.jpg",
+        ] {
+            assert!(public_cover_url(bad).is_none());
+        }
         assert!(
             relay_track(LocalTrack {
                 uri: "file:///secret".into(),

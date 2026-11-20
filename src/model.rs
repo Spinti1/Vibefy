@@ -1441,7 +1441,10 @@ pub enum Action {
     AnalyzeSpicyAudio,
     OpenSpicySettings(usize),
     RemoveSpicySyncPoint(usize),
+    SetVisualizerBackground(crate::spicy_lyrics::Appearance),
     SetSpicyAppearance(crate::spicy_lyrics::Appearance),
+    SaveSpicyStyle(String, crate::spicy_lyrics::Appearance),
+    DeleteSpicyStyle(String),
     CalibrateSpicyLyrics {
         audio_ms: u32,
         lyric_ms: u32,

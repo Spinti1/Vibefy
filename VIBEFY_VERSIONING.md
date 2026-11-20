@@ -1,10 +1,12 @@
 # Vibefy releases
 
-Current source version: **0.4.53**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
+Current source version: **0.4.74**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
 
-For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.54), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
+For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.75), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
 
 0.4.4: About and Mods credits, clearer buttons, cache management and 2 GB advisory, performance improvements.
+
+0.4.54: Optional Windows Spotify browser connection beside public playlist import. Select account playlists and Liked Songs, import complete metadata snapshots sequentially and optionally save unlisted YouTube copies after the local batch. Reuses the existing WebView2 host with isolated profiles, fixed resources and validated track additions and protected local session storage. No developer Client ID or new runtime dependencies. Opt-in additions-only background checks and confirmed writes use a separate durable outbox. Unofficial web-session access remains subject to Spotify changes and rate limits.
 
 0.4.5: Shopping cart beside Search opens the optional Mods catalogue with a performance advisory.
 
@@ -106,3 +108,43 @@ For each future user-requested functional update, increment the Vibefy patch ver
 
 0.4.53: Clear square YouTube backup checkbox with a larger target, contrasting outline and accent-colored checked state.
 Web companion for 0.4.53: explicit /web and /phone routes; presentation homepage, local playlist editing and backups, public Spotify/YouTube imports, optional Google account integration, browser-compatible mods and artist pages. Browser playback uses official source players and keeps its documented limits.
+
+0.4.55: Read authenticated Spotify library and playlist metadata from the rendered first-party web player instead of issuing extra Web API GETs. Complete positioned snapshots preserve repeats and reject missing rows. Private-library import does not require Premium or a developer Client ID. Spotify searches and writes retain their service cooldowns.
+
+0.4.56: Restore verified Spotify connection on startup independently from library availability; preserve connection and saved lists on transient read errors. Spotify playlists and Liked Songs have their own Home shelf below Vibefy, with bounded recovery when the rendered library count changes during loading. Read the desktop page layout and reject empty loading placeholders.
+
+0.4.57: Freeze paused playback and lyrics clocks; reject stale decoder updates, preserve replacement commands and stop on audio errors. Bound stalled device queues, stop idle audio workers on drop, and prefetch the actual next shuffle/manual/repeat selection. Coalesce small position updates instead of repeatedly copying entire playlists. Move recording cache I/O off the async runtime and release metadata locks before disk writes.
+
+0.4.58: Improve built-in visualizer band mapping, preserve paused frames, reset audio history on track changes and add smoothing, motion speed, detail, cover size and album/theme colours with bounded settings menus. Bring the browser playlist view closer to desktop with a searchable library sidebar, large playlist header, album/duration columns, filtering/sorting, context menus, navigation and transport controls. Refresh the offline shell while preserving existing browser libraries and optional mods.
+
+0.4.59: Web-only interface update. Reuse native Lucide/Spotifast SVGs throughout navigation, playlist actions, transport, lyrics and queue controls. Match native soft buttons, toolbar, Home backup actions and persistent desktop transport, with seek and source-player volume. Connect YouTube directly from Home or the toolbar, request read access once and automatically load selectable playlists. Restore retry controls on popup/load failure and timeout; keep writes a separate permission. Existing guest libraries are preserved. Desktop installation remains 0.4.58; no native installer rebuild is needed.
+
+0.4.60: Web-only Mods catalogue redesign, platform-specific import forms without a provider selector, one toolbar YouTube connection entry and removal of the synthetic Liked Songs collection. Existing saved metadata and backups are preserved. Desktop installation remains 0.4.58.
+
+0.4.61: Web-only YouTube account explanation shown before Google consent: verification pending, invited test-account limit, actual read/write permission scope, password/token handling and optional guest use. The toolbar opens the explanation; only Continue to Google requests access. No Google configuration or desktop binary changes.
+
+0.4.62: Web source searches beside the main search, visible JuiceVault account controls, aligned mod cards and separate Cat Jam settings, appearance/playback preferences, explicit site-data reset with backup warning, lightweight reduced-motion-aware transitions and YouTube account playlists only on Home. Jam uses the working Vercel invitation address and same-origin entry point.
+
+0.4.63: Repair web Jam actions after icon replacement, retain the connection indicator, bound connection attempts and show joined/waiting states. Notify browser and desktop listeners when a participant joins.
+
+0.4.64: Engine-driven background Jam timing, validated shared queue/seek controls, public JuiceVault Jam support, draggable application-only host status overlay, mobile controls and refreshed browser lyrics. YouTube remains official visible playback; direct audio sources play without video.
+
+0.4.65: Full-site browser Jam workspace, shared seek controls, public track artwork in Jam, confirmed lyrics availability, native JuiceVault Genius Quick Lyrics adaptation, centered invitation menus and a compact application-only host monitor.
+
+0.4.66: Track Peek follows the engine shuffle reservation and actual manual queue. Browser Jam uses a single playback surface, an integrated shared queue and local volume/mute controls.
+
+0.4.67: Explicit shared Jam play/pause, optimistic seek protected from stale snapshots, no redundant jump field, consistent host status reopening, bounded JuiceVault catalogue/account adapter on Cloudflare, artist-aware catalogue queries without aggressive result rejection, and visible-bar/browser-modal fixes for Nyan Cat and Cat Jam.
+
+0.4.68: Simplified lyrics settings to Background and Lyrics, visible style choices, user-saved appearances, independent animated backgrounds and correct blur transitions. Removed source/API and local analysis controls from the lyrics interface.
+
+0.4.69: Five additional palette backgrounds, two reactive to local audio; shared background controls and saved styles for visualizers; complete removal of Backmusic effects with safe preference migration.
+
+0.4.70: Simpler background and visualizer appearance controls, compact Customize window, optional advanced controls, and migration of removed background styles.
+
+0.4.71: Channel-only YouTube search, exact-name result ranking and verified metadata for More Lyrics fallback. Clear missing-lyrics message.
+
+0.4.72: Music clips are searchable and playable through strict audio-only streams. Retired snapshot recovery no longer runs automatically; recovered playlists move to Hidden playlists without deletion.
+
+0.4.73: Allocation-free visualizer audio windows and native input buffers, borrowed Track Peek neighbours, and preallocated animated background meshes. Same audio samples, frame pacing and visual detail.
+
+0.4.74: Opt-in QR playlist sharing with bounded metadata snapshots, protected owner credentials, read-only phone copies, conditional refreshes and revocable links. No music files are uploaded.

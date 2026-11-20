@@ -224,7 +224,10 @@ pub struct Settings {
     pub welcome_completed: bool,
     /// One-time local snapshot recovery after retiring cross-platform transfers.
     pub playlist_snapshot_recovery_v1: bool,
+    pub phone_playlist_sharing: bool,
+    pub legacy_recovery_hidden_v1: bool,
     pub playlist_backups: std::collections::BTreeMap<String, String>,
+    pub spotify_playlists: std::collections::BTreeMap<String, crate::spotify_sync::Binding>,
     /// Hidden Home playlists, scoped to the signed-in Spotify account.
     pub hidden_playlists: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     pub addons: crate::addons::Preferences,
@@ -309,6 +312,8 @@ pub struct Settings {
     pub spicy_lyrics_offset_ms: i32,
     #[serde(default)]
     pub spicy_lyrics_appearance: crate::spicy_lyrics::Appearance,
+    pub visualizer_background: crate::spicy_lyrics::Appearance,
+    pub spicy_lyrics_styles: Vec<crate::spicy_lyrics::SavedStyle>,
     pub spicy_lyrics_auto_sync: bool,
     pub cache_notice_at: u64,
     pub spicy_lyrics_auto_results: HashMap<String, crate::auto_sync::Alignment>,
@@ -449,8 +454,11 @@ impl Default for Settings {
         Self {
             hidden_playlists: Default::default(),
             welcome_completed: false,
-            playlist_snapshot_recovery_v1: false,
+            playlist_snapshot_recovery_v1: true,
+            phone_playlist_sharing: false,
+            legacy_recovery_hidden_v1: false,
             playlist_backups: Default::default(),
+            spotify_playlists: Default::default(),
             device_name: "Vibefy".to_string(),
             addons: crate::addons::Preferences::default(),
             bitrate: 320,
@@ -484,6 +492,8 @@ impl Default for Settings {
             spicy_lyrics_key: String::new(),
             spicy_lyrics_offset_ms: 0,
             spicy_lyrics_appearance: Default::default(),
+            spicy_lyrics_styles: Vec::new(),
+            visualizer_background: Default::default(),
             spicy_lyrics_auto_sync: true,
             cache_notice_at: 0,
             spicy_lyrics_auto_results: Default::default(),

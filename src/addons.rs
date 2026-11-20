@@ -17,7 +17,6 @@ pub enum Id {
     CatJam,
     YouTube,
     Vivy,
-    Backmusic,
     TrackPeek,
     SoundVisualizer,
 }
@@ -33,7 +32,7 @@ pub const ALL: [Id; 6] = [
 
 impl Id {
     pub const fn is_visualizer(self) -> bool {
-        matches!(self, Self::Vivy | Self::Backmusic | Self::SoundVisualizer)
+        matches!(self, Self::Vivy | Self::SoundVisualizer)
     }
     pub fn name(self) -> &'static str {
         match self {
@@ -45,7 +44,6 @@ impl Id {
             Self::CatJam => "Cat Jam Synced",
             Self::YouTube => "YouTube Playlist Import",
             Self::Vivy => "vivy",
-            Self::Backmusic => "backmusic",
             Self::TrackPeek => "Track Peek",
         }
     }
@@ -73,9 +71,6 @@ impl Id {
             Self::Vivy => {
                 "Native ridgeline and drifting ribbons, driven by live audio. Inspired by vivy; does not use Spotify's advance track analysis."
             }
-            Self::Backmusic => {
-                "Native audio-reactive rings, spectrum, cover art and particles. An independent adaptation inspired by backmusic."
-            }
             Self::TrackPeek => {
                 "Peek at the previous and next tracks, and preview audio from a track's context menu without changing your queue. Inspired by Spotify Spice."
             }
@@ -90,7 +85,6 @@ impl Id {
             Self::Oneko => Some("https://github.com/kyrie25/spicetify-oneko"),
             Self::CatJam => Some("https://github.com/BlafKing/spicetify-cat-jam-synced"),
             Self::Vivy => Some("https://github.com/wairence/vivy"),
-            Self::Backmusic => Some("https://github.com/rolandyangg/backmusic_extension"),
             Self::YouTube => None,
             Self::TrackPeek => Some("https://github.com/grasonchan/spotify-spice"),
         }
@@ -108,14 +102,20 @@ pub struct Preferences {
     pub installed: BTreeSet<Id>,
     #[serde(deserialize_with = "read_ids")]
     pub enabled: BTreeSet<Id>,
+    #[serde(deserialize_with = "read_visualizer")]
     pub visualizer: Option<Id>,
     pub visual_style: u8,
     pub intensity: f32,
     pub particles: bool,
     pub vivy: Option<VisualConfig>,
-    pub backmusic: Option<VisualConfig>,
     pub soundvisualizer: Option<VisualConfig>,
     pub cat_jam_scale: f32,
+}
+
+// Removed/unknown visualizers must not invalidate the user's entire settings file.
+fn read_visualizer<'de, D: serde::Deserializer<'de>>(reader: D) -> Result<Option<Id>, D::Error> {
+    let name = Option::<String>::deserialize(reader)?;
+    Ok(name.and_then(|name| serde_json::from_value(serde_json::Value::String(name)).ok()))
 }
 
 fn read_ids<'de, D: serde::Deserializer<'de>>(reader: D) -> Result<BTreeSet<Id>, D::Error> {
@@ -138,7 +138,6 @@ impl Default for Preferences {
             intensity: 0.0,
             particles: false,
             vivy: None,
-            backmusic: None,
             soundvisualizer: None,
             cat_jam_scale: 0.9,
         }
@@ -154,6 +153,11 @@ pub struct VisualConfig {
     pub show_title: bool,
     pub brightness: f32,
     pub fps: u16,
+    pub smoothing: f32,
+    pub speed: f32,
+    pub detail: u16,
+    pub cover_scale: f32,
+    pub artwork_colors: bool,
 }
 impl Default for VisualConfig {
     fn default() -> Self {
@@ -165,7 +169,31 @@ impl Default for VisualConfig {
             show_title: true,
             brightness: 1.0,
             fps: 30,
+            smoothing: 0.35,
+            speed: 1.0,
+            detail: 64,
+            cover_scale: 1.0,
+            artwork_colors: true,
         }
+    }
+}
+impl VisualConfig {
+    pub fn sanitized(mut self) -> Self {
+        let finite = |v: f32, default: f32, min: f32, max: f32| {
+            if v.is_finite() {
+                v.clamp(min, max)
+            } else {
+                default
+            }
+        };
+        self.intensity = finite(self.intensity, 1., 0.2, 3.);
+        self.brightness = finite(self.brightness, 1., 0.2, 1.);
+        self.smoothing = finite(self.smoothing, 0.35, 0., 1.);
+        self.speed = finite(self.speed, 1., 0.25, 2.);
+        self.cover_scale = finite(self.cover_scale, 1., 0.5, 1.6);
+        self.detail = self.detail.clamp(24, 96);
+        self.fps = self.fps.clamp(15, 60);
+        self
     }
 }
 impl Preferences {
@@ -187,28 +215,23 @@ impl Preferences {
             particles: self.particles,
             ..VisualConfig::default()
         };
-        match id {
-            Id::Backmusic => self.backmusic.unwrap_or(fallback),
+        (match id {
             Id::SoundVisualizer => self.soundvisualizer.unwrap_or_default(),
             _ => self.vivy.unwrap_or(fallback),
-        }
+        })
+        .sanitized()
     }
     pub fn visual_mut(&mut self, id: Id) -> &mut VisualConfig {
         if id == Id::SoundVisualizer {
             return self.soundvisualizer.get_or_insert_with(Default::default);
         }
         let old = self.visual(id);
-        self.vivy.get_or_insert(old);
-        self.backmusic.get_or_insert(old);
-        if id == Id::Backmusic {
-            self.backmusic.as_mut().unwrap()
-        } else {
-            self.vivy.as_mut().unwrap()
-        }
+        self.vivy.get_or_insert(old)
     }
     pub fn available_visualizers(&self) -> impl Iterator<Item = Id> + use<> {
-        [Id::Vivy, Id::Backmusic, Id::SoundVisualizer].into_iter()
+        [Id::Vivy, Id::SoundVisualizer].into_iter()
     }
+
     pub fn migrate_builtin_visualizers(&mut self) {
         self.installed
             .retain(|id| !id.is_visualizer() && *id != Id::YouTube);
@@ -307,6 +330,9 @@ pub enum Command {
     Host,
     Join(String),
     Leave,
+    JamMonitor(bool),
+    JamDetails,
+    JamPlayQueue { index: usize, uri: String },
 }
 
 /// Accept source identities, never arbitrary URLs or shell fragments.
@@ -653,6 +679,7 @@ pub struct Runtime {
     pub history_time: f64,
     pub waveform: Vec<f32>,
     pub bands: Vec<f32>,
+    pub visual_track: Option<String>,
     pub beat: BeatDetector,
     pub active_tracks: Vec<LocalTrack>,
     pub active_collection: Option<String>,
@@ -668,6 +695,7 @@ pub struct Runtime {
     pub jam_invite: String,
     pub jam_tracks: std::collections::HashMap<String, LocalTrack>,
     pub jam: Option<crate::jam::Session>,
+    pub jam_monitor_open: bool,
     pub pending_sync: Option<(crate::jam::Snapshot, std::time::Instant)>,
     pub last_sync: Option<std::time::Instant>,
     pub last_play_attempt: Option<std::time::Instant>,

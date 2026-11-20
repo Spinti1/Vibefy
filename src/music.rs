@@ -16,14 +16,16 @@ pub enum Filter {
     Albums,
     Artists,
     Playlists,
+    Channels,
 }
 impl Filter {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::All,
         Self::Songs,
         Self::Albums,
         Self::Artists,
         Self::Playlists,
+        Self::Channels,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -32,12 +34,13 @@ impl Filter {
             Self::Albums => "Albums",
             Self::Artists => "Artists",
             Self::Playlists => "Playlists",
+            Self::Channels => "YouTube channels",
         }
     }
     fn params(self) -> Option<String> {
         // Public category parameters, documented by sigma67/ytmusicapi (MIT).
         match self {
-            Self::All => None,
+            Self::All | Self::Channels => None,
             Self::Playlists => Some("Eg-KAQwIABAAGAAgACgBMABqChAEEAMQCRAFEAo%3D".into()),
             other => Some(format!(
                 "EgWKAQ{}AWoMEA4QChADEAQQCRAF",
@@ -57,6 +60,7 @@ pub enum Kind {
     Album,
     Artist,
     Playlist,
+    Channel,
 }
 impl Kind {
     pub fn label(self) -> &'static str {
@@ -65,6 +69,7 @@ impl Kind {
             Self::Album => "Album",
             Self::Artist => "Artist",
             Self::Playlist => "Playlist",
+            Self::Channel => "YouTube channel",
         }
     }
 }
@@ -145,7 +150,15 @@ impl Client {
             endpoint: None,
         }
     }
-    async fn request(&self, endpoint: &str, mut body: Value) -> Result<Value> {
+    async fn request(&self, endpoint: &str, body: Value) -> Result<Value> {
+        self.request_surface(endpoint, body, false).await
+    }
+    async fn request_surface(
+        &self,
+        endpoint: &str,
+        mut body: Value,
+        youtube: bool,
+    ) -> Result<Value> {
         ensure!(
             !self
                 .cooldown
@@ -158,16 +171,22 @@ impl Client {
             .to_zoned(jiff::tz::TimeZone::UTC)
             .strftime("%Y%m%d")
             .to_string();
-        let version = format!("1.{date}.01.00");
-        body["context"] = json!({"client":{"clientName":"WEB_REMIX","clientVersion":version,"hl":"en"},"user":{}});
+        let version = format!("{}.{date}.01.00", if youtube { "2" } else { "1" });
+        let origin = if youtube {
+            "https://www.youtube.com"
+        } else {
+            "https://music.youtube.com"
+        };
+        let client_name = if youtube { "WEB" } else { "WEB_REMIX" };
+        body["context"] = json!({"client":{"clientName":client_name,"clientVersion":version,"hl":"en"},"user":{}});
         let client = self.http.client().map_err(anyhow::Error::msg)?;
-        let base = "https://music.youtube.com/youtubei/v1";
+        let base = format!("{origin}/youtubei/v1");
         #[cfg(feature = "demo")]
-        let base = self.endpoint.as_deref().unwrap_or(base);
+        let base = self.endpoint.as_deref().unwrap_or(&base);
         let mut response = client
             .post(format!("{base}/{endpoint}"))
-            .header("Origin", "https://music.youtube.com")
-            .header("X-Youtube-Client-Name", "67")
+            .header("Origin", origin)
+            .header("X-Youtube-Client-Name", if youtube { "1" } else { "67" })
             .header("X-Youtube-Client-Version", &version)
             .timeout(Duration::from_secs(6))
             .json(&body)
@@ -218,6 +237,13 @@ impl Client {
         );
         let lookup = async {
             let page = self.request("next", json!({"videoId":video})).await?;
+            // A next response can advance to a different item in a mix.
+            if find(&page, "currentVideoEndpoint")
+                .and_then(|v| find_str(v, "videoId"))
+                .is_some_and(|id| id != video)
+            {
+                return Ok(None);
+            }
             let Some(id) = lyrics_browse_id(&page) else {
                 return Ok(None);
             };
@@ -247,12 +273,97 @@ impl Client {
             ensure!(token.len() <= 16384, "Invalid result cursor");
             body["continuation"] = token.into();
         }
-        tokio::time::timeout(Duration::from_secs(8), async {
-            parse(&self.request("search", body).await?, filter)
-        })
-        .await
-        .context("Search timed out. Try again.")?
+        if filter == Filter::Channels {
+            return self.channels(query, continuation).await;
+        }
+        let catalogue = async {
+            let primary = async { parse(&self.request("search", body).await?, filter) };
+            if continuation.is_some() || !matches!(filter, Filter::All | Filter::Songs) {
+                return primary.await;
+            }
+            // Include recordings published only as clips, without adding a video UI.
+            let clips = async {
+                let page = self
+                    .request(
+                        "search",
+                        json!({"query":query,"params":"EgWKAQIQAWoMEA4QChADEAQQCRAF"}),
+                    )
+                    .await?;
+                parse(&page, Filter::Songs)
+            };
+            let (primary, clips) = tokio::join!(
+                primary,
+                tokio::time::timeout(Duration::from_millis(1800), clips)
+            );
+            let mut results = match primary {
+                Ok(results) => results,
+                Err(error) => {
+                    return match clips {
+                        Ok(Ok(results)) if !results.entries.is_empty() => Ok(results),
+                        _ => Err(error),
+                    };
+                }
+            };
+            if let Ok(Ok(clips)) = clips {
+                let mut seen: HashSet<_> = results.entries.iter().map(|e| e.id.clone()).collect();
+                results.entries.extend(
+                    clips
+                        .entries
+                        .into_iter()
+                        .filter(|e| e.kind == Kind::Song && seen.insert(e.id.clone())),
+                );
+            }
+            Ok(results)
+        };
+        if filter == Filter::All && continuation.is_none() {
+            // Channel lookup is bounded and independent. It never discards usable catalogue results.
+            let (catalogue, channels) = tokio::join!(
+                catalogue,
+                tokio::time::timeout(Duration::from_millis(1800), self.channels(query, None))
+            );
+            let mut results = match catalogue {
+                Ok(results) => results,
+                Err(error) => match channels {
+                    Ok(Ok(channels)) if !channels.entries.is_empty() => return Ok(channels),
+                    _ => return Err(error),
+                },
+            };
+            if let Ok(Ok(channels)) = channels {
+                let mut seen: HashSet<_> = results.entries.iter().map(|e| e.id.clone()).collect();
+                results.entries.extend(
+                    channels
+                        .entries
+                        .into_iter()
+                        .filter(|e| seen.insert(e.id.clone())),
+                );
+            }
+            rank_results(&mut results, query);
+            return Ok(results);
+        }
+        let mut results = tokio::time::timeout(Duration::from_secs(8), catalogue)
+            .await
+            .context("Search timed out. Try again.")??;
+        rank_results(&mut results, query);
+        Ok(results)
     }
+    async fn channels(&self, query: &str, continuation: Option<&str>) -> Result<Results> {
+        let mut body = json!({"query":query,"params":"EgIQAg%3D%3D"});
+        if let Some(token) = continuation {
+            body["continuation"] = token.into();
+        }
+        let page = self.request_surface("search", body, true).await?;
+        let mut results = parse_channels(&page);
+        let words = crate::audio_match::normalized(query);
+        results.entries.retain(|entry| {
+            let title = crate::audio_match::normalized(&entry.title);
+            words
+                .split_whitespace()
+                .all(|word| title.split_whitespace().any(|part| part == word))
+        });
+        rank_results(&mut results, query);
+        Ok(results)
+    }
+
     #[cfg(feature = "demo")]
     pub fn demo_at(http: Http, endpoint: String) -> Self {
         let url = reqwest::Url::parse(&endpoint).expect("loopback fixture");
@@ -266,6 +377,17 @@ impl Client {
     }
     pub async fn browse_page(&self, id: &str, continuation: Option<&str>) -> Result<Results> {
         ensure!(valid_browse_id(id), "Invalid YouTube Music page");
+        if let Some(channel) = id.strip_prefix("YTUC") {
+            let mut body =
+                json!({"browseId":format!("UC{channel}"),"params":"EgZ2aWRlb3PyBgQKAjoA"});
+            if let Some(token) = continuation {
+                ensure!(token.len() <= 16384, "Invalid page cursor");
+                body = json!({"continuation":token});
+            }
+            let page = self.request_surface("browse", body, true).await?;
+            return Ok(parse_channel_uploads(&page));
+        }
+
         let mut body = json!({"browseId":id});
         if let Some(token) = continuation {
             ensure!(token.len() <= 16384, "Invalid page cursor");
@@ -273,7 +395,9 @@ impl Client {
         }
         tokio::time::timeout(Duration::from_secs(8), async {
             let page = self.request("browse", body).await?;
-            if id.starts_with("UC") || id.starts_with("MPLA") {
+            if id.starts_with("VLUU") {
+                parse_library_browse(&page)
+            } else if id.starts_with("UC") || id.starts_with("MPLA") {
                 parse_artist(&page)
             } else {
                 parse_browse(&page)
@@ -283,6 +407,202 @@ impl Client {
         .context("Music page timed out. Try again.")?
     }
 }
+/// Parse channel-only YouTube search responses without accepting video renderers.
+pub fn parse_channels(value: &Value) -> Results {
+    fn walk(value: &Value, results: &mut Results, seen: &mut HashSet<String>, depth: usize) {
+        if depth > 45 {
+            return;
+        }
+        match value {
+            Value::Object(map) => {
+                if let Some(row) = map.get("channelRenderer") {
+                    if let Some(id) = row["channelId"]
+                        .as_str()
+                        .filter(|id| id.starts_with("UC") && valid_browse_id(id))
+                    {
+                        let title = text(&row["title"]);
+                        if !title.is_empty() && seen.insert(id.to_owned()) {
+                            let image = row["thumbnail"]["thumbnails"]
+                                .as_array()
+                                .and_then(|v| v.last())
+                                .and_then(|v| v["url"].as_str())
+                                .map(|url| {
+                                    if url.starts_with("//") {
+                                        format!("https:{url}")
+                                    } else {
+                                        url.to_owned()
+                                    }
+                                });
+                            results.entries.push(Entry {
+                                id: id.to_owned(),
+                                kind: Kind::Channel,
+                                title,
+                                subtitle: {
+                                    let handle = text(&row["subscriberCountText"]);
+                                    if handle.is_empty() {
+                                        "YouTube channel".into()
+                                    } else {
+                                        format!("YouTube channel · {handle}")
+                                    }
+                                },
+                                image,
+                                track: None,
+                                browse_id: Some(format!("YTUC{}", &id[2..])),
+                                spotify_note: None,
+                            });
+                        }
+                    }
+                } else {
+                    for value in map.values() {
+                        walk(value, results, seen, depth + 1);
+                    }
+                }
+                if let Some(token) = map
+                    .get("continuationCommand")
+                    .and_then(|v| v["token"].as_str())
+                {
+                    results.continuation = Some(token.to_owned());
+                }
+            }
+            Value::Array(values) => {
+                for value in values {
+                    walk(value, results, seen, depth + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut results = Results::default();
+    walk(value, &mut results, &mut HashSet::new(), 0);
+    results
+}
+/// Only the selected channel's uploads grid is read, never recommendation shelves.
+pub fn parse_channel_uploads(value: &Value) -> Results {
+    let metadata = find(value, "channelMetadataRenderer");
+    let name = metadata
+        .and_then(|v| v["title"].as_str())
+        .unwrap_or("YouTube channel");
+    let mut result = Results {
+        profile: metadata.map(|v| Profile {
+            title: name.to_owned(),
+            subtitle: "YouTube channel · Uploads".into(),
+            description: v["description"].as_str().unwrap_or_default().to_owned(),
+            image: thumbnail(&v["avatar"]),
+        }),
+        ..Default::default()
+    };
+    fn walk(
+        value: &Value,
+        name: &str,
+        result: &mut Results,
+        seen: &mut HashSet<String>,
+        depth: usize,
+    ) {
+        if depth > 45 {
+            return;
+        }
+        match value {
+            Value::Object(map) => {
+                if let Some(tab) = map.get("tabRenderer") {
+                    if tab["selected"].as_bool() == Some(true) {
+                        walk(&tab["content"], name, result, seen, depth + 1);
+                    }
+                    return;
+                }
+                if let Some(row) = map
+                    .get("lockupViewModel")
+                    .or_else(|| map.get("videoRenderer"))
+                {
+                    let id = row["contentId"]
+                        .as_str()
+                        .or_else(|| row["videoId"].as_str());
+                    if let Some(id) = id.filter(|id| crate::addons::valid_video_id(id)) {
+                        let title = row["metadata"]["lockupMetadataViewModel"]["title"]["content"]
+                            .as_str()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| text(&row["title"]));
+                        if !title.is_empty() && seen.insert(id.to_owned()) {
+                            let image = thumbnail(&row["contentImage"])
+                                .or_else(|| thumbnail(&row["thumbnail"]));
+                            let duration = find(row, "thumbnailBadgeViewModel")
+                                .and_then(|v| v["text"].as_str())
+                                .map(duration_ms)
+                                .unwrap_or_else(|| duration_ms(&text(&row["lengthText"])));
+                            let track = LocalTrack {
+                                uri: format!("vibefy:youtube:{id}"),
+                                title: title.clone(),
+                                name: title.clone(),
+                                artists: vec![ArtistRef {
+                                    name: name.to_owned(),
+                                    ..Default::default()
+                                }],
+                                duration_ms: duration,
+                                cover_url: image.clone(),
+                                art_url: image.clone(),
+                                art_small_url: image.clone(),
+                                ..Default::default()
+                            };
+                            result.entries.push(Entry {
+                                id: id.to_owned(),
+                                kind: Kind::Song,
+                                title,
+                                subtitle: name.to_owned(),
+                                image,
+                                track: Some(track),
+                                browse_id: None,
+                                spotify_note: None,
+                            });
+                        }
+                    }
+                    return;
+                }
+                if let Some(token) = map
+                    .get("continuationCommand")
+                    .and_then(|v| v["token"].as_str())
+                {
+                    result.continuation = Some(token.to_owned());
+                }
+                for v in map.values() {
+                    walk(v, name, result, seen, depth + 1);
+                }
+            }
+            Value::Array(rows) => {
+                for row in rows {
+                    walk(row, name, result, seen, depth + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    let contents = value
+        .get("contents")
+        .or_else(|| value.get("onResponseReceivedActions"))
+        .unwrap_or(value);
+    walk(contents, name, &mut result, &mut HashSet::new(), 0);
+    result
+}
+
+/// Promote exact names, then complete query words. Keep service order within ties.
+pub fn rank_results(results: &mut Results, query: &str) {
+    let query = crate::audio_match::normalized(query);
+    if query.is_empty() {
+        return;
+    }
+    results.entries.sort_by_key(|entry| {
+        let title = crate::audio_match::normalized(&entry.title);
+        if title == query {
+            0
+        } else if query
+            .split_whitespace()
+            .all(|word| title.split_whitespace().any(|part| part == word))
+        {
+            1
+        } else {
+            2
+        }
+    });
+}
+
 pub fn valid_browse_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 200
@@ -383,7 +703,7 @@ pub fn duration_ms(value: &str) -> u32 {
         0
     }
 }
-fn row(value: &Value, _filter: Filter, library: bool) -> Option<Entry> {
+fn row(value: &Value, _filter: Filter, _library: bool) -> Option<Entry> {
     if value["musicItemRendererDisplayPolicy"].as_str()
         == Some("MUSIC_ITEM_RENDERER_DISPLAY_POLICY_GREY_OUT")
     {
@@ -419,9 +739,8 @@ fn row(value: &Value, _filter: Filter, library: bool) -> Option<Entry> {
         .or_else(|| find_str(&value["overlay"], "videoId"))
         .or_else(|| find_str(&value["onTap"], "videoId"))
         .filter(|id| crate::addons::valid_video_id(id));
-    let video_type = find_str(value, "musicVideoType").unwrap_or_default();
-    // Reject official videos, UGC and unclassified clips even in Songs and
-    // browse continuations. Category hints must never relabel a video.
+    // A Music video is a playable audio source too. The native player requests
+    // only its audio stream; no video widget or separate video category is used.
     let kind = if let Some(id) = &browse_id {
         if id.starts_with("MPRE") {
             Kind::Album
@@ -432,7 +751,7 @@ fn row(value: &Value, _filter: Filter, library: bool) -> Option<Entry> {
         } else {
             return None;
         }
-    } else if video_id.is_some() && (video_type == "MUSIC_VIDEO_TYPE_ATV" || library) {
+    } else if video_id.is_some() {
         Kind::Song
     } else {
         return None;

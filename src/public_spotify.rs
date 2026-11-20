@@ -14,7 +14,7 @@ const QUERY: &str = "https://api-partner.spotify.com/pathfinder/v2/query";
 const QUERY_HASH: &str = "c685ca91fb0019c87ff1225f84e1d85b26cd631fa6187f3f0900da182cb0953d";
 const MAX_RESPONSE: usize = 8 * 1024 * 1024;
 static RETRY_AT: AtomicU64 = AtomicU64::new(0);
-const PUBLIC_REQUIRED: &str = "Make this Spotify playlist public, then paste its playlist link. Private playlists and Liked Songs cannot be imported. Spotify sign-in is not supported.";
+const PUBLIC_REQUIRED: &str = "Make this Spotify playlist public, then paste its playlist link. To import private playlists or Liked Songs on Windows, use Connect Spotify on Home.";
 
 fn script<'a>(html: &'a str, id: &str) -> Result<&'a str> {
     ensure!(
