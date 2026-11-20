@@ -58,8 +58,8 @@ def safe_art(value):
 
 def track(row):
     identity = row.get("videoId", "")
-    # Never turn a music video, UGC clip or an unclassified browse item into a song.
-    if not VIDEO.fullmatch(identity) or row.get("videoType") != "MUSIC_VIDEO_TYPE_ATV":
+    # Presentation uses artwork; a playable recording may still originate from a clip.
+    if not VIDEO.fullmatch(identity) or row.get("isAvailable") is False:
         return None
     return {"id": identity, "title": str(row.get("title", "Untitled"))[:300],
             "artist": ", ".join(str(a.get("name", "")) for a in row.get("artists", []))[:300],
@@ -214,13 +214,19 @@ async def search(q: str = Query(min_length=1, max_length=160)):
     def load():
         def fetch():
             api = YTMusic(requests_session=False)
-            rows = api.search(q, filter="songs", limit=25)
-            # The songs filter explicitly identifies catalogue audio tracks. Older
-            # responses omit videoType, so infer ATV only for this exact category.
+            rows = api.search(q, limit=40)
+            # Preserve catalogue relevance across songs and clips in one request.
+            # Artist, album, podcast and playlist cards are not playable recordings.
+            seen = set()
+            results = []
             for row in rows:
-                if row.get("resultType") == "song":
-                    row.setdefault("videoType", "MUSIC_VIDEO_TYPE_ATV")
-            return [item for row in rows if (item := track(row))]
+                if row.get("resultType") not in {"song", "video"}:
+                    continue
+                item = track(row)
+                if item and item["id"] not in seen:
+                    seen.add(item["id"])
+                    results.append(item)
+            return results
         return cached(("search", q.casefold()), 120, fetch)
     return {"tracks": await worker(load)}
 

@@ -44,7 +44,48 @@ dialog{background:#20272e;border:1px solid #37414b;border-radius:15px;padding:24
 
 /* Native phone cover view. This changes presentation, not the provider's stream format. */
 html[data-cover-mode=true] .now-artwork{position:relative;width:100%;max-width:365px;aspect-ratio:1;margin:auto;isolation:isolate}
-html[data-cover-mode=true] .now-artwork>#now-cover{position:absolute;inset:0;z-index:2;width:100%;height:100%;object-fit:cover;border-radius:16px;pointer-events:none;background:#151b20}
-html[data-cover-mode=true] .now-artwork>#youtube-frame{position:absolute;inset:0;width:100%;height:100%;border-radius:16px;min-height:0;min-width:0}
+html[data-cover-mode=true] .now-artwork>#now-cover{position:absolute;inset:0;z-index:2;width:100%;height:100%;object-fit:cover;border-radius:16px;pointer-events:auto;background:#151b20}
+html[data-cover-mode=true] .now-artwork>#youtube-frame{position:absolute;inset:0;width:100%;height:100%;border-radius:16px;min-height:0;min-width:0;pointer-events:none}
 html[data-cover-mode=true] #embed-notice,html[data-cover-mode=true] #open-source{display:none!important}
 #shared-playlist-dialog{max-width:440px}#shared-playlist-dialog>label{display:flex;align-items:center;gap:10px;margin:20px 0}#shared-playlist-dialog input[type=checkbox]{appearance:auto;width:20px;height:20px;accent-color:var(--mint)}
+
+/* A single upper navigation and a compact player leave the library unobstructed. */
+.mobile-search-button{display:none}
+@media(max-width:900px){
+ .app-shell,.library-collapsed .app-shell{padding-bottom:calc(100px + env(safe-area-inset-bottom))}
+ .app-header{position:sticky;top:0;z-index:9;height:64px;padding:10px 12px;gap:4px;background:#101518f5;border-bottom:1px solid #ffffff0a}
+ .app-header>.brand,.app-header .history-controls,.app-header .header-search,.app-header .web-label{display:none}
+ .app-header #toggle-library,.app-header .toolbar-home,.app-header .mobile-search-button{display:inline-flex;min-width:38px;width:38px;height:42px;min-height:42px}
+ .header-actions{margin-left:auto;gap:2px}.header-actions .icon-button,.header-actions .account-connect{margin:0;min-width:36px;width:36px;min-height:42px;height:42px}
+ #view{padding:12px 16px 24px}#view h1{font-size:30px;line-height:1.15;letter-spacing:-1px;margin:18px 0 9px}
+ .intro{font-size:13px;line-height:1.55}
+ .welcome-card{border-radius:18px;padding:20px;margin:22px 0;background:linear-gradient(135deg,#193a37,#192127 70%);border:1px solid #34504b}
+ .welcome-card h2{font-size:21px;line-height:1.25}.welcome-card p{line-height:1.6}
+ .welcome-card .library-toolbar{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:18px 0}
+ .welcome-card .library-toolbar .button:first-child{grid-column:1/-1}
+ .welcome-card .library-toolbar .button{min-height:44px;white-space:normal;text-align:center;font-size:12px}
+ .home-backup-actions{display:flex;gap:8px;flex-wrap:wrap}.home-search{min-height:50px;border-radius:14px}
+ .collection-grid{gap:14px}.collection-tile{padding:10px;border-radius:14px;background:#192126;border:1px solid #ffffff09}
+ .collection-art{border-radius:9px}.collection-tile strong{font-size:14px;line-height:1.35}.collection-tile small{font-size:12px}
+ .section-label{margin-top:28px}.track-row .track-copy strong{font-size:14px;line-height:1.35}.track-row .track-copy small{font-size:12px}
+ .mini-player,.library-collapsed .mini-player{bottom:calc(10px + env(safe-area-inset-bottom));left:10px;right:10px;border-radius:15px;box-shadow:0 8px 28px #0007;min-height:68px;height:68px}
+ .mini-info strong{font-size:14px}.mini-info small{font-size:12px}.mini-info img{border-radius:8px;width:46px;height:46px}
+ .mini-transport #mini-play,.mini-transport #mini-next{min-width:42px;min-height:44px;width:42px;height:44px}
+ .now-dialog{padding:20px 22px calc(24px + env(safe-area-inset-bottom));background:radial-gradient(ellipse at 50% 0,#223b40,transparent 70%),#11171c}
+ .now-dialog .now-heading{margin-top:25px}.now-dialog .now-heading h2{font-size:24px;line-height:1.2}.now-dialog .now-heading p{font-size:15px}
+ .now-dialog .now-tools{gap:14px}.now-dialog .now-tools button{min-height:44px}
+}
+
+html[data-cover-mode=true] .now-artwork:has(>#now-cover[hidden]){aspect-ratio:auto}
+html[data-cover-mode=true] .now-artwork>#soundcloud-frame{position:relative;width:100%;min-height:200px}
+
+@media(max-width:900px){#search-form{display:flex;min-height:52px;margin:22px 0 26px;border-radius:14px}#search-form input{font-size:16px}.app-header>.toolbar-mods{width:36px;min-width:36px;height:42px;margin:0}}
+
+@media(max-width:900px){.app-header{height:auto;min-height:64px}}
+@media(max-width:380px){
+ .app-header{padding:8px 10px;column-gap:2px}
+ .app-header #toggle-library,.app-header .toolbar-home,.app-header .mobile-search-button,.app-header>.toolbar-mods{width:32px;min-width:32px;flex-shrink:0}
+ .app-header .header-actions{gap:1px}
+ .app-header .header-actions .icon-button{width:29px;min-width:29px;padding:5px}
+ .app-header .account-connect{padding:7px 8px!important;font-size:10px!important}
+}
