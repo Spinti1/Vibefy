@@ -31,9 +31,9 @@
  const connected=()=>!!token&&(Date.now()<expires||!!refreshToken);
  const status=message=>{$('youtube-status').textContent=message;};
  function update(){
-  const active=connected(),compact=window.vibefyPhone||window.matchMedia?.('(max-width:900px)').matches;
+  const active=connected(),upgrade=active&&window.vibefyNativeInfo?.renewableSession&&!refreshToken,compact=window.vibefyPhone||window.matchMedia?.('(max-width:900px)').matches;
   for(const name of ['header']){const button=$(name+'-connect');button.disabled=loading||(!client&&!active);button.classList.toggle('connected',active);button.setAttribute('aria-label',active?'YouTube connected. Open account':loading?'Connecting YouTube':'Connect YouTube');$(name+'-connect-label').textContent=loading?'Connecting…':active?(compact?'Connected':'YouTube connected'):(compact?'Sign in':'Connect YouTube');}
-  $('google-connect').disabled=loading||!client;$('google-connect').hidden=active;$('google-connect-label').textContent=loading?'Connecting…':'Continue to Google';
+  $('google-connect').disabled=loading||!client;$('google-connect').hidden=active&&!upgrade;$('google-connect-label').textContent=loading?'Connecting…':upgrade?'Keep me signed in':'Continue to Google';
   $('google-disconnect').hidden=!active;$('youtube-refresh').hidden=!active;$('youtube-refresh').disabled=loading;
   $('account-identity').textContent=active?(displayName||'YouTube connected'):'Not connected';
   $('home-account-status').textContent=loading?'Finish connecting in the Google window…':active?'YouTube connected · Your local playlists and backups stay available.':'Saved on this device. Use the top bar to connect YouTube and load your playlists.';
@@ -75,7 +75,7 @@
   status(playlists.length?playlists.length+' playlists found. Choose the ones to add to Home.':'No playlists found in this YouTube account. Your local library is available on Home.');
  }
  async function connect(){
-  if(connected()||!client){if(!$('account-dialog').open)$('account-dialog').showModal();return;}if(loading)return;if(!$('account-dialog').open)$('account-dialog').showModal();loading=true;status('Finish connecting in the Google window…');update();
+  if((connected()&&!(window.vibefyNativeInfo?.renewableSession&&!refreshToken))||!client){if(!$('account-dialog').open)$('account-dialog').showModal();return;}if(loading)return;if(!$('account-dialog').open)$('account-dialog').showModal();loading=true;status('Finish connecting in the Google window…');update();
   try{const response=await authorize();if(String(response.scope||'').split(' ').includes('openid')){try{const r=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(10000)});if(r.ok){const profile=await r.json();displayName=String(profile.name||'YouTube connected');}}catch{ /* Playlist access remains usable without profile metadata. */ }}await persist().catch(()=>{});update();await refresh();$('account-dialog').close();window.dispatchEvent(new Event('vibefy-youtube-ready'));}catch(error){status(error.message);}finally{loading=false;update();if(sessionSaveFailed)status('Connected, but secure storage could not save the account. Reopening may require connecting again.');}
  }
  $('google-connect').onclick=connect;
