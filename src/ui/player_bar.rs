@@ -149,11 +149,10 @@ fn visualizer(app: &mut App, ui: &egui::Ui, rect: Rect, now: Option<&NowPlaying>
             if !sounding && app.player_bar_analyser.settled() {
                 return false;
             }
-            let samples = if sounding {
-                app.winamp.tap.window(vis::WIDE_SAMPLES, vis::LAG)
-            } else {
-                Vec::new()
-            };
+            let mut samples = [0.0; vis::WIDE_SAMPLES];
+            if sounding {
+                app.winamp.tap.window_into(&mut samples, vis::LAG);
+            }
             let levels = app
                 .player_bar_analyser
                 .step(&samples, std::time::Instant::now());
@@ -167,7 +166,9 @@ fn visualizer(app: &mut App, ui: &egui::Ui, rect: Rect, now: Option<&NowPlaying>
             }
             // Winamp's scope with a column every eight points or so.
             let count = (rect.width() / 8.0).clamp(75.0, 320.0) as usize;
-            let samples = app.winamp.tap.window(count * vis::SCOPE_STEP, vis::LAG);
+            let mut storage = [0.0; 320 * vis::SCOPE_STEP];
+            let samples = &mut storage[..count * vis::SCOPE_STEP];
+            app.winamp.tap.window_into(samples, vis::LAG);
             waveform(
                 &painter,
                 rect,
@@ -1112,21 +1113,44 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
                 .push(Action::Addon(crate::addons::Command::Fullscreen));
         }
     }
-    if theme::icon_button(
-        ui,
-        Icon::Mic,
-        18.0,
-        if app.spicy.open {
-            palette.accent
-        } else {
-            palette.secondary
-        },
-        palette.text,
-        &gettext(app.locale, "Lyrics"),
-    )
-    .clicked()
+    if now.is_none_or(|now| !app.spicy.known_missing(&now.uri))
+        && theme::icon_button(
+            ui,
+            Icon::Mic,
+            18.0,
+            if app.spicy.open {
+                palette.accent
+            } else {
+                palette.secondary
+            },
+            palette.text,
+            &gettext(app.locale, "Lyrics"),
+        )
+        .clicked()
     {
         app.actions.push(Action::ToggleSpicyLyrics);
+    }
+    if let Some(now) = now.filter(|now| app.spicy.known_missing(&now.uri)) {
+        let artist = now
+            .artists
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if let Some(url) = crate::spicy_lyrics::juice_genius_search(&now.uri, &now.title, &artist) {
+            if theme::icon_button(
+                ui,
+                Icon::Search,
+                18.0,
+                palette.secondary,
+                palette.text,
+                "Find lyrics on Genius · opens your browser",
+            )
+            .clicked()
+            {
+                app.actions.push(Action::OpenUrl(url));
+            }
+        }
     }
 }
 

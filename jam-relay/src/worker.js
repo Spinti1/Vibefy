@@ -1,5 +1,7 @@
 import {DurableObject} from 'cloudflare:workers';
-import {CODE,TOKEN,track,snapshot,randomCode,secret} from './protocol.mjs';
+import {CODE,TOKEN,track,snapshot,control,randomCode,secret} from './protocol.mjs';
+import {shareRequest,SHARE_ID} from './playlist-share.mjs';
+import {juice} from './juice.mjs';
 const ORIGINS=new Set(['https://usevibefy.online','https://www.usevibefy.online','https://vibefy-neon.vercel.app']);
 const json=(value,status=200,origin='https://usevibefy.online')=>Response.json(value,{status,headers:{'Cache-Control':'no-store','Access-Control-Allow-Origin':origin,'Vary':'Origin'}});
 export default {
@@ -8,10 +10,13 @@ export default {
     if(origin&&!ORIGINS.has(origin))return json({error:'Origin not allowed'},403);
     const respond=(value,status=200)=>json(value,status,origin||'https://usevibefy.online');
     const url=new URL(request.url);
-    if(request.method==='OPTIONS')return new Response(null,{headers:{'Access-Control-Allow-Origin':origin||'https://usevibefy.online','Vary':'Origin','Access-Control-Allow-Methods':'GET, POST','Access-Control-Allow-Headers':'Content-Type','Access-Control-Max-Age':'600'}});
+    if(request.method==='OPTIONS')return new Response(null,{headers:{'Access-Control-Allow-Origin':origin||'https://usevibefy.online','Vary':'Origin','Access-Control-Allow-Methods':'GET, POST, PUT','Access-Control-Allow-Headers':'Content-Type, Authorization, If-None-Match','Access-Control-Max-Age':'600'}});
     if(url.pathname==='/health')return respond({service:'Vibefy Jam',protocol:2});
     const ip=request.headers.get('CF-Connecting-IP')||'unknown';
     if(!(await env.LIMITER.limit({key:ip})).success)return respond({error:'Too many connection attempts. Try again later.'},429);
+    const share=url.pathname.match(/^\/shares\/([a-f0-9]{32})(?:\/revoke)?$/);
+    if(share){const result=await env.SHARES.get(env.SHARES.idFromName(share[1])).fetch(request);const headers=new Headers(result.headers);headers.set('Access-Control-Allow-Origin',origin||'https://vibefy-neon.vercel.app');headers.set('Access-Control-Expose-Headers','ETag');headers.set('Vary','Origin');return new Response(result.body,{status:result.status,headers});}
+    if(url.pathname.startsWith('/juice/'))return juice(request,respond);
     if(url.pathname==='/rooms'&&request.method==='POST') {
       for(let attempt=0;attempt<3;attempt++) {
         const code=randomCode();const room=env.ROOMS.get(env.ROOMS.idFromName(code));
@@ -48,10 +53,10 @@ export class JamRoom extends DurableObject {
   broadcast(data){for(const ws of this.ctx.getWebSockets()){if(ws.deserializeAttachment()?.role)this.send(ws,data);}}
   state(){
     const peers=this.ctx.getWebSockets().map(ws=>ws.deserializeAttachment()).filter(s=>s?.role);
-    const host=peers.some(p=>p.role==='host');
+    const host=peers.find(p=>p.role==='host');
     let current=this.room.snapshot?structuredClone(this.room.snapshot):null;
     if(current?.playing)current.position_ms=Math.min(86400000,current.position_ms+Math.max(0,Date.now()-this.room.updated));
-    return {type:'state',snapshot:host?current:null,queue:this.room.queue,listeners:peers.filter(p=>p.role==='guest').length,host_present:host,sent:Date.now()};
+    return {type:'state',snapshot:host?current:null,queue:this.room.queue,listeners:peers.filter(p=>p.role==='guest').length,participants:peers.slice(0,25).map(p=>({name:p.name,role:p.role})),host_present:!!host,shared_controls:!!host?.shared_controls,host_age_ms:Math.max(0,Date.now()-this.room.updated),sent:Date.now()};
   }
   async webSocketMessage(ws,message){
     if(typeof message!=='string'||message.length>24000){ws.close(1009,'Message too large');return;}
@@ -67,6 +72,7 @@ export class JamRoom extends DurableObject {
         for(const other of this.ctx.getWebSockets())if(other!==ws&&other.deserializeAttachment()?.role==='host')other.close(1000,'Host reconnected');
         a.role='host';
       }else a.role='guest';
+      a.shared_controls=a.role==='host'&&p.shared_controls===true;
       a.name=String(p.name||'Listener').slice(0,60);ws.serializeAttachment(a);this.send(ws,{type:'welcome',role:a.role});this.broadcast(this.state());return;
     }
     ws.serializeAttachment(a);
@@ -93,6 +99,16 @@ export class JamRoom extends DurableObject {
       for(const host of hosts)this.send(host,{type:'add',track:t});
       this.send(ws,{type:'notice',message:'Song sent to the host queue'});return;
     }
+    if(p.type==='control'){
+      const hosts=this.ctx.getWebSockets().filter(s=>s.deserializeAttachment()?.role==='host');
+      const command=control(p,this.room.snapshot,this.room.queue);
+      if(!hosts.some(s=>s.deserializeAttachment()?.shared_controls)||!command){this.send(ws,{type:'error',message:'This Jam control is unavailable or its queue changed. Refresh and try again.'});return;}
+      if(now-(a.lastControl||0)<400||now-(this.room.lastControl||0)<400){this.send(ws,{type:'error',message:'Please wait before another Jam control.'});return;}
+      this.room.lastControl=now;
+      a.lastControl=now;ws.serializeAttachment(a);
+      for(const host of hosts)this.send(host,{type:'control',...command});
+      this.send(ws,{type:'notice',message:command.action==='set_playing'?(command.playing?'Resuming the shared track…':'Pausing the shared track…'):command.action==='seek'?'Seeking the shared track…':'Starting the selected queued song…'});return;
+    }
     if(p.type==='end'&&a.role==='host'){await this.end();return;}
     this.send(ws,{type:'error',message:'Only the host can control playback'});
   }
@@ -108,4 +124,10 @@ export class JamRoom extends DurableObject {
     }
     await this.ctx.storage.setAlarm(next);
   }
+}
+
+export class PlaylistShare extends DurableObject {
+ constructor(ctx,env){super(ctx,env);this.ctx=ctx;this.env=env;}
+ async fetch(request){return request.method==='GET'?shareRequest(this.ctx,this.env,request):this.ctx.blockConcurrencyWhile(()=>shareRequest(this.ctx,this.env,request));}
+ async alarm(){await this.ctx.storage.deleteAll();}
 }

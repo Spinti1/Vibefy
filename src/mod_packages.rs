@@ -32,7 +32,6 @@ pub fn slug(id: Id) -> &'static str {
         Id::CatJam => "catjam",
         Id::YouTube => "youtube",
         Id::Vivy => "vivy",
-        Id::Backmusic => "backmusic",
         Id::TrackPeek => "trackpeek",
         Id::SoundVisualizer => "soundvisualizer",
     }
@@ -46,7 +45,6 @@ fn identity(id: Id) -> i32 {
         Id::CatJam => 4,
         Id::YouTube => 5,
         Id::Vivy => 6,
-        Id::Backmusic => 7,
         Id::TrackPeek => 8,
         Id::SoundVisualizer => 9,
     }

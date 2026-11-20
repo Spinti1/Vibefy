@@ -19,12 +19,16 @@ const TIMEOUT: Duration = Duration::from_secs(12);
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Background {
     #[default]
+    #[serde(alias = "Solid", alias = "Theme")]
     BlurredCover,
+    #[serde(alias = "CoverColors")]
     AnimatedColors,
+    Aurora,
+    Fluid,
+    Orbit,
+    BeatGlow,
+    BeatWaves,
     CoverArt,
-    CoverColors,
-    Solid,
-    Theme,
     CustomImage,
 }
 
@@ -49,6 +53,8 @@ pub enum FontStyle {
 #[serde(default)]
 pub struct Appearance {
     pub background: Background,
+    pub animation_speed: f32,
+    pub reactivity: f32,
     pub blur: f32,
     pub darkness: f32,
     pub color: [u8; 3],
@@ -76,6 +82,8 @@ impl Default for Appearance {
     fn default() -> Self {
         Self {
             background: Background::BlurredCover,
+            animation_speed: 1.0,
+            reactivity: 1.0,
             blur: 18.0,
             darkness: 0.55,
             color: [24, 26, 36],
@@ -110,6 +118,8 @@ impl Appearance {
                 fallback
             }
         };
+        self.reactivity = finite(self.reactivity, 1.0, 0.0, 2.0);
+        self.animation_speed = finite(self.animation_speed, 1.0, 0.2, 2.0);
         self.blur = finite(self.blur, 18.0, 0.0, 48.0);
         self.darkness = finite(self.darkness, 0.55, 0.0, 0.95);
         self.font_size = finite(self.font_size, 38.0, 20.0, 64.0);
@@ -351,6 +361,12 @@ pub struct State {
 }
 
 impl State {
+    /// A failed provider is not proof that a song has no lyrics.
+    pub fn known_missing(&self, uri: &str) -> bool {
+        self.uri.as_deref() == Some(uri)
+            && matches!(&self.result,
+            Loadable::Loaded(found) if found.document.as_ref().map_or(found.notice.is_none(), |doc| doc.instrumental || doc.lines.is_empty()))
+    }
     pub fn accepts_auto(&self, key: &str, generation: u64) -> bool {
         self.auto_running
             && self.auto_generation == generation
@@ -371,6 +387,33 @@ impl State {
 pub struct Fetch {
     pub document: Option<Document>,
     pub notice: Option<String>,
+}
+
+/// Quick Lyrics behavior from JuiceVault Enhancer (Spinti1, MIT): user-triggered
+/// Genius search, not an additional timed-lyrics provider or automatic browser tab.
+pub fn juice_genius_search(uri: &str, title: &str, artist: &str) -> Option<String> {
+    if !uri
+        .strip_prefix("vibefy:juicevault:")
+        .is_some_and(crate::music_accounts::uuid)
+    {
+        return None;
+    }
+    let title = title
+        .replace("(Unreleased)", "")
+        .replace("[Unreleased]", "");
+    let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    if title.is_empty() {
+        return None;
+    }
+    let artist = if artist.trim().is_empty() {
+        "Juice WRLD"
+    } else {
+        artist.trim()
+    };
+    let mut url = reqwest::Url::parse("https://genius.com/search").ok()?;
+    url.query_pairs_mut()
+        .append_pair("q", &format!("{artist} {title}"));
+    Some(url.to_string())
 }
 
 pub fn position_with_offset(position_ms: u32, offset_ms: i32) -> u32 {
@@ -626,6 +669,22 @@ async fn spicy(
     Ok(Some(doc))
 }
 
+/// More Lyrics may return a search fallback. Require recording metadata before use.
+pub fn verified_more(json: &Value, query: &Query) -> Option<Document> {
+    let metadata = json.get("metadata").unwrap_or(json);
+    let title = metadata["trackName"]
+        .as_str()
+        .or_else(|| metadata["track"].as_str())
+        .or_else(|| metadata["title"].as_str())?;
+    let artist = metadata["artistName"]
+        .as_str()
+        .or_else(|| metadata["artist"].as_str())?;
+    if !crate::lyrics::metadata_matches(title, artist, query) {
+        return None;
+    }
+    from_more(json)
+}
+
 async fn more(http: &reqwest::Client, query: &Query) -> Result<Option<Document>> {
     let response = http
         .get(MORE_API)
@@ -648,7 +707,7 @@ async fn more(http: &reqwest::Client, query: &Query) -> Result<Option<Document>>
         .json::<Value>()
         .await
         .context("Invalid More Lyrics response")?;
-    Ok(from_more(&json))
+    Ok(verified_more(&json, query))
 }
 
 /// Fallbacks never fabricate word timing. A plain source stays plain and a
@@ -991,4 +1050,42 @@ mod selection_tests {
         .unwrap();
         assert!(found.word_synced());
     }
+}
+
+#[cfg(test)]
+mod availability_release_tests {
+    use super::*;
+    #[test]
+    fn only_a_confirmed_current_track_miss_hides_lyrics() {
+        let mut state = State::default();
+        state.uri = Some("current".into());
+        state.result = Loadable::Loading;
+        assert!(!state.known_missing("current"));
+        state.result = Loadable::Failed("Temporary network error".into());
+        assert!(!state.known_missing("current"));
+        state.result = Loadable::Loaded(Arc::new(Fetch::default()));
+        assert!(state.known_missing("current"));
+        assert!(!state.known_missing("another"));
+    }
+    #[test]
+    fn juice_quick_lyrics_is_an_encoded_user_triggered_search() {
+        let uri = "vibefy:juicevault:12345678-1234-1234-1234-123456789abc";
+        let url = reqwest::Url::parse(
+            &juice_genius_search(uri, "Song & title (Unreleased)", "Juice WRLD").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(url.host_str(), Some("genius.com"));
+        assert_eq!(
+            url.query_pairs().find(|(k, _)| k == "q").unwrap().1,
+            "Juice WRLD Song & title"
+        );
+        assert!(juice_genius_search("file:///secret", "Song", "Artist").is_none());
+    }
+}
+
+/// User-authored appearance; old settings default to an empty collection.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedStyle {
+    pub name: String,
+    pub appearance: Appearance,
 }

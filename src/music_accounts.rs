@@ -116,6 +116,9 @@ async fn credential(
     config: &Path,
     write: Option<Option<Vec<u8>>>,
 ) -> Result<Option<Vec<u8>>> {
+    protected_named(config, provider.key().to_owned(), write).await
+}
+pub(crate) async fn protected_named(config: &Path, key: String, write: Option<Option<Vec<u8>>>) -> Result<Option<Vec<u8>>> {
     // Keep the guard inside the blocking job: cancelling the async caller must
     // not allow a stale save to finish after Disconnect has deleted the entry.
     static LOCK: std::sync::OnceLock<std::sync::Arc<tokio::sync::Mutex<()>>> =
@@ -129,7 +132,7 @@ async fn credential(
     tokio::task::spawn_blocking(move || -> Result<Option<Vec<u8>>> {
         let _guard = guard;
         #[cfg(windows)]
-        return crate::credentials::music_account_secret(&config, provider.key(), write)
+        return crate::credentials::music_account_secret(&config, &key, write)
             .map_err(|_| anyhow::anyhow!("Cannot access protected music-account storage"));
         #[cfg(not(windows))]
         {
@@ -140,7 +143,7 @@ async fn credential(
             let store =
                 store.map_err(|_| anyhow::anyhow!("The system credential store is unavailable"))?;
             let entry = store
-                .build("Vibefy.MusicAccounts", provider.key(), None)
+                .build("Vibefy.MusicAccounts", &key, None)
                 .map_err(|_| anyhow::anyhow!("Cannot open the protected music-account entry"))?;
             match write {
                 Some(Some(bytes)) => {
@@ -635,8 +638,38 @@ pub fn juice_title_score(query: &str, title: &str) -> f32 {
     (2.0 * a.intersection(&b).count() as f32 / (a.len() + b.len()) as f32)
         .max(juice_edit_similarity(&q, &t) * 0.9)
 }
+pub fn juice_search_query(query: &str) -> String {
+    let words: Vec<_> = query.split_whitespace().collect();
+    let clean = |word: &str| {
+        word.trim_matches(|c: char| !c.is_alphanumeric())
+            .to_lowercase()
+    };
+    let mut cleaned = Vec::new();
+    let mut index = 0;
+    while index < words.len() {
+        if clean(words[index]) == "juicewrld" {
+            index += 1;
+        } else if clean(words[index]) == "juice"
+            && words.get(index + 1).is_some_and(|w| clean(w) == "wrld")
+        {
+            index += 2;
+        } else {
+            cleaned.push(words[index]);
+            index += 1;
+        }
+    }
+    if cleaned.is_empty() {
+        query.trim().to_owned()
+    } else {
+        cleaned
+            .join(" ")
+            .trim_matches(|c: char| c.is_whitespace() || matches!(c, '-' | '–' | ':'))
+            .to_owned()
+    }
+}
 pub async fn juice_search(http: &Http, query: &str) -> Result<Collection> {
-    let query = query.trim();
+    let query = juice_search_query(query);
+    let query = query.as_str();
     ensure!(
         (2..=200).contains(&query.len()),
         "Enter a song title (2–200 characters)"
@@ -653,9 +686,11 @@ pub async fn juice_search(http: &Http, query: &str) -> Result<Collection> {
         .into_iter()
         .flatten()
         .filter_map(juice_song)
-        .filter_map(|t| {
+        .map(|t| {
             let score = juice_title_score(query, &t.title);
-            (score >= 0.70).then_some((score, t))
+            // Catalogue results can match aliases and artist names too.
+            // Rank titles without discarding those valid recordings.
+            (score, t)
         })
         .collect();
     tracks.sort_by(|a, b| b.0.total_cmp(&a.0));

@@ -59,6 +59,7 @@ pub mod playlist_backup;
 pub mod peek;
 pub mod player;
 pub mod playlist_cover;
+pub mod playlist_share;
 pub mod playlist_outbox;
 mod playlist_recovery;
 pub mod playlist_tools;
@@ -76,7 +77,10 @@ pub mod sink;
 pub mod skin;
 pub mod sonos;
 pub mod spicy_lyrics;
+pub mod spotify_library;
 pub mod spotify_match;
+pub mod spotify_page;
+pub mod spotify_sync;
 pub mod storage;
 pub mod system_fonts;
 pub mod theme;
@@ -93,3 +97,5 @@ pub mod youtube_browser;
 pub mod zeroconf;
 
 pub mod visualizers;
+
+pub mod backgrounds;

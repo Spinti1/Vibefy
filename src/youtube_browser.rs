@@ -12,14 +12,35 @@ const MAX_RESPONSE: usize = 8 * 1024 * 1024;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Profile {
     id: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    spotify: bool,
     #[serde(skip)]
     root: PathBuf,
 }
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 impl Profile {
+    pub fn new_spotify(config: &Path) -> Result<Self> {
+        let mut profile = Self {
+            id: nonce(),
+            spotify: true,
+            root: PathBuf::new(),
+        };
+        profile.bind(config)?;
+        Ok(profile)
+    }
     pub fn bind(&mut self, config: &Path) -> Result<()> {
         ensure!(valid_id(&self.id), "Invalid YouTube session profile");
-        self.root = config.join("youtube-browser");
+        self.root = config.join(if self.spotify {
+            "spotify-browser"
+        } else {
+            "youtube-browser"
+        });
         Ok(())
+    }
+    pub fn is_spotify(&self) -> bool {
+        self.spotify
     }
     fn directory(&self) -> Result<PathBuf> {
         ensure!(
@@ -149,6 +170,7 @@ pub fn response_message(source: &str, expected: &str, message: &str) -> Result<O
 pub async fn connect(config: &Path, proxy: &crate::settings::ProxyConfig) -> Result<Connection> {
     let mut profile = Profile {
         id: nonce(),
+        spotify: false,
         root: PathBuf::new(),
     };
     profile.bind(config)?;
@@ -193,6 +215,7 @@ pub async fn post(
     body: Value,
     continuation: Option<&str>,
 ) -> Result<Response> {
+    ensure!(!profile.spotify, "Invalid YouTube profile");
     ensure!(valid_endpoint(endpoint), "Unsupported YouTube operation");
     #[cfg(windows)]
     {
@@ -230,6 +253,150 @@ pub async fn forget(profile: &Profile) -> Result<()> {
     Ok(())
 }
 
+/// Isolated Spotify web-player profile. Only metadata leaves the browser thread.
+pub async fn spotify_connect(config: &Path, previous: Option<Profile>) -> Result<Profile> {
+    #[cfg(windows)]
+    {
+        let mut profile = previous.unwrap_or_else(|| Profile {
+            id: nonce(),
+            spotify: true,
+            root: PathBuf::new(),
+        });
+        ensure!(profile.spotify, "Invalid Spotify profile");
+        profile.bind(config)?;
+        native::submit(profile.clone(), None, native::Operation::SpotifyConnect).await?;
+        Ok(profile)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (config, previous);
+        anyhow::bail!("Spotify browser connection is currently available on Windows only")
+    }
+}
+pub async fn spotify_read(
+    profile: &Profile,
+    path: &str,
+    offset: u32,
+    limit: u32,
+) -> Result<Response> {
+    ensure!(
+        profile.spotify
+            && crate::spotify_library::valid_path(path)
+            && offset <= 20_000
+            && (1..=50).contains(&limit),
+        "Unsupported Spotify read"
+    );
+    #[cfg(windows)]
+    {
+        let value = native::submit(
+            profile.clone(),
+            None,
+            native::Operation::SpotifyRead {
+                path: path.into(),
+                offset,
+                limit,
+            },
+        )
+        .await?;
+        let status = value["status"]
+            .as_u64()
+            .filter(|v| (100..600).contains(v))
+            .ok_or_else(|| anyhow::anyhow!("Invalid Spotify response"))?
+            as u16;
+        let body = value["body"]
+            .as_str()
+            .filter(|s| s.len() <= MAX_RESPONSE)
+            .ok_or_else(|| anyhow::anyhow!("Spotify response is too large"))?;
+        return Ok(Response {
+            status,
+            retry_after: value["retryAfter"].as_str().map(str::to_owned),
+            body: serde_json::from_str(body)
+                .map_err(|_| anyhow::anyhow!("Spotify returned an unsupported response"))?,
+        });
+    }
+    #[cfg(not(windows))]
+    {
+        anyhow::bail!("Spotify browser connection is currently available on Windows only")
+    }
+}
+pub async fn spotify_invalidate(profile: &Profile) -> Result<()> {
+    ensure!(profile.spotify, "Invalid Spotify profile");
+    #[cfg(windows)]
+    {
+        native::submit(profile.clone(), None, native::Operation::SpotifyInvalidate).await?;
+        return Ok(());
+    }
+    #[cfg(not(windows))]
+    anyhow::bail!("Spotify browser connection is currently available on Windows only")
+}
+fn spotify_result(value: Value) -> Result<Response> {
+    let status = value["status"]
+        .as_u64()
+        .filter(|v| (100..600).contains(v))
+        .ok_or_else(|| anyhow::anyhow!("Invalid Spotify response"))? as u16;
+    let body = value["body"]
+        .as_str()
+        .filter(|s| s.len() <= MAX_RESPONSE)
+        .ok_or_else(|| anyhow::anyhow!("Spotify response is too large"))?;
+    Ok(Response {
+        status,
+        retry_after: value["retryAfter"].as_str().map(str::to_owned),
+        body: if body.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_str(body)
+                .map_err(|_| anyhow::anyhow!("Spotify returned an unsupported response"))?
+        },
+    })
+}
+pub async fn spotify_search(profile: &Profile, query: &str) -> Result<Response> {
+    ensure!(
+        profile.spotify && !query.trim().is_empty() && query.len() <= 1000,
+        "Invalid Spotify search"
+    );
+    #[cfg(windows)]
+    {
+        return spotify_result(
+            native::submit(
+                profile.clone(),
+                None,
+                native::Operation::SpotifySearch {
+                    query: query.into(),
+                },
+            )
+            .await?,
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        anyhow::bail!("Spotify browser connection is currently available on Windows only")
+    }
+}
+pub async fn spotify_add(profile: &Profile, playlist: &str, uris: &[String]) -> Result<Response> {
+    ensure!(
+        profile.spotify && crate::spotify_sync::valid_addition(playlist, uris),
+        "Invalid Spotify addition"
+    );
+    #[cfg(windows)]
+    {
+        return spotify_result(
+            native::submit(
+                profile.clone(),
+                None,
+                native::Operation::SpotifyMutation {
+                    playlist: playlist.into(),
+                    uris: uris.to_vec(),
+                },
+            )
+            .await?,
+        );
+    }
+    #[cfg(not(windows))]
+    {
+        anyhow::bail!("Spotify browser connection is currently available on Windows only")
+    }
+}
+
 #[cfg(windows)]
 mod native {
     use super::*;
@@ -259,6 +426,20 @@ mod native {
     };
     pub enum Operation {
         Connect,
+        SpotifyConnect,
+        SpotifyInvalidate,
+        SpotifyRead {
+            path: String,
+            offset: u32,
+            limit: u32,
+        },
+        SpotifySearch {
+            query: String,
+        },
+        SpotifyMutation {
+            playlist: String,
+            uris: Vec<String>,
+        },
         Post {
             endpoint: String,
             account: String,
@@ -374,6 +555,10 @@ mod native {
         profile: Profile,
         args: Option<String>,
         trace: Rc<RefCell<NavigationTrace>>,
+        // Observed only on Spotify's own requests in this isolated profile.
+        // Never serialized, logged, sent to the UI or shared with another origin.
+        spotify_authorization: Rc<RefCell<Option<String>>>,
+        spotify_pages: RefCell<Vec<(String, String, Value, Instant)>>,
     }
     impl Drop for Browser {
         fn drop(&mut self) {
@@ -384,12 +569,12 @@ mod native {
     }
     fn error() -> anyhow::Error {
         anyhow::anyhow!(
-            "Cannot initialize the YouTube window. Install or update Microsoft Edge WebView2 Runtime from Microsoft's official website."
+            "Cannot initialize the account window. Install or update Microsoft Edge WebView2 Runtime from Microsoft's official website."
         )
     }
     fn com_error(stage: &str, error: windows_webview::core::Error) -> anyhow::Error {
         anyhow::anyhow!(
-            "YouTube window: {stage} failed (HRESULT 0x{:08X}). Check Microsoft Edge WebView2 Runtime and folder permissions.",
+            "Account window: {stage} failed (HRESULT 0x{:08X}). Check Microsoft Edge WebView2 Runtime and folder permissions.",
             error.code().0 as u32
         )
     }
@@ -416,9 +601,9 @@ mod native {
             }
             ensure!(
                 !reply.is_closed() && !state.closed.get(),
-                "YouTube connection cancelled"
+                "Account connection cancelled"
             );
-            ensure!(Instant::now() < end, "YouTube connection timed out");
+            ensure!(Instant::now() < end, "Account connection timed out");
             std::thread::sleep(Duration::from_millis(10));
         }
     }
@@ -434,6 +619,20 @@ mod native {
         Ok(result)
     }
     fn open(hwnd: HWND, state: &WindowState, job: &Job) -> Result<Browser> {
+        // Spotify's library sidebar is hidden in the narrow sign-in layout.
+        // Read its desktop layout, independently of the user's main app size.
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                if job.profile.spotify { 1100 } else { 580 },
+                780,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+            .map_err(|_| error())?;
+        }
         let directory = job.profile.directory()?;
         std::fs::create_dir_all(&directory)?;
         let (tx, rx) = mpsc::channel();
@@ -499,6 +698,7 @@ mod native {
             blocked: false,
         }));
         let navigation_trace = trace.clone();
+        let spotify = job.profile.spotify;
         let mut token = EventRegistrationToken::default();
         let nav = NavigationStartingEventHandler::create(Box::new(move |_, args| {
             if let Some(args) = args {
@@ -508,7 +708,11 @@ mod native {
                         let mut trace = navigation_trace.borrow_mut();
                         trace.record(&uri, "starting");
                     }
-                    if !allowed_navigation(&uri) {
+                    if !(if spotify {
+                        crate::spotify_library::allowed_navigation(&uri)
+                    } else {
+                        allowed_navigation(&uri)
+                    }) {
                         {
                             let mut trace = navigation_trace.borrow_mut();
                             trace.blocked = true;
@@ -565,16 +769,70 @@ mod native {
         }));
         unsafe { view.add_NavigationCompleted(&completed, &mut token) }.map_err(|_| error())?;
         let popup_trace = trace.clone();
-        let popup = NewWindowRequestedEventHandler::create(Box::new(move |_, args| {
+        let popup = NewWindowRequestedEventHandler::create(Box::new(move |sender, args| {
             if let Some(args) = args {
                 unsafe {
                     let uri = text(|p| args.Uri(p))?;
                     popup_trace.borrow_mut().record(&uri, "popup_requested");
+                    if spotify {
+                        args.SetHandled(true)?;
+                        if crate::spotify_library::allowed_navigation(&uri) {
+                            if let Some(sender) = sender {
+                                sender.Navigate(&HSTRING::from(uri))?;
+                            }
+                        } else {
+                            popup_trace.borrow_mut().blocked = true;
+                        }
+                    }
                 }
             }
             Ok(())
         }));
         unsafe { view.add_NewWindowRequested(&popup, &mut token) }.map_err(|_| error())?;
+        let spotify_authorization = Rc::new(RefCell::new(None));
+        if spotify {
+            let authorization = spotify_authorization.clone();
+            let handler =
+                WebResourceRequestedEventHandler::create(Box::new(move |sender, args| {
+                    unsafe {
+                        if let (Some(sender), Some(args)) = (sender, args) {
+                            let origin = text(|p| sender.Source(p))?;
+                            let request = args.Request()?;
+                            let uri = text(|p| request.Uri(p))?;
+                            if crate::spotify_library::player_origin(&origin)
+                                && crate::spotify_library::metadata_origin(&uri)
+                            {
+                                let headers = request.Headers()?;
+                                if let Ok(value) =
+                                    text(|p| headers.GetHeader(w!("Authorization"), p))
+                                {
+                                    if value.starts_with("Bearer ")
+                                        && value.len() <= 16_384
+                                        && value.bytes().all(|b| b.is_ascii_graphic() || b == b' ')
+                                    {
+                                        *authorization.borrow_mut() = Some(value);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Ok(())
+                }));
+            unsafe {
+                view.AddWebResourceRequestedFilter(
+                    w!("https://api-partner.spotify.com/*"),
+                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                )
+                .map_err(|_| error())?;
+                view.AddWebResourceRequestedFilter(
+                    w!("https://api.spotify.com/*"),
+                    COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                )
+                .map_err(|_| error())?;
+                view.add_WebResourceRequested(&handler, &mut token)
+                    .map_err(|_| error())?;
+            }
+        }
         if let Ok(muted) = view.cast::<ICoreWebView2_8>() {
             unsafe {
                 let _ = muted.SetIsMuted(true);
@@ -588,6 +846,8 @@ mod native {
             profile: job.profile.clone(),
             args: job.args.clone(),
             trace,
+            spotify_authorization,
+            spotify_pages: RefCell::new(Vec::new()),
         })
     }
     fn source(browser: &Browser) -> String {
@@ -760,6 +1020,319 @@ mod native {
         }
         outcome
     }
+    fn spotify_dom(
+        browser: &Browser,
+        job: &Job,
+        state: &WindowState,
+        input: Value,
+    ) -> Result<Value> {
+        script(
+            browser,
+            &format!(
+                "{}({})",
+                crate::spotify_page::SCRIPT,
+                serde_json::to_string(&input)?
+            ),
+            job,
+            state,
+        )
+    }
+    fn spotify_navigate(
+        browser: &Browser,
+        job: &Job,
+        state: &WindowState,
+        url: &str,
+    ) -> Result<()> {
+        let sequence = browser.trace.borrow().sequence;
+        unsafe { browser.view.Navigate(&HSTRING::from(url)) }.map_err(|_| error())?;
+        let end = Instant::now() + Duration::from_secs(40);
+        loop {
+            pump();
+            ensure!(
+                !job.reply.is_closed() && !state.closed.get(),
+                "Spotify page reading cancelled"
+            );
+            ensure!(
+                !browser.trace.borrow().blocked,
+                "Spotify requested an unsupported page redirect"
+            );
+            let trace = browser.trace.borrow();
+            if trace.sequence > sequence
+                && trace
+                    .events
+                    .last()
+                    .is_some_and(|e| e["event"] == "completed")
+            {
+                return Ok(());
+            }
+            ensure!(
+                Instant::now() < end,
+                "Spotify's page did not finish loading. Your saved playlists were kept."
+            );
+            drop(trace);
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+    fn spotify_account(browser: &Browser, job: &Job, state: &WindowState) -> Result<Value> {
+        if !crate::spotify_library::player_origin(&source(browser)) {
+            spotify_navigate(browser, job, state, "https://open.spotify.com/")?;
+        }
+        let end = Instant::now() + Duration::from_secs(20);
+        loop {
+            let value = spotify_dom(
+                browser,
+                job,
+                state,
+                serde_json::json!({"kind":"identity","openMenu":true}),
+            )?;
+            if value["ready"] == true {
+                crate::spotify_library::identity(&value)?;
+                return Ok(value);
+            }
+            ensure!(
+                !job.reply.is_closed() && !state.closed.get(),
+                "Spotify page reading cancelled"
+            );
+            ensure!(
+                Instant::now() < end,
+                "Open Connect Spotify and finish signing in. Spotify has not exposed your profile link yet."
+            );
+            pump();
+            std::thread::sleep(Duration::from_millis(250));
+        }
+    }
+    fn spotify_page_read(
+        browser: &Browser,
+        job: &Job,
+        state: &WindowState,
+        path: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<Value> {
+        let account = spotify_account(browser, job, state)?;
+        if path == "me" {
+            return Ok(account);
+        }
+        let (key, url, library) = crate::spotify_page::target(path)?;
+        {
+            let mut pages = browser.spotify_pages.borrow_mut();
+            pages.retain(|(_, id, _, at)| {
+                account["id"].as_str() == Some(id.as_str())
+                    && at.elapsed() < Duration::from_secs(300)
+            });
+            if let Some((_, _, value, _)) = pages.iter().find(|(k, _, _, _)| k == &key) {
+                return crate::spotify_page::api_value(value, path, offset, limit);
+            }
+        }
+        spotify_navigate(browser, job, state, &url)?;
+        let id = if key == "me/tracks" {
+            "liked"
+        } else {
+            key.strip_prefix("playlists/").unwrap_or_default()
+        };
+        let mut snapshot = crate::spotify_page::Snapshot::default();
+        let mut unchanged = Instant::now();
+        let end = Instant::now() + Duration::from_secs(300);
+        let mut stable = 0;
+        loop {
+            ensure!(
+                !job.reply.is_closed() && !state.closed.get(),
+                "Spotify page reading cancelled"
+            );
+            ensure!(
+                Instant::now() < end,
+                "Spotify page reading timed out. No partial playlist was saved."
+            );
+            let value = spotify_dom(
+                browser,
+                job,
+                state,
+                serde_json::json!({"kind":if library {"library"}else{"collection"},"id":id,"scroll":true}),
+            )?;
+            if value["ready"] == true {
+                let before = snapshot.len(library);
+                let restarted = snapshot.absorb(value, library)?;
+                if restarted {
+                    spotify_dom(
+                        browser,
+                        job,
+                        state,
+                        serde_json::json!({"kind":"library","reset":true}),
+                    )?;
+                }
+                if restarted || before != snapshot.len(library) {
+                    unchanged = Instant::now();
+                    stable = 0;
+                } else {
+                    stable += 1;
+                }
+                if snapshot.complete(library) && (!library || stable >= 8) {
+                    break;
+                }
+                ensure!(
+                    unchanged.elapsed() < Duration::from_secs(20),
+                    "Spotify did not display the complete list. Your old local copy was kept; try opening the playlist in Spotify first."
+                );
+            } else {
+                ensure!(
+                    unchanged.elapsed() < Duration::from_secs(25),
+                    "Spotify did not display the expected list. Reconnect or try a public playlist link; your local copies were kept."
+                );
+            }
+            pump();
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        let current = spotify_account(browser, job, state)?;
+        ensure!(
+            current["id"] == account["id"],
+            "The Spotify account changed while reading. Nothing was imported."
+        );
+        let value = snapshot.finish(library, account.clone(), id)?;
+        let response = crate::spotify_page::api_value(&value, path, offset, limit)?;
+        let mut pages = browser.spotify_pages.borrow_mut();
+        if pages.len() >= 2 {
+            pages.remove(0);
+        }
+        pages.push((
+            key,
+            account["id"].as_str().unwrap_or_default().into(),
+            value,
+            Instant::now(),
+        ));
+        Ok(response)
+    }
+    fn spotify_request(
+        browser: &Browser,
+        job: &Job,
+        state: &WindowState,
+        path: &str,
+        offset: u32,
+        limit: u32,
+        query: Option<&str>,
+        uris: Option<&[String]>,
+    ) -> Result<Value> {
+        ensure!(
+            (crate::spotify_library::valid_path(path)
+                || query.is_some_and(|q| path == "search" && !q.is_empty() && q.len() <= 1000)
+                || uris.is_some_and(|u| crate::spotify_sync::valid_addition(path, u)))
+                && crate::spotify_library::player_origin(&source(browser)),
+            "Reconnect Spotify to use your library"
+        );
+        let authorization = browser
+            .spotify_authorization
+            .borrow()
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Spotify session expired. Connect Spotify again."))?;
+        let id = nonce();
+        let id_check = id.clone();
+        let (tx, rx) = mpsc::channel();
+        let mut event_token = EventRegistrationToken::default();
+        let handler = WebMessageReceivedEventHandler::create(Box::new(move |_, args| {
+            if let Some(args) = args {
+                unsafe {
+                    let source = text(|p| args.Source(p))?;
+                    if crate::spotify_library::player_origin(&source) {
+                        let message = text(|p| args.WebMessageAsJson(p))?;
+                        if message.len() <= MAX_RESPONSE * 2 {
+                            if let Ok(value) = serde_json::from_str::<Value>(&message) {
+                                if value["id"].as_str() == Some(&id_check) {
+                                    let _ = tx.send(value);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }));
+        unsafe {
+            browser
+                .view
+                .add_WebMessageReceived(&handler, &mut event_token)
+        }
+        .map_err(|_| error())?;
+        let mut url = reqwest::Url::parse(&format!("https://api.spotify.com/v1/{path}"))?;
+        let mut method = "GET";
+        let mut body = Value::Null;
+        if let Some(uris) = uris {
+            if path == "liked" {
+                method = "PUT";
+                url.set_path("/v1/me/library");
+                url.query_pairs_mut().append_pair("uris", &uris.join(","));
+            } else {
+                method = "POST";
+                url.set_path(&format!("/v1/playlists/{path}/items"));
+                body = serde_json::json!({"uris":uris});
+            }
+        } else {
+            url.query_pairs_mut()
+                .append_pair("limit", &limit.to_string())
+                .append_pair("offset", &offset.to_string());
+            if let Some(query) = query {
+                url.query_pairs_mut()
+                    .append_pair("q", query)
+                    .append_pair("type", "track");
+            }
+        }
+        let input = serde_json::json!({"id":id,"authorization":authorization,"url":url.as_str(),"method":method,"body":body});
+        let code = format!(
+            r#"(()=>{{if(location.origin!=='https://open.spotify.com')return;const p={input};(async()=>{{try{{const r=await fetch(p.url,{{method:p.method,credentials:'omit',redirect:'error',headers:{{Authorization:p.authorization,...(p.body===null?{{}}:{{'Content-Type':'application/json'}})}},body:p.body===null?undefined:JSON.stringify(p.body),signal:AbortSignal.timeout(20000)}});if(Number(r.headers.get('content-length'))>{MAX_RESPONSE})throw Error();const reader=r.body?.getReader();let parts=[],size=0;if(reader)for(;;){{const v=await reader.read();if(v.done)break;size+=v.value.byteLength;if(size>{MAX_RESPONSE}){{await reader.cancel();throw Error();}}parts.push(v.value);}}const bytes=new Uint8Array(size);let at=0;for(const part of parts){{bytes.set(part,at);at+=part.length;}}chrome.webview.postMessage({{id:p.id,status:r.status,retryAfter:r.headers.get('retry-after'),body:new TextDecoder().decode(bytes)}});}}catch(_){{chrome.webview.postMessage({{id:p.id,error:true}});}}}})();}})()"#
+        );
+        let result = (|| {
+            unsafe { browser.view.ExecuteScript(&HSTRING::from(code), None) }
+                .map_err(|_| error())?;
+            let value = wait(rx, &job.reply, state, 25)?;
+            ensure!(
+                value["error"].is_null(),
+                "Spotify did not complete the library read. Reconnect or try again later."
+            );
+            Ok(value)
+        })();
+        unsafe {
+            let _ = browser.view.remove_WebMessageReceived(event_token);
+        }
+        result
+    }
+    fn spotify_ready(
+        browser: &Browser,
+        job: &Job,
+        state: &WindowState,
+        visible: bool,
+    ) -> Result<Value> {
+        let end = Instant::now() + Duration::from_secs(if visible { 600 } else { 35 });
+        let mut next = Instant::now();
+        loop {
+            pump();
+            ensure!(
+                !job.reply.is_closed() && !state.closed.get(),
+                "Spotify connection cancelled"
+            );
+            ensure!(
+                !browser.trace.borrow().blocked,
+                "Spotify requested an unsupported sign-in redirect. Use Spotify's email sign-in option."
+            );
+            ensure!(
+                Instant::now() < end,
+                "Spotify sign-in did not finish. Connect Spotify again; the web player may be unavailable."
+            );
+            if Instant::now() >= next && crate::spotify_library::player_origin(&source(browser)) {
+                next = Instant::now() + Duration::from_secs(1);
+                // Anonymous web-player requests also carry authorization. Never
+                // probe a private API until the page shows its signed-in account
+                // control. The importer separately verifies /me before every copy.
+                let logged = script(
+                    browser,
+                    "Boolean(document.querySelector('[data-testid=\"user-widget-link\"],[data-testid=\"user-widget-avatar\"]'))",
+                    job,
+                    state,
+                )?;
+                if logged == true {
+                    return Ok(Value::Null);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
     fn clear(browser: &Browser, job: &Job, state: &WindowState) -> Result<()> {
         let v: ICoreWebView2_2 = browser.view.cast().map_err(|_| error())?;
         unsafe { v.CookieManager().map_err(|_| error())?.DeleteAllCookies() }
@@ -821,7 +1394,7 @@ mod native {
             CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
                 class.lpszClassName,
-                w!("Vibefy · YouTube sign-in"),
+                w!("Vibefy · Account sign-in"),
                 WS_OVERLAPPEDWINDOW,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
@@ -860,10 +1433,11 @@ mod native {
                     continue;
                 }
                 state.closed.set(false);
-                if browser
-                    .as_ref()
-                    .is_some_and(|b| b.profile.id != job.profile.id || b.args != job.args)
-                {
+                if browser.as_ref().is_some_and(|b| {
+                    b.profile.id != job.profile.id
+                        || b.profile.spotify != job.profile.spotify
+                        || b.args != job.args
+                }) {
                     state.controller.borrow_mut().take();
                     browser = None;
                 }
@@ -873,6 +1447,59 @@ mod native {
                     }
                     let b = browser.as_ref().unwrap();
                     match &job.op {
+                        Operation::SpotifyConnect => {
+                            unsafe {
+                                let _ = ShowWindow(hwnd, SW_SHOW);
+                                let _ = SetForegroundWindow(hwnd);
+                                b.view.Navigate(&HSTRING::from("https://accounts.spotify.com/login?continue=https%3A%2F%2Fopen.spotify.com%2F")).map_err(|_| error())?;
+                            }
+                            spotify_ready(b, &job, &state, true)
+                        }
+                        Operation::SpotifyInvalidate => {
+                            b.spotify_pages.borrow_mut().clear();
+                            Ok(Value::Null)
+                        }
+                        Operation::SpotifyRead {
+                            path,
+                            offset,
+                            limit,
+                        } => {
+                            let body = spotify_page_read(
+                                b,
+                                &job,
+                                &state,
+                                path,
+                                *offset as usize,
+                                *limit as usize,
+                            )?;
+                            Ok(
+                                serde_json::json!({"status":200,"body":serde_json::to_string(&body)?}),
+                            )
+                        }
+                        Operation::SpotifySearch { query } => {
+                            if !crate::spotify_library::player_origin(&source(b))
+                                || b.spotify_authorization.borrow().is_none()
+                            {
+                                unsafe {
+                                    b.view.Navigate(&HSTRING::from("https://open.spotify.com/"))
+                                }
+                                .map_err(|_| error())?;
+                                spotify_ready(b, &job, &state, false)?;
+                            }
+                            spotify_request(b, &job, &state, "search", 0, 10, Some(query), None)
+                        }
+                        Operation::SpotifyMutation { playlist, uris } => {
+                            if !crate::spotify_library::player_origin(&source(b))
+                                || b.spotify_authorization.borrow().is_none()
+                            {
+                                unsafe {
+                                    b.view.Navigate(&HSTRING::from("https://open.spotify.com/"))
+                                }
+                                .map_err(|_| error())?;
+                                spotify_ready(b, &job, &state, false)?;
+                            }
+                            spotify_request(b, &job, &state, playlist, 0, 1, None, Some(uris))
+                        }
                         Operation::Connect => {
                             unsafe {
                                 let _ = ShowWindow(hwnd, SW_SHOW);
@@ -918,9 +1545,9 @@ mod native {
                 unsafe {
                     let _ = ShowWindow(hwnd, SW_HIDE);
                 }
-                let failed_login = matches!(job.op, Operation::Connect)
+                let failed_login = matches!(job.op, Operation::Connect | Operation::SpotifyConnect)
                     && (result.is_err() || job.reply.is_closed());
-                if failed_login {
+                if failed_login && !job.profile.spotify {
                     if let Some(b) = &browser {
                         let _ = clear(b, &job, &state);
                     }

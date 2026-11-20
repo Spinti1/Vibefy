@@ -314,12 +314,19 @@ impl Record {
     }
 }
 
+/// Metadata-based providers must identify the recording, not merely return text.
+pub fn metadata_matches(title: &str, artist: &str, query: &Query) -> bool {
+    let wanted_title = normalize(&clean_title(&query.title));
+    let wanted_artist = normalize(&clean_artist(&query.artist));
+    !wanted_title.is_empty()
+        && !wanted_artist.is_empty()
+        && normalize(&clean_title(title)) == wanted_title
+        && normalize(&clean_artist(artist)) == wanted_artist
+}
+
 /// How well a search result fits what is playing; `None` rules it out.
 fn score(record: &Record, query: &Query) -> Option<i64> {
-    if normalize(&clean_title(&record.track_name)) != normalize(&clean_title(&query.title)) {
-        return None;
-    }
-    if !loose_match(&record.artist_name, &clean_artist(&query.artist)) {
+    if !metadata_matches(&record.track_name, &record.artist_name, query) {
         return None;
     }
     let mut score = 1000;
@@ -685,7 +692,7 @@ struct Cached {
 fn cache_key(query: &Query) -> String {
     let digest = Sha1::digest(
         format!(
-            "matched-artist-v2|{}|{}|{}|{}",
+            "verified-recording-v3|{}|{}|{}|{}",
             query.artist, query.title, query.album, query.duration_ms
         )
         .as_bytes(),

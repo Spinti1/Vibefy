@@ -57,6 +57,7 @@ Source: "{#AppDir}\auto-sync\*"; DestDir: "{app}\auto-sync"; Flags: ignoreversio
 Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE_SPOTIFAST.txt"; Flags: ignoreversion
 Source: "..\..\CREDITS.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\THIRD_PARTY_LICENSES.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\assets\licenses\juicevault-enhancer-LICENSE.txt"; DestDir: "{app}\licenses"; Flags: ignoreversion
 Source: "vibefy-installer.txt"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{autoprograms}\Vibefy"; Filename: "{app}\vibefy.exe"

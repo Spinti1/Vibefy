@@ -1,4 +1,4 @@
-name: Build Vibefy mobile preview
+name: Build Vibefy hybrid mobile candidate
 on:
   workflow_dispatch:
 permissions:
@@ -18,10 +18,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - run: gradle -p mobile/android --no-daemon assembleDebug assembleRelease lintRelease
+      - run: gradle -p mobile/android --no-daemon assembleDebug assembleRelease testReleaseUnitTest lintRelease
       - uses: actions/upload-artifact@v4
         with:
-          name: Vibefy-Android-preview
+          name: Vibefy-Android-hybrid-candidate
           path: |
             mobile/android/app/build/outputs/apk/debug/*.apk
             mobile/android/app/build/outputs/apk/release/*.apk
@@ -41,14 +41,13 @@ jobs:
           mkdir -p package/Payload
           cp -R build/Build/Products/Release-iphoneos/Vibefy.app package/Payload/
           cd package
-          /usr/bin/zip -r -y ../Vibefy-0.1.0.ipa Payload
-      - name: Validate IPA and create SideStore source
-        run: python3 mobile/tools/source.py mobile/ios/Vibefy-0.1.0.ipa --url https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.1.0/Vibefy-0.1.0.ipa --output mobile/ios/source.json
+          /usr/bin/zip -r -y ../Vibefy.ipa Payload
+      - name: Validate native device application
+        run: |
+          python3 -c "import plistlib; p=plistlib.load(open('mobile/ios/package/Payload/Vibefy.app/Info.plist','rb')); assert p['CFBundleIdentifier']=='online.usevibefy.mobile'; assert p['CFBundleShortVersionString']==__import__('pathlib').Path('mobile/ios/project.yml').read_text().split('MARKETING_VERSION: ')[1].splitlines()[0].strip(chr(39)); assert __import__('pathlib').Path('mobile/ios/package/Payload/Vibefy.app/app-shell.js').is_file()"
       - uses: actions/upload-artifact@v4
         with:
-          name: Vibefy-iOS-preview
+          name: Vibefy-iOS-hybrid-candidate
           path: |
-            mobile/ios/Vibefy-0.1.0.ipa
-            mobile/ios/source.json
-            mobile/ios/source.sha256
+            mobile/ios/Vibefy.ipa
           retention-days: 7

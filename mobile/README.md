@@ -1,27 +1,47 @@
-# Vibefy mobile preview 0.1.0
+# Vibefy mobile 0.2.6 hybrid preview
 
-Small native Android and iOS hosts for the existing HTTPS Vibefy web player. This preview requires internet and the deployed Vibefy backend. It is not a port of the Windows Rust playback engine. It shares the web player's search, public playlist imports, local playlist metadata, browser mods and Jam. No audio library or desktop speech model is bundled.
+The user authorized a lightweight hybrid app after the native-only port began. The current entry points use Android WebView and Apple WKWebView with app-style navigation and the existing mobile interface. Native-only prototype screens and player code are retained for later engine integration; they are not the active playback engine in this build.
 
-## Current limits
+## Implemented
 
-Google does not support its authorization flow in embedded WebViews. The preview offers **Open in browser** for the existing web connection. This does not log the native app in, and browser storage is separate from the app's storage. Export/import playlist metadata to transfer guest collections. Native account authorization is still pending; do not advertise desktop account parity.
+- No browser address bar or persistent Reload/Open in browser toolbar. Native launch cover, dark surfaces and Android Back/dialog navigation.
+- Persistent WebView/WKWebsiteDataStore profiles. Existing 0.1.0 local libraries on the same hosted origin are not wiped. Queue metadata now survives a cold app launch; it does not include music files or account secrets.
+- Browser HTTP caching stays enabled. Rendering expensive offscreen playlist tiles can be skipped. Active animation frame pacing is not capped; heavyweight desktop visualizers/Track Peek/Oneko are absent from the mobile web interface.
+- Native document export for metadata-only playlist backups, main-frame/origin-restricted bridge, and platform document selection for JSON imports.
+- Jam code/link joining uses the existing relay and desktop protocol. `vibefy://jam?code=...` opens the app's Join screen. This works across networks; automatic same-Wi-Fi discovery/Spotify Connect-style playback transfer is not implemented yet.
 
-YouTube still uses its official embedded player. Background/lock-screen playback is not guaranteed. JuiceVault and SoundCloud availability remains subject to providers. Native download, external file import/export behavior, autoplay and Jam timing need physical-device testing before a stable release. Local playlists belong to the app installation and can be lost when uninstalling. Existing desktop data is untouched.
+## Important remaining limitations
 
-## Android
+Google connection opens the registered Vibefy website in the system browser, then returns an encrypted, single-use grant to the waiting app. Tap Return to Vibefy after consent. Reloading or killing the app during authorization requires restarting the connection. Mobile 0.2.5 stores renewable grants in device-protected storage, renews access before expiry and retries renewal after returning from the background. Connect once after updating to enable this; existing access-only grants cannot be converted automatically. Google verification, consent and user limits still apply. JuiceVault's existing account form remains subject to provider acceptance. Account tokens can expire; persistent website data is not a guarantee of permanent login.
 
-Requires JDK 17 or 21, Gradle 8.9, Android SDK 35 and build tools. Run `gradle -p mobile/android assembleDebug assembleRelease lintRelease` from the repository root.
+YouTube uses the existing official player, including its visible video. Background/lock-screen YouTube playback is not guaranteed. Native Media3/AVPlayer prototype source is not presented as an integrated YouTube engine. Physical Android/iPhone flow, battery and frame-time measurement are still required before describing performance as proven.
 
-`app-debug.apk` is installable for testing. `app-release-unsigned.apk` is deliberately unsigned: a stable release needs a persistent publisher signing key stored outside source control. Do not ship repeatedly changing debug keys as production updates.
+The app requires the hosted Vibefy service. It is not an offline player. Device-local playlists can be lost when app data is cleared or the app is uninstalled; export a metadata backup first.
 
-## iOS, SideStore and iLoader
+## Builds and signing
 
-Use **Build Vibefy mobile preview** in GitHub Actions. Its macOS runner creates a real device `.app`, packages `Payload/Vibefy.app` in an unsigned IPA, and generates a source from the IPA's actual bundle ID, version and byte count. No Apple password, certificate or provisioning profile is needed for this unsigned build. SideStore/iLoader handles device signing; Apple's sideloading restrictions and refresh requirements still apply.
+Use the mobile workflow on the development branch. Android uses SDK 35/Gradle 8.9/JDK 21. APK release signing uses the existing locally retained publisher key. iOS device builds run on macOS and produce an unsigned IPA for SideStore/iLoader signing. No signing credentials or account data are committed.
 
-The IPA can be imported directly into iLoader or SideStore. For a source link, first attach the exact IPA to the `mobile-v0.1.0` GitHub prerelease, then publish the generated `source.json` at a stable HTTPS URL. Do not list an IPA that has not been uploaded. The generated download URL is version-specific, not `latest`. Bundle ID is `online.usevibefy.mobile` on both platforms.
+See PORT_STATUS.md and the repository's CREDITS.md. AndroidX WebKit and Media3 are Apache-2.0; iOS WebKit and AVFoundation are system frameworks. The hybrid design is disclosed rather than advertised as fully native.
 
-## Security and credits
 
-Main-frame navigation stays on the fixed Vibefy HTTPS host. External HTTPS links open in the system browser. No native JavaScript bridge, filesystem access, arbitrary URL loader, cleartext exception, or certificate bypass is included. The operating system owns WebView storage. Embedded provider frames remain part of the existing player.
+## 0.2.3 mobile account fix and Android updates
 
-Vibefy and the web interface retain the repository's MIT license and existing [credits](../CREDITS.md). Android uses the system WebView; iOS uses Apple's WebKit. SideStore and iLoader are third-party installation tools, not authors of Vibefy. No new artwork or third-party app source was copied.
+The 0.2.2 document-start script read document.documentElement before WebKit/WebView created it, set its initialized flag, then aborted. The web page therefore fell back to the embedded Google popup. Initialization now installs the native authorization bridge without accessing DOM nodes, and delays styling until DOMContentLoaded. The initialized flag is set only after bridge setup. The hosted repair also recovers partially initialized 0.2.2 profiles without clearing their data. Ordinary browsers and foreign frames are excluded.
+
+Android 0.2.3 adds automatic GitHub release checks (at most once per six hours), a manual check in Settings, bounded HTTPS downloads, GitHub release size/SHA-256 checks, and an Android installer handoff through a narrowly scoped FileProvider. Android itself requires the user's installation permission and confirmation. Older APKs did not contain this updater; users must install this update once, over the existing app. A hosted Android notice links to the current APK for those versions.
+
+
+## Protected account persistence and renewal (0.2.5)
+
+iOS uses a device-bound Keychain item; Android uses app-specific Android Keystore AES-256-GCM encryption. Credentials are excluded from browser storage and playlist backups. The trusted main-frame bridge reads/writes only that account record.
+
+New mobile connections use Google's authorization-code model through the system browser. The Vercel endpoint exchanges the code using the existing Vibefy Web client; only its secret is held in protected server configuration. The server does not persist user tokens. The encrypted one-time app callback carries the grant to the waiting app, which stores the refresh credential locally. Renewal submits that credential over HTTPS to the fixed same-origin endpoint and on to Google. API calls use the access token directly with Google.
+
+Expired access is renewed before library requests and after background suspension. Concurrent renewal is shared. Network/server/configuration errors keep the protected credential; only explicit disconnect or confirmed Google invalid_grant clears it. A YouTube API 401 triggers one renewal/retry instead of deleting the account. Reconnect once (Keep me signed in) after updating from an access-only version. Google can still revoke access or require consent; permanent authorization is not guaranteed. Physical-device authentication and background suspension remain to be validated on an iPhone and Android phone.
+
+## 0.2.6 QR imports and mobile presentation
+
+A desktop QR opens a metadata preview at /web#share=<id>. Save a local copy without signing in; Keep updated retrieves changes on opening it or returning to the foreground, with conditional requests and a one-minute minimum interval. vibefy://playlist?id=<id> opens the preview in installed apps. Turning off following allows independent local edits. Metadata backups retain the read-only subscription, never its desktop owner key.
+
+Native phone pinch/page zoom is disabled. YouTube now-playing displays cover artwork; this presentation change does not remove the existing YouTube video stream or guarantee audio-only network traffic. Background playback limitations remain.

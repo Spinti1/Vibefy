@@ -2057,7 +2057,7 @@ impl App {
                 duration_ms: track.duration_ms,
                 position_ms: match self.pending_local_position {
                     Some((position, at)) if at.elapsed() < OPTIMISTIC_HOLD => {
-                        if self.local.playback == Playback::Playing {
+                        if playing {
                             let elapsed = at.elapsed().as_millis() as u32;
                             let limit = track.duration_ms.max(position);
                             position.saturating_add(elapsed).min(limit)
@@ -2912,6 +2912,12 @@ impl App {
                     }
                 }
                 Event::Personal { request, result } => self.receive_personal(request, result),
+                Event::SpotifyAddition {
+                    account,
+                    playlist,
+                    uris,
+                    result,
+                } => self.receive_spotify_addition(account, playlist, uris, result),
                 Event::PersonalProgress { request, message } => {
                     if let Some(pending) = self.personal.tasks.get_mut(&request) {
                         pending.message = message;
@@ -2986,7 +2992,6 @@ impl App {
                             if matches!(
                                 id,
                                 crate::addons::Id::Vivy
-                                    | crate::addons::Id::Backmusic
                                     | crate::addons::Id::SoundVisualizer
                             ) {
                                 self.settings.addons.visualizer = Some(id);
@@ -3117,6 +3122,12 @@ impl App {
                     }
                 }
                 Event::Local(state) => self.handle_local(*state),
+                Event::LocalProgress(progress) => {
+                    if let Some(update) = progress.lock().unwrap_or_else(|e| e.into_inner()).take()
+                    {
+                        update.apply(&mut self.local);
+                    }
+                }
                 Event::Api(response) => self.handle_api(*response),
                 Event::Accent {
                     url,
@@ -3755,7 +3766,21 @@ impl App {
             .sum()
     }
 
-    fn handle_local(&mut self, state: LocalState) {
+    fn handle_local(&mut self, mut state: LocalState) {
+        // A coalesced progress update can be newer than an earlier metadata or
+        // volume snapshot. Keep its clock while still applying the other fields.
+        if state.playback == Playback::Playing
+            && self.local.playback == Playback::Playing
+            && state.track_sequence == self.local.track_sequence
+            && state.seek_sequence == self.local.seek_sequence
+            && state
+                .position_at
+                .zip(self.local.position_at)
+                .is_some_and(|(incoming, current)| incoming < current)
+        {
+            state.position_ms = self.local.position_ms;
+            state.position_at = self.local.position_at;
+        }
         if state.playback == Playback::Loading
             && let Some(track) = state
                 .track
@@ -3798,6 +3823,7 @@ impl App {
         }
         if state.playback != self.local.playback {
             self.optimistic_playing = None;
+            self.pending_local_position = None;
             if matches!(state.playback, Playback::Playing | Playback::Loading) {
                 self.clear_play_pending();
             }
@@ -4265,9 +4291,9 @@ impl App {
         {
             self.refresh_queue(true);
         }
-        if self.spicy.open {
-            self.request_spicy_lyrics(false);
-        }
+        // Resolve availability once per track off the UI thread, reusing the
+        // provider cache. A confirmed miss can hide the unavailable lyric action.
+        self.request_spicy_lyrics(false);
         if !self.spicy.open && (self.show_lyrics_panel || self.lyrics_fullscreen.is_some()) {
             // Fullscreen shows lyrics without the panel flag when the
             // queue column is open; a track change must refresh them.
@@ -4428,17 +4454,7 @@ impl App {
     }
 
     pub fn spicy_audio_position(&self, now: &NowPlaying) -> u32 {
-        if now.local
-            && self
-                .local
-                .track
-                .as_ref()
-                .is_some_and(|track| track.uri == now.uri)
-        {
-            self.local.position_now()
-        } else {
-            now.position_ms
-        }
+        now.position_ms
     }
 
     pub fn request_spicy_lyrics(&mut self, refresh: bool) {
@@ -10334,10 +10350,14 @@ impl App {
     }
 
     fn toggle_play(&mut self) {
-        let playing = self.now_playing().map(|now| now.playing);
+        let now = self.now_playing();
+        let playing = now.as_ref().map(|now| now.playing);
         match self.target() {
             Target::Local => {
                 if self.local.is_active() {
+                    if let Some(now) = &now {
+                        self.pending_local_position = Some((now.position_ms, Instant::now()));
+                    }
                     self.backend.player(PlayerCommand::Toggle);
                 } else if let Some(remote) = self.remote_fresh() {
                     // Nothing is playing locally: resume on this computer.
@@ -10394,6 +10414,21 @@ impl App {
     }
 
     fn seek(&mut self, position_ms: u32) {
+        if let Some(session) = self.addons.jam.as_ref().filter(|session| !session.host) {
+            let uri = self
+                .local
+                .track
+                .as_ref()
+                .map(|t| t.uri.as_str())
+                .unwrap_or_default();
+            let accepted = session.seek(uri, position_ms);
+            self.toast(if accepted {
+                "Seeking the shared track…"
+            } else {
+                "Jam seek is unavailable. Wait for the host to reconnect."
+            });
+            return;
+        }
         // Dragging the bar under the remembered song moves the point a press
         // of play will resume from; there is no stream to seek yet.
         if self.now_playing_live().is_none() && self.resume_track.is_some() {
@@ -12671,6 +12706,22 @@ impl App {
                 });
             }
             Action::SignOut => {
+                self.backend.send(Command::CancelSpotifyImports);
+                self.personal.spotify = None;
+                self.personal.spotify_busy = false;
+                self.personal.spotify_importing = false;
+                self.personal.spotify_queue.clear();
+                self.personal
+                    .tasks
+                    .retain(|_, pending| !pending.fingerprint.starts_with("spotify-"));
+                self.personal.spotify_pending.clear();
+                self.personal.spotify_probe_tried = true;
+                self.personal.spotify_resume_account = None;
+                self.personal.next = self.personal.next.wrapping_add(1);
+                self.backend.send(Command::Personal {
+                    request: self.personal.next,
+                    task: crate::personal_library::Task::SpotifyDisconnect,
+                });
                 self.personal.started = false;
                 self.settings.welcome_completed = false;
                 self.settings_dirty = true;
@@ -12739,8 +12790,38 @@ impl App {
                 ctx.data_mut(|data| {
                     let id = egui::Id::new("spicy-lyrics-config");
                     data.insert_temp(id, true);
-                    data.insert_temp(id.with("tab"), tab.min(3));
+                    data.insert_temp(id.with("tab"), tab.min(1));
                 });
+            }
+            Action::SaveSpicyStyle(name, mut appearance) => {
+                let name: String = name.trim().chars().take(48).collect();
+                if !name.is_empty() {
+                    appearance.normalize();
+                    if let Some(saved) = self
+                        .settings
+                        .spicy_lyrics_styles
+                        .iter_mut()
+                        .find(|saved| saved.name == name)
+                    {
+                        saved.appearance = appearance;
+                    } else {
+                        self.settings
+                            .spicy_lyrics_styles
+                            .push(crate::spicy_lyrics::SavedStyle { name, appearance });
+                    }
+                    self.actions.push(Action::SettingsChanged);
+                }
+            }
+            Action::DeleteSpicyStyle(name) => {
+                self.settings
+                    .spicy_lyrics_styles
+                    .retain(|saved| saved.name != name);
+                self.actions.push(Action::SettingsChanged);
+            }
+            Action::SetVisualizerBackground(mut appearance) => {
+                appearance.normalize();
+                self.settings.visualizer_background = appearance;
+                self.actions.push(Action::SettingsChanged);
             }
             Action::SetSpicyAppearance(mut appearance) => {
                 appearance.normalize();
@@ -12820,6 +12901,15 @@ impl App {
                 self.apply(Action::ToggleSpicyLyrics, ctx);
             }
             Action::ToggleListenTogether => {
+                if self.addons.jam.as_ref().is_some_and(|session| session.host) {
+                    if self.show_listen_together {
+                        self.show_listen_together = false;
+                        self.addons.jam_monitor_open = true;
+                    } else {
+                        self.addons.jam_monitor_open = !self.addons.jam_monitor_open;
+                    }
+                    return;
+                }
                 self.show_listen_together = !self.show_listen_together;
                 if self.show_listen_together {
                     self.show_queue_panel = false;
@@ -14944,6 +15034,7 @@ mod tests {
                 for label in [
                     "Create playlist",
                     "Import Spotify playlist",
+                    "Connect Spotify",
                     "Vibefy playlists",
                 ] {
                     assert!(
@@ -14956,6 +15047,430 @@ mod tests {
                 assert!(!rendered.contains("Bring your playlists along"));
             }
         }
+    }
+    #[test]
+    fn playback_regression_control_snapshots_do_not_rewind_coalesced_progress() {
+        let mut app = test_app("progress-snapshot-057");
+        app.backend.set_offline(true);
+        app.offline = true;
+        app.local_ready = true;
+        app.local = LocalState {
+            connected: true,
+            playback: Playback::Playing,
+            position_ms: 4000,
+            position_at: Some(Instant::now()),
+            track_sequence: 4,
+            seek_sequence: 2,
+            ..Default::default()
+        };
+        let mut stale = app.local.clone();
+        stale.position_ms = 1000;
+        stale.position_at = Some(Instant::now() - Duration::from_secs(2));
+        stale.volume = 1234;
+        app.handle_local(stale);
+        assert_eq!(app.local.position_ms, 4000);
+        assert_eq!(app.local.volume, 1234);
+        let mut paused = app.local.clone();
+        paused.playback = Playback::Paused;
+        paused.position_ms = 4100;
+        paused.position_at = None;
+        app.handle_local(paused);
+        assert_eq!(app.local.position_now(), 4100);
+    }
+    #[test]
+    fn playback_regression_optimistic_pause_freezes_player_and_lyrics_together() {
+        let mut app = test_app("pause-lyrics-057");
+        app.backend.set_offline(true);
+        app.offline = true;
+        app.local_ready = true;
+        app.local = LocalState {
+            connected: true,
+            playback: Playback::Playing,
+            position_ms: 2000,
+            position_at: Some(Instant::now() - Duration::from_secs(1)),
+            track: Some(crate::player::LocalTrack {
+                uri: "vibefy:youtube:abcdefghijk".into(),
+                title: "Example".into(),
+                duration_ms: 60000,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        app.toggle_play();
+        let first = app.now_playing().unwrap();
+        assert!(!first.playing);
+        let second = app.now_playing().unwrap();
+        assert_eq!(first.position_ms, second.position_ms);
+        assert_eq!(app.spicy_audio_position(&second), second.position_ms);
+        let mut paused = app.local.clone();
+        paused.playback = Playback::Paused;
+        paused.position_ms = 3100;
+        paused.position_at = Some(Instant::now() - Duration::from_secs(20));
+        app.handle_local(paused);
+        let now = app.now_playing().unwrap();
+        assert!(!now.playing);
+        assert_eq!(now.position_ms, 3100);
+        assert_eq!(app.spicy_audio_position(&now), 3100);
+    }
+    #[test]
+    fn spotify_connection_survives_catalog_and_watch_errors() {
+        use crate::personal_library::{Output, Pending};
+        use crate::spotify_library::{Catalog, Entry};
+        let mut app = test_app("spotify-connection-state");
+        app.backend.set_offline(true);
+        app.offline = true;
+        let entry = Entry {
+            editable: true,
+            id: "liked".into(),
+            title: "Liked Songs".into(),
+            image: None,
+            count: None,
+        };
+        app.personal.spotify = Some(Catalog {
+            account: "account".into(),
+            name: "Example".into(),
+            entries: vec![entry],
+            loaded: true,
+            error: None,
+        });
+        app.personal.spotify_resume_account = Some("account".into());
+        app.personal.tasks.insert(
+            1,
+            Pending {
+                source: None,
+                backup: false,
+                fingerprint: "spotify-account".into(),
+                epoch: 0,
+                message: String::new(),
+            },
+        );
+        app.receive_personal(
+            1,
+            Ok(Output::SpotifyCatalog(Some(Catalog {
+                account: "account".into(),
+                name: "Example".into(),
+                loaded: true,
+                error: Some("List temporarily unavailable".into()),
+                ..Default::default()
+            }))),
+        );
+        assert_eq!(app.personal.spotify.as_ref().unwrap().entries.len(), 1);
+        assert_eq!(
+            app.personal.message.as_deref(),
+            Some("List temporarily unavailable")
+        );
+        assert!(!app.personal.spotify_busy);
+        assert!(app.personal.tasks.is_empty());
+        app.personal.tasks.insert(
+            2,
+            Pending {
+                source: None,
+                backup: false,
+                fingerprint: "spotify-watch".into(),
+                epoch: 0,
+                message: String::new(),
+            },
+        );
+        app.receive_personal(2, Err("Network unavailable".into()));
+        assert!(app.personal.spotify.is_some());
+        app.personal.tasks.insert(
+            3,
+            Pending {
+                source: None,
+                backup: false,
+                fingerprint: "spotify-account".into(),
+                epoch: 0,
+                message: String::new(),
+            },
+        );
+        app.receive_personal(3, Ok(Output::SpotifyDisconnected));
+        assert!(app.personal.spotify.is_none());
+    }
+    #[test]
+    fn spotify_sync_follow_is_opt_in_and_remote_updates_keep_local_additions() {
+        use crate::personal_library::{Action as Edit, Output, Pending};
+        use crate::spotify_library::{Catalog, Entry};
+        let mut app = test_app("spotify-follow");
+        app.backend.set_offline(true);
+        app.offline = true;
+        let entry = Entry {
+            editable: true,
+            id: "1234567890123456789012".into(),
+            title: "Example".into(),
+            image: None,
+            count: None,
+        };
+        let source = entry.source("account");
+        let key = crate::spotify_sync::account_key("account");
+        app.personal.spotify = Some(Catalog {
+            account: "account".into(),
+            name: "Example".into(),
+            entries: vec![entry.clone()],
+            ..Default::default()
+        });
+        let song = |id: &str| crate::player::LocalTrack {
+            uri: format!("spotify:track:{id:0<22}"),
+            ..Default::default()
+        };
+        let list = crate::addons::Collection {
+            source: source.clone(),
+            title: "Example".into(),
+            tracks: vec![song("original"), song("pending")],
+            ..Default::default()
+        };
+        for follow in [false, true] {
+            app.apply_personal(Edit::SpotifyImport {
+                selected: vec![entry.id.clone()],
+                backup: false,
+                follow,
+            });
+            let request = *app.personal.tasks.keys().next().unwrap();
+            app.receive_personal(request, Ok(Output::Imported(list.clone())));
+            assert_eq!(app.settings.spotify_playlists.contains_key(&source), follow);
+        }
+        for (request, account, expected) in [
+            (100, "other", 2),
+            (101, key.as_str(), 3),
+            (102, key.as_str(), 3),
+        ] {
+            app.personal.tasks.insert(
+                request,
+                Pending {
+                    source: Some(source.clone()),
+                    backup: false,
+                    fingerprint: "spotify-watch".into(),
+                    epoch: 0,
+                    message: String::new(),
+                },
+            );
+            app.receive_personal(
+                request,
+                Ok(Output::SpotifyChanged {
+                    source: source.clone(),
+                    account: account.into(),
+                    snapshot: "revision".into(),
+                    collection: Some(crate::addons::Collection {
+                        source: source.clone(),
+                        tracks: vec![song("original"), song("new")],
+                        ..Default::default()
+                    }),
+                }),
+            );
+            let current = app.source_collection(&source).unwrap();
+            assert_eq!(current.tracks.len(), expected);
+            assert!(current.tracks.iter().any(|t| t.uri == song("pending").uri));
+        }
+        assert_eq!(app.settings.spotify_playlists[&source].snapshot, "revision");
+    }
+    #[test]
+    fn spotify_sync_ignores_late_search_and_previous_account_write_events() {
+        use crate::personal_library::{Dialog, Output, Pending};
+        let mut app = test_app("spotify-stale");
+        app.backend.set_offline(true);
+        app.offline = true;
+        app.personal.spotify = Some(crate::spotify_library::Catalog {
+            account: "current".into(),
+            name: "Example".into(),
+            entries: vec![],
+            ..Default::default()
+        });
+        app.personal.spotify_search_serial = 2;
+        app.personal.dialog = Some(Dialog::SpotifyAdd {
+            source: Default::default(),
+            query: String::new(),
+            results: Loadable::Loading,
+            selected: None,
+            destination: None,
+            local_source: None,
+            local: true,
+            backup: false,
+        });
+        app.personal.tasks.insert(
+            1,
+            Pending {
+                source: None,
+                backup: false,
+                fingerprint: "spotify-search:1".into(),
+                epoch: 0,
+                message: String::new(),
+            },
+        );
+        app.receive_personal(
+            1,
+            Ok(Output::SpotifyMatches {
+                serial: 1,
+                tracks: vec![],
+            }),
+        );
+        assert!(matches!(
+            app.personal.dialog,
+            Some(Dialog::SpotifyAdd {
+                results: Loadable::Loading,
+                ..
+            })
+        ));
+        app.receive_spotify_addition(
+            "previous".into(),
+            "liked".into(),
+            vec!["spotify:track:1234567890123456789012".into()],
+            None,
+        );
+        assert!(app.personal.spotify_pending.is_empty());
+        assert!(app.personal.message.is_none());
+    }
+    #[test]
+    fn spotify_import_is_sequential_and_failure_preserves_completed_and_existing_copies() {
+        use crate::personal_library::{Action as Edit, Output};
+        use crate::spotify_library::{Catalog, Entry};
+        let mut app = test_app("spotify-import-batch");
+        app.backend.set_offline(true);
+        app.offline = true;
+        app.settings.welcome_completed = true;
+        let entries: Vec<_> = ["1234567890123456789012", "2234567890123456789012"]
+            .into_iter()
+            .map(|id| Entry {
+                editable: true,
+                id: id.into(),
+                title: "Example playlist".into(),
+                image: None,
+                count: Some(0),
+            })
+            .collect();
+        let original = crate::addons::Collection {
+            source: entries[1].source("account"),
+            title: "Existing copy".into(),
+            ..Default::default()
+        };
+        app.addons.collections.push(original.clone());
+        app.personal.spotify = Some(Catalog {
+            account: "account".into(),
+            name: "Example".into(),
+            entries: entries.clone(),
+            ..Default::default()
+        });
+        app.apply_personal(Edit::SpotifyImport {
+            selected: entries.iter().map(|e| e.id.clone()).collect(),
+            backup: false,
+            follow: false,
+        });
+        assert_eq!(app.personal.tasks.len(), 1);
+        assert_eq!(app.personal.spotify_queue.len(), 1);
+        let request = *app.personal.tasks.keys().next().unwrap();
+        app.receive_personal(
+            request,
+            Ok(Output::Imported(crate::addons::Collection {
+                source: entries[0].source("account"),
+                title: "Imported copy".into(),
+                ..Default::default()
+            })),
+        );
+        assert_eq!(app.personal.tasks.len(), 1);
+        assert_eq!(app.personal.spotify_queue.len(), 0);
+        assert!(
+            app.source_collection(&entries[0].source("account"))
+                .is_some()
+        );
+        let request = *app.personal.tasks.keys().next().unwrap();
+        app.receive_personal(request, Err("Spotify is limiting library reads".into()));
+        assert!(!app.personal.spotify_importing);
+        assert!(app.personal.tasks.is_empty());
+        assert_eq!(app.source_collection(&original.source), Some(&original));
+        assert_eq!(app.addons.collections.len(), 2);
+    }
+    #[test]
+    fn spotify_import_youtube_copy_is_opt_in_and_account_bound() {
+        use crate::personal_library::{Output, Pending};
+        let mut app = test_app("spotify-import-backup");
+        app.backend.set_offline(true);
+        app.offline = true;
+        app.personal.scope = Some("youtube-account".into());
+        app.music_accounts[0].connected = true;
+        app.music_accounts_serial[0] = 3;
+        for (id, kind, epoch, expected) in [
+            (1, "spotify-import", 3, false),
+            (2, "spotify-import-backup", 2, false),
+            (3, "spotify-import-backup", 3, true),
+        ] {
+            let source = crate::personal_library::new_source();
+            app.personal.tasks.insert(
+                id,
+                Pending {
+                    source: Some(source.clone()),
+                    backup: false,
+                    fingerprint: kind.into(),
+                    epoch,
+                    message: String::new(),
+                },
+            );
+            app.receive_personal(
+                id,
+                Ok(Output::Imported(crate::addons::Collection {
+                    source: source.clone(),
+                    title: "Imported".into(),
+                    ..Default::default()
+                })),
+            );
+            assert_eq!(
+                app.settings.playlist_backups.contains_key(&source),
+                expected
+            );
+        }
+    }
+    #[test]
+    fn spotify_import_does_not_send_later_batch_entries_to_a_changed_youtube_account() {
+        use crate::personal_library::{Action as Edit, Output};
+        use crate::spotify_library::{Catalog, Entry};
+        let mut app = test_app("spotify-import-batch-account");
+        app.backend.set_offline(true);
+        app.offline = true;
+        app.settings.welcome_completed = true;
+        app.music_accounts[0].connected = true;
+        app.music_accounts_serial[0] = 3;
+        app.personal.scope = Some("youtube-one".into());
+        let entries: Vec<_> = ["1234567890123456789012", "2234567890123456789012"]
+            .into_iter()
+            .map(|id| Entry {
+                editable: true,
+                id: id.into(),
+                title: "Playlist".into(),
+                image: None,
+                count: None,
+            })
+            .collect();
+        app.personal.spotify = Some(Catalog {
+            account: "spotify".into(),
+            name: "Example".into(),
+            entries: entries.clone(),
+            ..Default::default()
+        });
+        app.apply_personal(Edit::SpotifyImport {
+            selected: entries.iter().map(|e| e.id.clone()).collect(),
+            backup: true,
+            follow: false,
+        });
+        let request = *app.personal.tasks.keys().next().unwrap();
+        assert_eq!(
+            app.personal.tasks[&request].fingerprint,
+            "spotify-import-backup"
+        );
+        app.music_accounts_serial[0] = 4;
+        app.personal.scope = Some("youtube-two".into());
+        app.receive_personal(
+            request,
+            Ok(Output::Imported(crate::addons::Collection {
+                source: entries[0].source("spotify"),
+                title: "First copy".into(),
+                ..Default::default()
+            })),
+        );
+        let next = app
+            .personal
+            .tasks
+            .values()
+            .find(|p| p.fingerprint.starts_with("spotify-import"))
+            .unwrap();
+        assert_eq!(next.fingerprint, "spotify-import");
+        assert!(app.settings.playlist_backups.is_empty());
     }
 
     /// #623: the missing-output message the sink reports is the one the

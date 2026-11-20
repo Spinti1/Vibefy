@@ -1027,21 +1027,6 @@ fn item_menu_at(
     }
     super::personal_library::song_menu(ui, app, std::slice::from_ref(item), context);
     if uri.starts_with("vibefy:") {
-        if app.is_connected()
-            && let PlayableItem::Track(track) = item
-            && menu_item(
-                ui,
-                &palette,
-                Some(Icon::ListPlus),
-                "Add to Spotify playlist…",
-            )
-        {
-            app.actions.push(Action::FindSpotifyTrack {
-                source: track.clone(),
-                query: format!("{} {}", track.name, track.artist_names()),
-            });
-            ui.close();
-        }
         if let Some(url) = crate::addons::direct_url(&uri) {
             if menu_item(ui, &palette, Some(Icon::ExternalLink), "Open source") {
                 app.actions.push(Action::OpenUrl(url.clone()));

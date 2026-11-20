@@ -37,6 +37,14 @@ impl App {
         self.backend.send(Command::Personal { request, task });
     }
     pub(super) fn tick_personal_library(&mut self) {
+        self.tick_spotify_copies();
+        let revision=self.addons.collections_revision;
+        if self.settings.phone_playlist_sharing && self.personal.phone_revision!=Some(revision){self.personal.phone_revision=Some(revision);self.personal.phone_due=Some(std::time::Instant::now()+std::time::Duration::from_secs(3));}
+        if self.personal.phone_due.is_some_and(|t|t<=std::time::Instant::now()) && !self.personal.tasks.values().any(|p|p.fingerprint.starts_with("phone-")) {
+            self.personal.phone_due=None;
+            self.personal_request(Task::PhoneSync(self.addons.collections.clone()),None,false,"phone-sync".into(),"Updating shared playlists…");
+        }
+
         if self.personal.checked_revision != Some(self.addons.collections_revision) {
             self.personal.current = self
                 .addons
@@ -55,14 +63,17 @@ impl App {
             self.settings.welcome_completed = true;
             self.settings_dirty = true;
             self.backend.send(Command::GuestPlayback(true));
-            if !self.settings.playlist_snapshot_recovery_v1 {
-                self.personal_request(
-                    Task::RecoverLegacy,
-                    None,
-                    false,
-                    String::new(),
-                    "Restoring saved playlist snapshots…",
-                );
+            // Retired snapshots must not silently repopulate a user's Home.
+            self.settings.playlist_snapshot_recovery_v1 = true;
+            if !self.settings.legacy_recovery_hidden_v1 {
+                for collection in &self.addons.collections {
+                    if library::legacy_recovered(collection) {
+                        self.actions.push(crate::model::Action::SetPlaylistHidden {
+                            source: collection.source.clone(), hidden: true,
+                        });
+                    }
+                }
+                self.settings.legacy_recovery_hidden_v1 = true;
             }
         }
         let observed = self.music_accounts[0]
@@ -86,7 +97,10 @@ impl App {
                 self.personal.observed = None;
             }
         }
-        if self.music_accounts[0].busy || self.personal.tasks.values().any(|p| p.backup) {
+        if self.personal.spotify_importing
+            || self.music_accounts[0].busy
+            || self.personal.tasks.values().any(|p| p.backup)
+        {
             return;
         }
         let Some(scope) = self.personal.scope.clone() else {
@@ -111,6 +125,217 @@ impl App {
     }
     pub(super) fn apply_personal(&mut self, action: Edit) {
         match action {
+            Edit::PhoneClose => {self.personal.phone_dialog=false;},
+            Edit::PhoneShare {source,revoke} => {
+                if self.personal.tasks.values().any(|p|p.fingerprint.starts_with("phone-")){return;}
+                self.settings.phone_playlist_sharing=true;self.settings_dirty=true;self.personal.phone_dialog=true;self.personal.phone_panel=None;self.personal.phone_status=if revoke {"Disabling sharing…"}else{"Preparing your playlist link…"}.into();
+                if let Some(collection)=self.source_collection(&source).cloned(){self.personal_request(Task::PhoneShare{collection,revoke},Some(source),false,"phone-open".into(),"Preparing phone share…");}
+                else {self.personal.phone_status="Open this playlist once to load its songs, then choose Share to phone.".into();}
+            },
+
+            Edit::SpotifyOpen => {
+                self.personal.message = None;
+                self.personal.dialog = Some(library::Dialog::Spotify {
+                    backup: false,
+                    selected: Default::default(),
+                    follow: false,
+                });
+                if self
+                    .personal
+                    .spotify
+                    .as_ref()
+                    .is_none_or(|c| c.entries.is_empty())
+                {
+                    self.apply_personal(Edit::SpotifyLoad { connect: false });
+                }
+            }
+            Edit::SpotifyLoad { connect } => {
+                if self.personal.spotify_busy || self.personal.spotify_importing {
+                    return;
+                }
+                self.personal.spotify_busy = true;
+                self.personal.message = None;
+                self.personal_request(
+                    Task::SpotifyLoad { connect },
+                    Some("spotify-account".into()),
+                    false,
+                    "spotify-account".into(),
+                    if connect {
+                        "Finish signing in in the Spotify window…"
+                    } else {
+                        "Checking your Spotify connection…"
+                    },
+                );
+            }
+            Edit::SpotifyDisconnect => {
+                if self.personal.spotify_busy || self.personal.spotify_importing {
+                    return;
+                }
+                self.backend.send(Command::CancelSpotifyImports);
+                self.personal
+                    .tasks
+                    .retain(|_, p| !p.fingerprint.starts_with("spotify-"));
+                self.personal.spotify_probe_tried = true;
+                self.personal.spotify_resume_account = None;
+                self.personal.spotify_busy = true;
+                self.personal_request(
+                    Task::SpotifyDisconnect,
+                    Some("spotify-account".into()),
+                    false,
+                    "spotify-account".into(),
+                    "Disconnecting Spotify…",
+                );
+            }
+            Edit::SpotifyImport {
+                selected,
+                backup,
+                follow,
+            } => {
+                if self.personal.spotify_busy || self.personal.spotify_importing {
+                    return;
+                }
+                let Some(catalog) = &self.personal.spotify else {
+                    return;
+                };
+                self.personal.spotify_queue = catalog
+                    .entries
+                    .iter()
+                    .filter(|entry| selected.contains(&entry.id))
+                    .cloned()
+                    .collect();
+                if self.personal.spotify_queue.is_empty() {
+                    return;
+                }
+                let new_count = self
+                    .personal
+                    .spotify_queue
+                    .iter()
+                    .filter(|entry| {
+                        self.source_collection(&entry.source(&catalog.account))
+                            .is_none()
+                    })
+                    .count();
+                if self.addons.collections.len() + new_count > library::MAX_LISTS {
+                    self.personal.message = Some(format!(
+                        "Choose fewer playlists. Vibefy can store {} local playlists; your existing copies are kept.",
+                        library::MAX_LISTS
+                    ));
+                    self.personal.spotify_queue.clear();
+                    return;
+                }
+                self.personal.spotify_importing = true;
+                self.personal.spotify_backup = backup;
+                self.personal.spotify_follow = follow;
+                self.personal.spotify_backup_epoch = self.music_accounts_serial[0];
+                self.personal.spotify_completed = 0;
+                self.personal.spotify_total = self.personal.spotify_queue.len();
+                self.personal.dialog = None;
+                self.open(Page::Home);
+                self.next_spotify_import();
+            }
+            Edit::SpotifyToggleSync { source, enabled } => {
+                if let Some(binding) = self.settings.spotify_playlists.get_mut(&source) {
+                    binding.writes = enabled;
+                    self.settings_dirty = true;
+                }
+            }
+            Edit::SpotifySong {
+                source,
+                local_source,
+            } => {
+                self.personal.spotify_search_serial =
+                    self.personal.spotify_search_serial.wrapping_add(1);
+                let selected = crate::spotify_match::valid_uri(&source.uri).then(|| source.clone());
+                let destination = local_source
+                    .as_ref()
+                    .and_then(|s| self.settings.spotify_playlists.get(s))
+                    .map(|b| b.id.clone());
+                self.personal.dialog = Some(library::Dialog::SpotifyAdd {
+                    query: format!("{} {}", source.name, source.artist_names()),
+                    source,
+                    results: crate::model::Loadable::NotLoaded,
+                    selected,
+                    destination,
+                    local_source,
+                    local: true,
+                    backup: false,
+                });
+                if self
+                    .personal
+                    .spotify
+                    .as_ref()
+                    .is_none_or(|c| c.entries.is_empty())
+                {
+                    self.apply_personal(Edit::SpotifyLoad { connect: false });
+                }
+            }
+            Edit::SpotifyFind { source, query } => {
+                let Some(account) = self
+                    .personal
+                    .spotify
+                    .as_ref()
+                    .map(|c| crate::spotify_sync::account_key(&c.account))
+                else {
+                    return;
+                };
+                let query = query.trim().chars().take(200).collect::<String>();
+                if query.is_empty() {
+                    return;
+                }
+                self.personal.spotify_search_serial =
+                    self.personal.spotify_search_serial.wrapping_add(1);
+                let serial = self.personal.spotify_search_serial;
+                if let Some(library::Dialog::SpotifyAdd {
+                    results, selected, ..
+                }) = &mut self.personal.dialog
+                {
+                    *results = crate::model::Loadable::Loading;
+                    *selected = None;
+                }
+                self.personal_request(
+                    Task::SpotifySearch {
+                        serial,
+                        source,
+                        query,
+                        account,
+                    },
+                    None,
+                    false,
+                    format!("spotify-search:{serial}"),
+                    "Searching Spotify recordings…",
+                );
+            }
+            Edit::SpotifyChoose(uri) => {
+                if let Some(library::Dialog::SpotifyAdd {
+                    results: crate::model::Loadable::Loaded(tracks),
+                    selected,
+                    ..
+                }) = &mut self.personal.dialog
+                {
+                    if let Some(track) = tracks.iter().find(|t| t.uri == uri) {
+                        *selected = Some(track.clone());
+                    }
+                }
+            }
+            Edit::SpotifySend => self.send_spotify_song(),
+            Edit::SpotifyLocalOnly => {
+                if let Some(library::Dialog::SpotifyAdd {
+                    source,
+                    local_source: Some(target),
+                    ..
+                }) = self.personal.dialog.clone()
+                {
+                    if let Some(mut list) = self.source_collection(&target).cloned() {
+                        library::append(
+                            &mut list,
+                            vec![crate::playlist_tools::local_track(&source)],
+                        );
+                        if self.save_source_collection(list) {
+                            self.personal.dialog = None;
+                        }
+                    }
+                }
+            }
             Edit::Show(dialog) => {
                 self.personal.seed_tracks.clear();
                 self.personal.message = None;
@@ -173,17 +398,43 @@ impl App {
             Edit::Delete(source) => {
                 self.addons.collections.retain(|c| c.source != source);
                 self.settings.playlist_backups.remove(&source);
+                self.settings.spotify_playlists.remove(&source);
                 self.settings_dirty = true;
                 self.personal_changed();
                 self.personal.dialog = None;
                 self.open(Page::Home);
             }
             Edit::Add { source, tracks } => {
+                if self
+                    .settings
+                    .spotify_playlists
+                    .get(&source)
+                    .is_some_and(|b| b.writes)
+                {
+                    if tracks.len() != 1 {
+                        self.personal.message = Some(
+                            "Select one song at a time to confirm its Spotify recording.".into(),
+                        );
+                        return;
+                    }
+                    let item = tracks[0].to_playable_item();
+                    if let crate::api::models::PlayableItem::Track(track) = item {
+                        self.apply_personal(Edit::SpotifySong {
+                            source: track,
+                            local_source: Some(source),
+                        });
+                    }
+                    return;
+                }
                 if let Some(mut list) = self
                     .addons
                     .collections
                     .iter()
-                    .find(|c| c.source == source && library::owned(&source))
+                    .find(|c| {
+                        c.source == source
+                            && (library::owned(&source)
+                                || self.settings.spotify_playlists.contains_key(&source))
+                    })
                     .cloned()
                 {
                     library::append(&mut list, tracks);
@@ -319,7 +570,73 @@ impl App {
         {
             return;
         }
+        let spotify_import = pending.fingerprint.starts_with("spotify-import");
+        if let Some(serial) = pending
+            .fingerprint
+            .strip_prefix("spotify-search:")
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            if serial != self.personal.spotify_search_serial {
+                return;
+            }
+        }
+        if pending.fingerprint == "spotify-account" {
+            self.personal.spotify_busy = false;
+        }
+        if pending.fingerprint.starts_with("phone-") {
+            match result {
+                Ok(Output::PhoneShared(panel))=>{self.personal.phone_panel=panel;self.personal.phone_status=if self.personal.phone_panel.is_some(){"Scan with your phone camera. No account is required."}else{"Sharing disabled. Existing phone copies are kept."}.into();},
+                Ok(Output::PhoneSynced)=>{},
+                Err(error)=>{self.personal.phone_status=error;self.personal.phone_due=Some(std::time::Instant::now()+std::time::Duration::from_secs(60));},
+                _=>{},
+            }
+            return;
+        }
+        let mut failed = result.is_err();
+        let imported_editable = match &result {
+            Ok(Output::SpotifyImported { editable, .. }) => Some(*editable),
+            _ => None,
+        };
         match result {
+            Ok(Output::PhoneShared(_) | Output::PhoneSynced) => {},
+            Ok(Output::SpotifyMatches{serial,tracks}) => {
+                if serial==self.personal.spotify_search_serial {
+                    if let Some(library::Dialog::SpotifyAdd{results,..})=&mut self.personal.dialog {*results=crate::model::Loadable::Loaded(tracks);}
+                }
+            }
+            Ok(Output::SpotifyChanged{source,account,snapshot,collection}) => {
+                if self.personal.spotify.as_ref().is_none_or(|c|crate::spotify_sync::account_key(&c.account)!=account) {return;}
+                if self.settings.spotify_playlists.get(&source).is_none_or(|b|b.account!=account) {return;}
+                if let Some(remote)=collection {
+                    if let Some(mut local)=self.source_collection(&source).cloned() {
+                        if crate::spotify_sync::append_remote(&mut local,remote.tracks)>0 && !self.save_source_collection(local) {return;}
+                    }
+                }
+                if let Some(binding)=self.settings.spotify_playlists.get_mut(&source) {binding.snapshot=snapshot;self.settings_dirty=true;}
+            }
+            Ok(Output::SpotifyCatalog(mut catalog)) => {
+                if let (Some(next),Some(previous))=(&mut catalog,&self.personal.spotify) {
+                    if next.account==previous.account && next.error.is_some() && (previous.loaded || !previous.entries.is_empty()) {
+                        next.entries=previous.entries.clone();
+                    }
+                }
+                if let Some(catalog)=&catalog {
+                    self.personal.message=catalog.error.clone();
+                }
+                self.personal.spotify = catalog;
+                if let Some(library::Dialog::Spotify { selected, .. }) = &mut self.personal.dialog { selected.clear(); }
+                if let Some(account)=self.personal.spotify.as_ref().map(|c|c.account.clone()) {
+                    if self.personal.spotify_resume_account.as_deref()!=Some(account.as_str()) {
+                        self.backend.send(Command::ResumeSpotifyAdditions(account.clone()));
+                        self.personal.spotify_resume_account=Some(account);
+                    }
+                    if self.personal.spotify.as_ref().is_some_and(|c|!c.loaded) {self.apply_personal(Edit::SpotifyLoad{connect:false});}
+                }
+            }
+            Ok(Output::SpotifyDisconnected) => {
+                self.personal.spotify = None;
+                self.personal.message = Some("Spotify disconnected. Your imported playlists are kept.".into());
+            }
             Ok(Output::LegacyRecovered(collections)) => {
                 match crate::playlist_recovery::merge(&mut self.addons.collections, collections) {
                     Ok(count) => {
@@ -340,9 +657,37 @@ impl App {
                 self.personal.scope=Some(scope);self.personal.backups.insert(source.clone(),report);
                 self.personal.dialog=None;self.open(Page::LocalCollection(source));
             }
-            Ok(Output::Imported(collection))=>{
+            Ok(Output::Imported(collection) | Output::SpotifyImported{collection,..})=>{
                 let source=collection.source.clone();
-                if self.save_source_collection(collection) {self.personal.dialog=None;self.open(Page::LocalCollection(source.clone()));self.personal.message=Some("Playlist imported and saved on this device".into());if pending.fingerprint=="backup" && pending.epoch==self.music_accounts_serial[0] {self.apply_personal(Edit::Backup(source));}}
+                if let Some(editable)=imported_editable {
+                    if let Some(catalog)=&mut self.personal.spotify {
+                        if let Some(entry)=catalog.entries.iter_mut().find(|e|e.source(&catalog.account)==source) {entry.editable=editable;}
+                    }
+                }
+                if self.save_source_collection(collection) {
+                    if spotify_import {
+                        if let Some(catalog)=&self.personal.spotify {
+                            if self.personal.spotify_follow {
+                                if let Some(entry)=catalog.entries.iter().find(|e|e.source(&catalog.account)==source) {
+                                    self.settings.spotify_playlists.insert(source.clone(),crate::spotify_sync::Binding{account:crate::spotify_sync::account_key(&catalog.account),id:entry.id.clone(),writes:entry.editable,snapshot:String::new()});
+                                    self.settings_dirty=true;
+                                }
+                            } else {self.settings.spotify_playlists.remove(&source);self.settings_dirty=true;}
+                        }
+                    }
+                    self.personal.dialog=None;
+                    if !spotify_import {self.open(Page::LocalCollection(source.clone()));}
+                    self.personal.message=Some("Playlist imported and saved on this device".into());
+                    if matches!(pending.fingerprint.as_str(),"backup"|"spotify-import-backup") && pending.epoch==self.music_accounts_serial[0] {
+                        if spotify_import {
+                            if let Some(scope)=self.personal.scope.clone() {
+                                self.settings.playlist_backups.insert(source,scope);
+                                self.personal.checked_revision=None;
+                                self.settings_dirty=true;
+                            }
+                        } else {self.apply_personal(Edit::Backup(source));}
+                    }
+                } else { failed=true; }
             }
             Ok(Output::Restored(lists))=>{
                 match crate::playlist_backup::merge(&mut self.addons.collections, lists) {
@@ -357,8 +702,282 @@ impl App {
                 self.personal.backups.insert(source,report);
             }
             Err(error)=>{
+                if pending.fingerprint=="spotify-watch" {
+                    let wait=crate::spotify_library::retry_remaining();
+                    if wait>0 {self.personal.spotify_poll_due=Some(std::time::Instant::now()+std::time::Duration::from_secs(wait));}
+                    else {self.personal.spotify_poll_due=Some(std::time::Instant::now()+std::time::Duration::from_secs(60));}
+                }
+                if pending.fingerprint.starts_with("spotify-search:") {
+                    if let Some(library::Dialog::SpotifyAdd{results,..})=&mut self.personal.dialog {*results=crate::model::Loadable::Failed(error.clone());}
+                }
                 if pending.backup && let Some(source)=pending.source {self.personal.backups.entry(source).or_default().message=Some(error.clone());}
                 if !error.contains("selection cancelled") {self.personal.message=Some(error);}
+            }
+        }
+        if spotify_import {
+            if failed {
+                self.personal.spotify_queue.clear();
+                self.personal.spotify_importing = false;
+                if let Some(message) = &mut self.personal.message {
+                    message.push_str(" Completed local imports were kept. Select the remaining playlists to retry.");
+                }
+            } else {
+                self.personal.spotify_completed += 1;
+                self.next_spotify_import();
+            }
+        }
+    }
+    fn next_spotify_import(&mut self) {
+        if self.personal.spotify_backup_epoch != self.music_accounts_serial[0] {
+            self.personal.spotify_backup = false;
+        }
+        let Some(entry) = self.personal.spotify_queue.pop_front() else {
+            self.personal.spotify_importing = false;
+            self.personal.message = Some(format!(
+                "Imported {} Spotify collections. Saved locally{}.",
+                self.personal.spotify_completed,
+                if self.personal.spotify_backup {
+                    "; selected YouTube copies are being saved separately"
+                } else {
+                    ""
+                }
+            ));
+            return;
+        };
+        let Some(account) = self.personal.spotify.as_ref().map(|c| c.account.clone()) else {
+            self.personal.spotify_importing = false;
+            self.personal.spotify_queue.clear();
+            return;
+        };
+        let source = entry.source(&account);
+        let message = format!(
+            "Importing Spotify · {}/{} · {}",
+            self.personal.spotify_completed + 1,
+            self.personal.spotify_total,
+            entry.title
+        );
+        self.personal_request(
+            Task::SpotifyImport { entry, account },
+            Some(source),
+            false,
+            if self.personal.spotify_backup {
+                "spotify-import-backup"
+            } else {
+                "spotify-import"
+            }
+            .into(),
+            &message,
+        );
+    }
+    fn tick_spotify_copies(&mut self) {
+        if !self.library_access()
+            || self.personal.spotify_busy
+            || self.personal.spotify_importing
+            || self.personal.tasks.values().any(|p| p.backup)
+        {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if self.personal.spotify_poll_due.is_some_and(|due| now < due) {
+            return;
+        }
+        if self.personal.tasks.values().any(|p| {
+            p.fingerprint.starts_with("spotify-watch") || p.fingerprint == "spotify-account"
+        }) {
+            return;
+        }
+        if self.personal.spotify.is_none() {
+            if !self.personal.spotify_probe_tried {
+                self.personal.spotify_probe_tried = true;
+                self.personal.spotify_busy = true;
+                self.personal_request(
+                    Task::SpotifyProbe,
+                    None,
+                    false,
+                    "spotify-account".into(),
+                    "Restoring the selected Spotify playlist connection…",
+                );
+            }
+            return;
+        }
+        let account =
+            crate::spotify_sync::account_key(&self.personal.spotify.as_ref().unwrap().account);
+        let next = self
+            .settings
+            .spotify_playlists
+            .iter()
+            .filter(|(source, b)| {
+                b.account == account
+                    && self.source_collection(source).is_some()
+                    && self
+                        .personal
+                        .spotify_checked
+                        .get(*source)
+                        .is_none_or(|last| {
+                            now.duration_since(*last) >= std::time::Duration::from_secs(15 * 60)
+                        })
+            })
+            .min_by_key(|(source, _)| self.personal.spotify_checked.get(*source).copied())
+            .map(|(s, b)| (s.clone(), b.clone()));
+        if let Some((source, binding)) = next {
+            self.personal.spotify_checked.insert(source.clone(), now);
+            self.personal.spotify_poll_due = Some(now + std::time::Duration::from_secs(20));
+            self.personal_request(
+                Task::SpotifyWatch {
+                    source: source.clone(),
+                    binding,
+                },
+                Some(source),
+                false,
+                "spotify-watch".into(),
+                "Checking selected Spotify playlist additions…",
+            );
+        }
+    }
+    fn send_spotify_song(&mut self) {
+        let Some(library::Dialog::SpotifyAdd {
+            selected: Some(track),
+            destination: Some(id),
+            local_source,
+            local,
+            backup,
+            ..
+        }) = self.personal.dialog.clone()
+        else {
+            return;
+        };
+        let Some(catalog) = self.personal.spotify.clone() else {
+            return;
+        };
+        let Some(entry) = catalog
+            .entries
+            .iter()
+            .find(|e| e.id == id && e.editable)
+            .cloned()
+        else {
+            return;
+        };
+        if !crate::spotify_sync::valid_addition(&id, &[track.uri.clone()]) {
+            return;
+        }
+        let key = crate::spotify_sync::account_key(&catalog.account);
+        let source = local_source.unwrap_or_else(|| entry.source(&catalog.account));
+        if self
+            .settings
+            .spotify_playlists
+            .get(&source)
+            .is_some_and(|b| b.account != key || b.id != id)
+        {
+            self.personal.message =
+                Some("Reconnect the Spotify account associated with this copy.".into());
+            return;
+        }
+        if local {
+            let mut list = self.source_collection(&source).cloned().unwrap_or_else(|| {
+                crate::addons::Collection {
+                    source: source.clone(),
+                    title: entry.title.clone(),
+                    image: entry.image.clone(),
+                    owner: Some("Spotify copy · Additions only".into()),
+                    ..Default::default()
+                }
+            });
+            let mut song = crate::playlist_tools::local_track(&track);
+            if track.explicit {
+                song.album.push_str(" [Explicit]");
+            }
+            library::append(&mut list, vec![song]);
+            if !self.save_source_collection(list) {
+                return;
+            }
+            self.settings
+                .spotify_playlists
+                .entry(source.clone())
+                .or_insert(crate::spotify_sync::Binding {
+                    account: key,
+                    id: id.clone(),
+                    writes: true,
+                    snapshot: String::new(),
+                });
+            self.settings_dirty = true;
+            if backup {
+                self.apply_personal(Edit::Backup(source.clone()));
+            }
+        }
+        self.personal
+            .spotify_pending
+            .insert((source.clone(), track.uri.clone()));
+        self.backend
+            .send(Command::SpotifyAddition(crate::playlist_outbox::Addition {
+                account: catalog.account,
+                playlist_id: id,
+                playlist_name: entry.title,
+                uris: vec![track.uri],
+                position: None,
+            }));
+        self.personal.dialog = None;
+        self.personal.message = Some(
+            if local {
+                "Saved in Vibefy. The Spotify addition is pending; you can keep listening."
+            } else {
+                "Spotify addition pending. You can keep listening."
+            }
+            .into(),
+        );
+    }
+    pub(super) fn receive_spotify_addition(
+        &mut self,
+        account: String,
+        playlist: String,
+        uris: Vec<String>,
+        result: Option<Result<(), String>>,
+    ) {
+        if self
+            .personal
+            .spotify
+            .as_ref()
+            .is_none_or(|c| c.account != account)
+        {
+            return;
+        }
+        let entry = crate::spotify_library::Entry {
+            editable: true,
+            id: playlist,
+            title: String::new(),
+            image: None,
+            count: None,
+        };
+        let source = entry.source(&account);
+        for uri in uris {
+            if result.is_none() {
+                self.personal.spotify_pending.insert((source.clone(), uri));
+            } else {
+                self.personal.spotify_pending.remove(&(source.clone(), uri));
+            }
+        }
+        if let Some(result) = result {
+            match result {
+                Ok(()) => {
+                    self.personal.spotify_checked.remove(&source);
+                    self.personal.message = Some(
+                        if self.source_collection(&source).is_some() {
+                            "Song added to Spotify. Your Vibefy copy is saved."
+                        } else {
+                            "Song added to Spotify."
+                        }
+                        .into(),
+                    );
+                }
+                Err(error) => {
+                    self.personal.message = Some(format!(
+                        "{}Spotify: {error}",
+                        if self.source_collection(&source).is_some() {
+                            "Saved in Vibefy. "
+                        } else {
+                            ""
+                        }
+                    ))
+                }
             }
         }
     }

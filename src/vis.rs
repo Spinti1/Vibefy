@@ -88,18 +88,26 @@ impl AudioTap {
     /// The `count` samples ending `lag` samples before the newest, with
     /// silence where there is less than that.
     pub fn window(&self, count: usize, lag: usize) -> Vec<f32> {
+        let mut out = vec![0.0; count];
+        self.window_into(&mut out, lag);
+        out
+    }
+
+    /// Copies the same window into caller-owned storage without a heap allocation.
+    pub fn window_into(&self, out: &mut [f32], lag: usize) {
         let samples = self.samples.lock().unwrap_or_else(|p| p.into_inner());
         let end = samples.len().saturating_sub(lag);
-        let start = end.saturating_sub(count);
-        let mut out = vec![0.0; count];
-        let taken = end - start;
-        for (slot, sample) in out[count - taken..]
-            .iter_mut()
-            .zip(samples.range(start..end))
-        {
-            *slot = *sample;
-        }
-        out
+        let start = end.saturating_sub(out.len());
+        let padding = out.len() - (end - start);
+        out[..padding].fill(0.0);
+        let (head, tail) = samples.as_slices();
+        let first_end = end.min(head.len());
+        let first_start = start.min(first_end);
+        let first_len = first_end - first_start;
+        out[padding..padding + first_len].copy_from_slice(&head[first_start..first_end]);
+        let tail_start = start.saturating_sub(head.len());
+        let tail_end = end.saturating_sub(head.len());
+        out[padding + first_len..].copy_from_slice(&tail[tail_start..tail_end]);
     }
 
     pub fn clear(&self) {

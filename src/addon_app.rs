@@ -187,6 +187,7 @@ impl App {
                 }
             }
             AddonCommand::ConfigureVisual(mut config) => {
+                config = config.sanitized();
                 config.style = config.style.min(
                     if self.settings.addons.visualizer == Some(Id::SoundVisualizer) {
                         11
@@ -224,6 +225,11 @@ impl App {
                     self.stop_peek(true);
                     self.addons.jam_message = None;
                     self.addons.jam = Some(crate::jam::Session::start_host());
+                    self.addons.jam_monitor_open = true;
+                    self.backend
+                        .send(Command::JamHost(std::sync::Arc::downgrade(
+                            &self.addons.jam.as_ref().unwrap().shared,
+                        )));
                     self.addons.pending_sync = None;
                 }
             }
@@ -246,6 +252,23 @@ impl App {
                 self.addons.jam = None;
                 self.addons.jam_tracks.clear();
                 self.addons.pending_sync = None;
+            }
+            AddonCommand::JamMonitor(open) => self.addons.jam_monitor_open = open,
+            AddonCommand::JamDetails => {
+                self.addons.jam_monitor_open = false;
+                self.show_listen_together = true;
+            }
+            AddonCommand::JamPlayQueue { index, uri } => {
+                let accepted = self
+                    .addons
+                    .jam
+                    .as_ref()
+                    .is_some_and(|session| session.play_queue(index, &uri));
+                self.toast(if accepted {
+                    "Starting queued song…"
+                } else {
+                    "Jam queue changed or the host is reconnecting. Try again."
+                });
             }
         }
     }
@@ -450,32 +473,22 @@ impl App {
         if self.addons.fullscreen && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.leave_addon_fullscreen(ctx);
         }
+        let notifications = self
+            .addons
+            .jam
+            .as_ref()
+            .map(|session| session.take_notifications())
+            .unwrap_or_default();
+        for notification in notifications {
+            self.toast(notification);
+        }
         let Some(session) = &self.addons.jam else {
             return;
         };
         ctx.request_repaint_after(Duration::from_millis(100));
         if session.host {
-            let now = self.now_playing().filter(|n| n.local && !n.loading);
-            let snapshot = now.and_then(|n| {
-                let mut track = self.local.track.clone()?;
-                if let Some(source) = &self.local.source {
-                    if crate::addons::valid_video_id(&source.youtube_id) {
-                        track.uri = format!("vibefy:youtube:{}", source.youtube_id);
-                    }
-                }
-                Some(crate::jam::Snapshot {
-                    track,
-                    position_ms: n.position_ms,
-                    playing: n.playing,
-                })
-            });
-            session.publish(snapshot);
-            session.publish_queue(
-                self.local
-                    .queue_tracks
-                    .get(self.local.queue_index.saturating_add(1)..)
-                    .unwrap_or(&[]),
-            );
+            // The relay thread reads the engine's live state. UI frames may stop
+            // while this window is occluded and must never be the Jam clock.
             for track in session.take_additions() {
                 if self.addons.jam_tracks.len() < 100 {
                     self.addons

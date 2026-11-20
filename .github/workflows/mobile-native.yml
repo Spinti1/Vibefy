@@ -1,0 +1,53 @@
+name: Build Vibefy hybrid mobile candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-35 build-tools;34.0.0
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - run: gradle -p mobile/android --no-daemon assembleDebug assembleRelease testReleaseUnitTest lintRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vibefy-Android-hybrid-candidate
+          path: |
+            mobile/android/app/build/outputs/apk/debug/*.apk
+            mobile/android/app/build/outputs/apk/release/*.apk
+            mobile/android/app/build/reports/lint-results-release.html
+          retention-days: 7
+  ios:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - name: Build device application without signing credentials
+        working-directory: mobile/ios
+        run: |
+          python3 ../tools/icons.py
+          xcodegen generate
+          xcodebuild -project Vibefy.xcodeproj -scheme Vibefy -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+          mkdir -p package/Payload
+          cp -R build/Build/Products/Release-iphoneos/Vibefy.app package/Payload/
+          cd package
+          /usr/bin/zip -r -y ../Vibefy.ipa Payload
+      - name: Validate native device application
+        run: |
+          python3 -c "import plistlib; p=plistlib.load(open('mobile/ios/package/Payload/Vibefy.app/Info.plist','rb')); assert p['CFBundleIdentifier']=='online.usevibefy.mobile'; assert p['CFBundleShortVersionString']==__import__('pathlib').Path('mobile/ios/project.yml').read_text().split('MARKETING_VERSION: ')[1].splitlines()[0].strip(chr(39)); assert __import__('pathlib').Path('mobile/ios/package/Payload/Vibefy.app/app-shell.js').is_file()"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Vibefy-iOS-hybrid-candidate
+          path: |
+            mobile/ios/Vibefy.ipa
+          retention-days: 7

@@ -716,6 +716,10 @@ type FileSelection =
     std::pin::Pin<Box<dyn std::future::Future<Output = Option<rfd::FileHandle>> + Send>>;
 
 pub enum Command {
+    JamHost(std::sync::Weak<std::sync::Mutex<crate::jam::Shared>>),
+    SpotifyAddition(crate::playlist_outbox::Addition),
+    ResumeSpotifyAdditions(String),
+    CancelSpotifyImports,
     GuestPlayback(bool),
     Personal {
         request: u64,
@@ -1045,6 +1049,12 @@ pub struct LyricsRequest {
 }
 
 pub enum Event {
+    SpotifyAddition {
+        account: String,
+        playlist: String,
+        uris: Vec<String>,
+        result: Option<Result<(), String>>,
+    },
     PersonalProgress {
         request: u64,
         message: String,
@@ -1153,6 +1163,7 @@ pub enum Event {
         result: Result<(), String>,
     },
     Local(Box<LocalState>),
+    LocalProgress(Arc<std::sync::Mutex<Option<crate::player::LocalProgress>>>),
     Api(Box<ApiResponse>),
     Accent {
         url: String,
@@ -1975,11 +1986,12 @@ impl PlaylistHeaderLookup {
 
 struct Worker {
     guest: bool,
-    personal_tasks: Vec<(bool, tokio::task::JoinHandle<()>)>,
+    personal_tasks: Vec<(bool, bool, tokio::task::JoinHandle<()>)>,
     connected_music: [bool; 2],
     music_account_serial: [u64; 2],
     music_account_tasks: [Option<tokio::task::JoinHandle<()>>; 2],
     playlist_outbox: crate::playlist_outbox::Outbox,
+    spotify_write_tasks: Vec<tokio::task::JoinHandle<()>>,
     peek: Option<Arc<crate::peek::Session>>,
     dirs: AppDirs,
     credentials: CredentialStore,
@@ -2017,6 +2029,7 @@ struct Worker {
     commands: mpsc::UnboundedSender<Command>,
     waker: Waker,
     engine: Option<Arc<Engine>>,
+    jam_host: Option<std::sync::Weak<std::sync::Mutex<crate::jam::Shared>>>,
     /// What the engine is heard at, so the engine that replaces it starts
     /// there. `engine_config` alone knows only the level the app launched
     /// with.
@@ -2109,6 +2122,7 @@ impl Worker {
     ) -> Self {
         Self {
             playlist_outbox: crate::playlist_outbox::Outbox::default(),
+            spotify_write_tasks: Vec::new(),
             music_account_tasks: [None, None],
             guest: false,
             personal_tasks: Vec::new(),
@@ -2148,6 +2162,7 @@ impl Worker {
             commands,
             waker,
             engine: None,
+            jam_host: None,
             heard: None,
             rootlist_pending: false,
             album_type_lookup: AlbumTypeLookup::default(),
@@ -2179,7 +2194,7 @@ impl Worker {
     }
 
     fn personal_task(&mut self, request: u64, task: crate::personal_library::Task) {
-        self.personal_tasks.retain(|(_, t)| !t.is_finished());
+        self.personal_tasks.retain(|(_, _, t)| !t.is_finished());
         if self.personal_tasks.len() >= 8 {
             self.emit(Event::Personal {
                 request,
@@ -2190,6 +2205,15 @@ impl Worker {
         let scoped = matches!(
             task,
             crate::personal_library::Task::Backup { .. } | crate::personal_library::Task::Account
+        );
+        let spotify = matches!(
+            task,
+            crate::personal_library::Task::SpotifyLoad { .. }
+                | crate::personal_library::Task::SpotifyImport { .. }
+                | crate::personal_library::Task::SpotifyDisconnect
+                | crate::personal_library::Task::SpotifyProbe
+                | crate::personal_library::Task::SpotifySearch { .. }
+                | crate::personal_library::Task::SpotifyWatch { .. }
         );
         let progress_events = self.events.clone();
         let progress_waker = self.waker.clone();
@@ -2207,6 +2231,7 @@ impl Worker {
         let waker = self.waker.clone();
         self.personal_tasks.push((
             scoped,
+            spotify,
             tokio::spawn(async move {
                 let result = crate::personal_library::execute(task, context)
                     .await
@@ -2215,6 +2240,40 @@ impl Worker {
                 waker.wake();
             }),
         ));
+    }
+    fn spotify_addition(&mut self, addition: crate::playlist_outbox::Addition) {
+        self.spotify_write_tasks.retain(|t| !t.is_finished());
+        if self.spotify_write_tasks.len() >= 128 {
+            self.emit(Event::SpotifyAddition{account:addition.account,playlist:addition.playlist_id,uris:addition.uris,result:Some(Err("Too many pending Spotify additions. The local song is kept; try again after the pending work finishes.".into()))});
+            return;
+        }
+        let outbox = self.playlist_outbox.clone();
+        let root = self.dirs.state.join("spotify-browser-outbox");
+        let config = self.dirs.config.clone();
+        let events = self.events.clone();
+        let waker = self.waker.clone();
+        self.spotify_write_tasks.push(tokio::spawn(async move {
+            let notify = |result: Option<Result<(), String>>| {
+                let _ = events.send(Event::SpotifyAddition {
+                    account: addition.account.clone(),
+                    playlist: addition.playlist_id.clone(),
+                    uris: addition.uris.clone(),
+                    result,
+                });
+                waker.wake();
+            };
+            let result = outbox
+                .run(
+                    root,
+                    addition.clone(),
+                    || crate::spotify_sync::add(&config, &addition),
+                    || notify(None),
+                )
+                .await;
+            if let Some(result) = result {
+                notify(Some(result.map(|_| ()).map_err(|e| e.to_string())));
+            }
+        }));
     }
 
     fn emit(&self, event: Event) {
@@ -2233,6 +2292,44 @@ impl Worker {
         ));
         while let Some(command) = commands.recv().await {
             match command {
+                Command::JamHost(jam) => {
+                    if let (Some(shared), Some(engine)) = (jam.upgrade(), self.engine.as_ref()) {
+                        shared
+                            .lock()
+                            .unwrap()
+                            .attach(engine.jam_state(), self.commands.clone());
+                    }
+                    self.jam_host = Some(jam);
+                }
+                Command::CancelSpotifyImports => {
+                    for (_, spotify, task) in &self.personal_tasks {
+                        if *spotify {
+                            task.abort();
+                        }
+                    }
+                    for task in self.spotify_write_tasks.drain(..) {
+                        task.abort();
+                    }
+                }
+                Command::SpotifyAddition(addition) => self.spotify_addition(addition),
+                Command::ResumeSpotifyAdditions(account) => {
+                    match crate::playlist_outbox::pending(
+                        &self.dirs.state.join("spotify-browser-outbox"),
+                        &account,
+                    )
+                    .await
+                    {
+                        Ok(pending) => {
+                            for addition in pending {
+                                self.spotify_addition(addition);
+                            }
+                        }
+                        Err(_) => self.emit(Event::Error(
+                            "Cannot read pending Spotify additions. Saved playlists were kept."
+                                .into(),
+                        )),
+                    }
+                }
                 Command::GuestPlayback(enabled) => {
                     self.guest = enabled;
                     if enabled {
@@ -2468,7 +2565,7 @@ impl Worker {
                                 | crate::music_accounts::Action::Connect
                         )
                     {
-                        for (scoped, task) in &self.personal_tasks {
+                        for (scoped, _, task) in &self.personal_tasks {
                             if *scoped {
                                 task.abort();
                             }
@@ -4026,10 +4123,17 @@ impl Worker {
         let events = self.events.clone();
         let commands = self.commands.clone();
         let waker = self.waker.clone();
+        let progress = Arc::new(std::sync::Mutex::new(None));
         Arc::new(move |event| match event {
             EngineEvent::State(state) => {
                 let _ = events.send(Event::Local(Box::new(state)));
                 waker.wake();
+            }
+            EngineEvent::Progress(update) => {
+                if crate::player::replace_progress(&progress, update) {
+                    let _ = events.send(Event::LocalProgress(Arc::clone(&progress)));
+                    waker.wake();
+                }
             }
             EngineEvent::SessionEnded => {
                 let _ = commands.send(Command::Reconnect);
@@ -4365,6 +4469,12 @@ impl Worker {
                 // The engine plays the kept song on now.
                 self.kept_player = None;
                 let engine = Arc::new(engine);
+                if let Some(shared) = self.jam_host.as_ref().and_then(|s| s.upgrade()) {
+                    shared
+                        .lock()
+                        .unwrap()
+                        .attach(engine.jam_state(), self.commands.clone());
+                }
                 self.heard = Some(engine.heard());
                 if let Some(spec) = self.resume.take() {
                     // Delay resume until Spirc finishes registering. An early

@@ -1676,25 +1676,25 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
             }
             "mods-enabled"
             | "mods-vivy"
-            | "mods-backmusic"
+            | "mods-soundvisualizer"
             | "mods-youtube"
             | "mods-vivy-controls"
-            | "mods-backmusic-controls" => {
+            | "mods-soundvisualizer-controls" => {
                 for id in crate::addons::ALL {
                     app.settings.addons.set(id, true);
                 }
                 app.settings.addons.intensity = 1.0;
                 app.settings.addons.particles = true;
-                app.settings.addons.visualizer = Some(if surface == "mods-backmusic" {
-                    crate::addons::Id::Backmusic
+                app.settings.addons.visualizer = Some(if surface == "mods-soundvisualizer" {
+                    crate::addons::Id::SoundVisualizer
                 } else {
                     crate::addons::Id::Vivy
                 });
-                app.addons.fullscreen = matches!(surface, "mods-vivy" | "mods-backmusic");
+                app.addons.fullscreen = matches!(surface, "mods-vivy" | "mods-soundvisualizer");
                 app.addons.filter = match surface {
                     "mods-youtube" => "YouTube",
                     "mods-vivy-controls" => "vivy",
-                    "mods-backmusic-controls" => "backmusic",
+                    "mods-soundvisualizer-controls" => "soundvisualizer",
                     _ => "",
                 }
                 .into();

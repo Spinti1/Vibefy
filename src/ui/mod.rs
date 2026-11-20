@@ -30,6 +30,7 @@ pub mod settings;
 pub mod show;
 pub mod sidebar;
 mod spicy_lyrics;
+mod music_background;
 pub mod topbar;
 mod track_peek;
 mod update;
@@ -97,18 +98,18 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         if app.show_lyrics_panel {
             lyrics::side_panel(app, ui);
         }
-        if app.show_listen_together {
-            listen_together::side_panel(app, ui);
-        }
         central(app, ui);
     }
     keep_room_for_panels(app, ctx);
     devices::popup(app, ctx);
     dialogs::show(app, ctx);
     personal_library::dialog(app, ctx);
+    personal_library::phone_dialog(app, ctx);
     mods::reload_prompt(app, ctx);
     update::show(app, ctx);
     widgets::drag_ghost(ctx, &app.palette, app.locale);
+    listen_together::host_monitor(app, ctx);
+    listen_together::dialog(app, ctx);
     toasts(app, ctx, theme::PLAYER_BAR_HEIGHT + 16.0);
     caption_buttons(ui, &app.palette, app.locale);
     fastframe_titlebar::resize(ui);
@@ -148,7 +149,7 @@ fn keep_room_for_panels(app: &App, ctx: &Context) {
     let width = main_min_width(
         topbar::least_width(ctx),
         panels && app.settings.sidebar_visible,
-        panels && (app.show_queue_panel || app.show_lyrics_panel || app.show_listen_together),
+        panels && (app.show_queue_panel || app.show_lyrics_panel),
     )
     .round();
     let id = Id::new("main-min-width");

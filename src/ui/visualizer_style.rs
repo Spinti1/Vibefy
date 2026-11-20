@@ -95,12 +95,13 @@ mod release_update_tests {
             color_at(fallback, rect, rect.center(), 1., 1.),
             Color32::GRAY
         );
-        let out = ctx.run_ui(Default::default(), |ui| {
+        let mut out = ctx.run_ui(Default::default(), |ui| {
             ui.painter().add(egui::Shape::line(
                 (0..20).map(|i| egui::pos2(i as f32 * 15., 50.)).collect(),
                 stroke(colors, rect, 3., 1., 1.),
             ));
         });
+        out.textures_delta.clear();
         let meshes = ctx.tessellate(out.shapes, out.pixels_per_point);
         let colours: std::collections::HashSet<_> = meshes
             .iter()

@@ -88,6 +88,21 @@ pub fn append(collection: &mut Collection, tracks: Vec<LocalTrack>) {
 
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    Spotify {
+        backup: bool,
+        selected: std::collections::BTreeSet<String>,
+        follow: bool,
+    },
+    SpotifyAdd {
+        source: crate::api::models::Track,
+        query: String,
+        results: crate::model::Loadable<Vec<crate::api::models::Track>>,
+        selected: Option<crate::api::models::Track>,
+        destination: Option<String>,
+        local_source: Option<String>,
+        local: bool,
+        backup: bool,
+    },
     New {
         name: String,
         backup: bool,
@@ -105,6 +120,33 @@ pub enum Dialog {
 }
 #[derive(Clone, Debug)]
 pub enum Action {
+    PhoneShare { source: String, revoke: bool },
+    PhoneClose,
+    SpotifyOpen,
+    SpotifyLoad {
+        connect: bool,
+    },
+    SpotifyDisconnect,
+    SpotifyImport {
+        selected: Vec<String>,
+        backup: bool,
+        follow: bool,
+    },
+    SpotifyToggleSync {
+        source: String,
+        enabled: bool,
+    },
+    SpotifySong {
+        source: crate::api::models::Track,
+        local_source: Option<String>,
+    },
+    SpotifyFind {
+        source: crate::api::models::Track,
+        query: String,
+    },
+    SpotifyChoose(String),
+    SpotifySend,
+    SpotifyLocalOnly,
     Show(Dialog),
     CreateFrom(Vec<LocalTrack>),
     Close,
@@ -137,6 +179,26 @@ pub enum Action {
 }
 #[derive(Default)]
 pub struct State {
+    pub phone_dialog: bool,
+    pub phone_panel: Option<crate::playlist_share::Panel>,
+    pub phone_status: String,
+    pub phone_revision: Option<u64>,
+    pub phone_due: Option<std::time::Instant>,
+    pub spotify: Option<crate::spotify_library::Catalog>,
+    pub spotify_busy: bool,
+    pub spotify_queue: std::collections::VecDeque<crate::spotify_library::Entry>,
+    pub spotify_importing: bool,
+    pub spotify_backup: bool,
+    pub spotify_backup_epoch: u64,
+    pub spotify_follow: bool,
+    pub spotify_search_serial: u64,
+    pub spotify_resume_account: Option<String>,
+    pub spotify_probe_tried: bool,
+    pub spotify_poll_due: Option<std::time::Instant>,
+    pub spotify_checked: BTreeMap<String, std::time::Instant>,
+    pub spotify_pending: std::collections::BTreeSet<(String, String)>,
+    pub spotify_completed: usize,
+    pub spotify_total: usize,
     pub started: bool,
     pub checked_revision: Option<u64>,
     pub current: BTreeMap<String, String>,
@@ -166,6 +228,24 @@ pub struct Report {
     pub message: Option<String>,
 }
 pub enum Output {
+    PhoneShared(Option<crate::playlist_share::Panel>),
+    PhoneSynced,
+    SpotifyImported {
+        collection: Collection,
+        editable: bool,
+    },
+    SpotifyMatches {
+        serial: u64,
+        tracks: Vec<crate::api::models::Track>,
+    },
+    SpotifyChanged {
+        source: String,
+        account: String,
+        snapshot: String,
+        collection: Option<Collection>,
+    },
+    SpotifyCatalog(Option<crate::spotify_library::Catalog>),
+    SpotifyDisconnected,
     LegacyRecovered(Vec<Collection>),
     Imported(Collection),
     Recovered {
@@ -186,6 +266,27 @@ pub enum Output {
 }
 #[derive(Clone)]
 pub enum Task {
+    PhoneShare { collection: Collection, revoke: bool },
+    PhoneSync(Vec<Collection>),
+    SpotifyProbe,
+    SpotifySearch {
+        serial: u64,
+        source: crate::api::models::Track,
+        query: String,
+        account: String,
+    },
+    SpotifyWatch {
+        source: String,
+        binding: crate::spotify_sync::Binding,
+    },
+    SpotifyLoad {
+        connect: bool,
+    },
+    SpotifyDisconnect,
+    SpotifyImport {
+        entry: crate::spotify_library::Entry,
+        account: String,
+    },
     RecoverLegacy,
     Import {
         youtube: bool,
@@ -207,6 +308,50 @@ pub struct ContextData {
 
 pub async fn execute(task: Task, context: ContextData) -> Result<Output> {
     match task {
+        Task::PhoneShare { collection, revoke } => crate::playlist_share::publish(collection,true,revoke,context).await,
+        Task::PhoneSync(collections) => crate::playlist_share::sync(collections,context).await,
+        Task::SpotifyProbe => Ok(Output::SpotifyCatalog(
+            crate::spotify_sync::probe(&context.config).await?,
+        )),
+        Task::SpotifySearch {
+            serial,
+            source,
+            query,
+            account,
+        } => Ok(Output::SpotifyMatches {
+            serial,
+            tracks: crate::spotify_sync::search(&context.config, &account, &source, &query).await?,
+        }),
+        Task::SpotifyWatch { source, binding } => {
+            let (snapshot, collection) =
+                crate::spotify_sync::watch(&context.config, &binding, &*context.progress).await?;
+            Ok(Output::SpotifyChanged {
+                source,
+                account: binding.account,
+                snapshot,
+                collection,
+            })
+        }
+        Task::SpotifyLoad { connect } => Ok(Output::SpotifyCatalog(
+            crate::spotify_library::load(&context.config, connect, &*context.progress).await?,
+        )),
+        Task::SpotifyDisconnect => {
+            crate::spotify_library::disconnect(&context.config).await?;
+            Ok(Output::SpotifyDisconnected)
+        }
+        Task::SpotifyImport { entry, account } => {
+            let (collection, editable) = crate::spotify_library::import_details(
+                &context.config,
+                &entry,
+                &account,
+                &*context.progress,
+            )
+            .await?;
+            Ok(Output::SpotifyImported {
+                collection,
+                editable,
+            })
+        }
         Task::RecoverLegacy => {
             let root = context.root;
             Ok(Output::LegacyRecovered(
@@ -660,4 +805,9 @@ mod tests {
         list.title = "New name".into();
         assert_ne!(before, fingerprint(&list));
     }
+}
+
+/// This owner marker was written exclusively by the retired automatic recovery.
+pub fn legacy_recovered(collection: &Collection) -> bool {
+    collection.owner.as_deref() == Some("Imported playlist")
 }

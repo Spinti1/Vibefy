@@ -29,8 +29,8 @@ mod release_update_tests {
         input
     }
     #[test]
-    fn builtin_visualizers_render_all_16_effects_without_mod_packages() {
-        assert_eq!(EFFECTS.len(), 16);
+    fn builtin_visualizers_render_all_14_effects_without_mod_packages() {
+        assert_eq!(EFFECTS.len(), 14);
         for (width, height) in [(1200., 760.), (320., 240.)] {
             for effect in EFFECTS {
                 let mut input = input(width, height);
@@ -66,6 +66,66 @@ mod release_update_tests {
         }
     }
     #[test]
+    fn enhanced_visualizers_keep_controls_compatible_and_finite() {
+        let old: crate::addons::VisualConfig =
+            serde_json::from_str(r#"{"style":1,"intensity":2.0}"#).unwrap();
+        assert_eq!(old.cover_scale, 1.);
+        assert!(old.artwork_colors);
+        let bad = crate::addons::VisualConfig {
+            intensity: f32::NAN,
+            speed: f32::INFINITY,
+            cover_scale: -4.,
+            detail: 0,
+            ..Default::default()
+        }
+        .sanitized();
+        assert_eq!(bad.intensity, 1.);
+        assert_eq!(bad.speed, 1.);
+        assert_eq!(bad.cover_scale, 0.5);
+        assert_eq!(bad.detail, 24);
+        for effect in EFFECTS {
+            for detail in [24., 64., 96.] {
+                let mut data = input(320., 240.);
+                data[13] = effect.style as f32;
+                data[20] = detail;
+                data[21] = 1.6;
+                data[16] = 1.;
+                let commands = render(effect.id, &data);
+                assert!(commands.len() <= 4096);
+                assert!(
+                    commands
+                        .iter()
+                        .all(|c| c.values.iter().all(|v| v.is_finite()))
+                );
+                let cover = commands.iter().find(|c| c.kind == 7).unwrap();
+                assert!(cover.values[2] <= 120.);
+            }
+        }
+    }
+    #[test]
+    fn enhanced_visualizers_detail_reduces_work_and_spectrum_uses_treble() {
+        let mut data = input(800., 600.);
+        data[20] = 24.;
+        let low = render(Id::SoundVisualizer, &data).len();
+        data[20] = 96.;
+        assert!(render(Id::SoundVisualizer, &data).len() > low);
+        data[18] = 75.;
+        data[64..192].fill(0.);
+        let quiet: Vec<_> = render(Id::SoundVisualizer, &data)
+            .into_iter()
+            .map(|c| c.values)
+            .collect();
+        data[64 + 74] = 1.;
+        let treble: Vec<_> = render(Id::SoundVisualizer, &data)
+            .into_iter()
+            .map(|c| c.values)
+            .collect();
+        assert_ne!(
+            quiet, treble,
+            "spectrum includes the highest available band"
+        );
+    }
+    #[test]
     fn cover_and_colour_regression_all_effects_draw_one_optional_cover_inside_the_view() {
         for (width, height) in [(1200., 760.), (320., 240.), (80., 60.)] {
             for effect in EFFECTS {
@@ -94,16 +154,16 @@ mod release_update_tests {
         let mut p = Preferences::default();
         p.require_packages = true;
         p.set(Id::Oneko, true);
-        p.visualizer = Some(Id::Backmusic);
-        p.visual_mut(Id::Backmusic).intensity = 2.;
+        p.visualizer = Some(Id::SoundVisualizer);
+        p.visual_mut(Id::SoundVisualizer).intensity = 2.;
         for id in p.available_visualizers() {
             p.installed.insert(id);
             p.enabled.insert(id);
             p.ready_packages.insert(id);
         }
         p.migrate_builtin_visualizers();
-        assert_eq!(p.visualizer, Some(Id::Backmusic));
-        assert_eq!(p.visual(Id::Backmusic).intensity, 2.);
+        assert_eq!(p.visualizer, Some(Id::SoundVisualizer));
+        assert_eq!(p.visual(Id::SoundVisualizer).intensity, 2.);
         assert!(p.installed.contains(&Id::Oneko));
         for effect in EFFECTS {
             assert!(p.active(effect.id));
@@ -116,7 +176,7 @@ mod release_update_tests {
             assert!(select(&mut p, effect.id, effect.style));
             assert_eq!(selected(&p), effect);
         }
-        assert_eq!(p.visual(Id::Backmusic).intensity, 2.);
+        assert_eq!(p.visual(Id::SoundVisualizer).intensity, 2.);
         let before = p.clone();
         assert!(!select(&mut p, Id::SoundVisualizer, 12));
         assert!(!select(&mut p, Id::Oneko, 0));
@@ -129,7 +189,7 @@ pub struct Effect {
     pub style: u8,
     pub label: &'static str,
 }
-pub const EFFECTS: [Effect; 16] = [
+pub const EFFECTS: [Effect; 14] = [
     Effect {
         id: Id::Vivy,
         style: 0,
@@ -139,16 +199,6 @@ pub const EFFECTS: [Effect; 16] = [
         id: Id::Vivy,
         style: 1,
         label: "Vivy · Drift",
-    },
-    Effect {
-        id: Id::Backmusic,
-        style: 0,
-        label: "Backmusic · Rings",
-    },
-    Effect {
-        id: Id::Backmusic,
-        style: 1,
-        label: "Backmusic · Spectrum",
     },
     Effect {
         id: Id::SoundVisualizer,
@@ -239,13 +289,17 @@ pub fn render(id: Id, input: &[f32]) -> Vec<Draw> {
     }
     match id {
         Id::Vivy => frame.render_vivy(x, y, w, h),
-        Id::Backmusic => frame.render_backmusic(x, y, w, h),
         Id::SoundVisualizer => frame.render_sound(x, y, w, h),
         _ => {}
     }
     if id.is_visualizer() && frame.n(16) > 0. {
         let dim = w.min(h);
-        let (cx, cy, size) = (x + w / 2., y + h / 2. - 20., dim * 0.22 * 1.15);
+        let scale = if frame.n(21) > 0. {
+            frame.n(21).clamp(0.5, 1.6)
+        } else {
+            1.
+        };
+        let (cx, cy, size) = (x + w / 2., y + h / 2. - 20., dim * 0.22 * 1.15 * scale);
         // Append once, after the effect/particles, so the image stays visible.
         let size = size.min(dim * 0.5);
         let cx = cx.clamp(x + size / 2., x + w - size / 2.);
@@ -259,6 +313,13 @@ struct Frame<'a> {
     output: Vec<Draw>,
 }
 impl Frame<'_> {
+    fn detail(&self) -> usize {
+        if self.n(20) > 0. {
+            (self.n(20) as usize).clamp(24, 96)
+        } else {
+            64
+        }
+    }
     fn n(&self, i: i32) -> f32 {
         self.input
             .get(i as usize)
@@ -284,7 +345,7 @@ impl Frame<'_> {
         self.draw(8, [fps, 0., 0., 0., 0., 0., 0., 0.]);
     }
     fn render_vivy(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        let count = self.n(18) as i32;
+        let count = (self.n(18) as i32).min(self.detail() as i32);
         let rows = self.n(19) as i32;
         for row in (0..rows.min(24)).rev() {
             let depth = row as f32 / 24.;
@@ -299,74 +360,15 @@ impl Frame<'_> {
                 };
                 self.point(
                     x + w / 2. - width / 2. + width * i as f32 / (count - 1).max(1) as f32,
-                    base - self.n(256 + row * 128 + i) * self.n(12) * h * 0.16 * (1. - depth)
+                    base - self.n(256 + row * 128 + i * self.n(18) as i32 / count.max(1))
+                        * self.n(12)
+                        * h
+                        * 0.16
+                        * (1. - depth)
                         + drift,
                 );
             }
             self.end();
-        }
-        if self.n(6) > 0. {
-            self.repaint(self.n(26));
-        }
-    }
-    fn render_backmusic(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        let radius = w.min(h) * 0.22;
-        let cx = x + w / 2.;
-        let cy = y + h / 2. - 20.;
-        let count = (self.n(18) as i32).min(128);
-        if self.n(13) < 1. {
-            for ring in 0..5 {
-                self.line(1.5, 0.8 - ring as f32 * 0.12);
-                for i in 0..=128 {
-                    let angle = i as f32 / 128. * std::f32::consts::TAU;
-                    let band = if count > 0 {
-                        self.n(64 + i % count)
-                    } else {
-                        0.
-                    };
-                    let r = radius * (1. + ring as f32 * 0.13) + band * self.n(12) * 32.;
-                    self.point(cx + angle.cos() * r, cy + angle.sin() * r);
-                }
-                self.end();
-            }
-        } else {
-            let width = w * 0.8;
-            let step = width / count.max(1) as f32;
-            for i in 0..count {
-                let bh = (self.n(64 + i) * self.n(12) * h * 0.3).max(2.);
-                let bw = (step - 3.).max(1.);
-                self.draw(
-                    3,
-                    [
-                        cx - width / 2. + i as f32 * step - bw / 2.,
-                        cy - bh / 2.,
-                        bw,
-                        bh,
-                        2.,
-                        0.8,
-                        -1.,
-                        0.,
-                    ],
-                );
-            }
-        }
-        if self.n(15) > 0. {
-            for i in 0..48 {
-                let seed = i as f32;
-                self.draw(
-                    4,
-                    [
-                        x + (seed * 0.618 + self.n(4) * 0.008).rem_euclid(1.) * w,
-                        y + (seed * 0.431 - self.n(4) * 0.012).rem_euclid(1.) * h,
-                        1. + self.n(17) * 1.5,
-                        0.5,
-                        0.,
-                        0.,
-                        0.,
-                        0.,
-                    ],
-                );
-            }
         }
         if self.n(6) > 0. {
             self.repaint(self.n(26));
@@ -400,11 +402,13 @@ impl Frame<'_> {
         match mode {
             0 | 1 => {
                 // bars.js / centerbars.js
-                let count = 64;
+                let count = self.detail();
                 let slot = w / count as f32;
                 for i in 0..count {
                     let k = if mode == 1 {
-                        (((i as f32 - 31.5).abs() / 32.) * 63.).round() as usize
+                        (((i as f32 - (count - 1) as f32 / 2.).abs() / (count as f32 / 2.))
+                            * (count - 1) as f32)
+                            .round() as usize
                     } else {
                         i
                     };
@@ -421,7 +425,7 @@ impl Frame<'_> {
             }
             2 | 7 => {
                 // circular.js / starburst.js
-                let count = 64;
+                let count = self.detail();
                 let base = dim
                     * if mode == 2 {
                         0.22 * (1. + bass * 0.28)
@@ -457,26 +461,31 @@ impl Frame<'_> {
             }
             3 => {
                 // wave.js: actual PCM, not spectrum magnitudes.
+                let points = self.detail() * 3;
                 self.line(2., 0.95);
-                for i in 0..256 {
-                    self.point(x + w * i as f32 / 255., cy + self.wave(i) * h * 0.3528);
+                for i in 0..points {
+                    self.point(
+                        x + w * i as f32 / (points - 1) as f32,
+                        cy + self.wave(i * 255 / (points - 1)) * h * 0.3528,
+                    );
                 }
                 self.end();
             }
             4 => {
                 // radialwave.js
                 let radius = dim * 0.22 * (1. + bass * 0.28);
+                let points = self.detail() * 3;
                 self.line(2., 0.95);
-                for i in 0..=256 {
-                    let a = (i % 256) as f32 / 256. * TAU + t * 0.12;
-                    let r = radius + self.wave(i) * dim * 0.1092;
+                for i in 0..=points {
+                    let a = i as f32 / points as f32 * TAU + t * 0.12;
+                    let r = radius + self.wave((i % points) * 256 / points) * dim * 0.1092;
                     self.point(cx + a.cos() * r, cy + a.sin() * r);
                 }
                 self.end();
             }
             5 | 6 => {
                 // dots.js / blocks.js: bounded 48 x 24 grid.
-                let cols = 48;
+                let cols = self.detail().min(64);
                 let rows = (h / 30.).round().clamp(5., 24.) as usize;
                 let sx = w / cols as f32;
                 let sy = h * 0.84 / rows as f32;
@@ -496,11 +505,12 @@ impl Frame<'_> {
             }
             8 => {
                 // extras.js Helix
+                let count = self.detail();
                 for side in 0..2 {
                     self.line(2., 0.85);
-                    for i in 0..96 {
-                        let f = i as f32 / 95.;
-                        let amp = h * 0.276 * (0.35 + self.band(i, 96) * 0.9);
+                    for i in 0..count {
+                        let f = i as f32 / (count - 1) as f32;
+                        let amp = h * 0.276 * (0.35 + self.band(i, count) * 0.9);
                         self.point(
                             x + f * w,
                             cy + (f * TAU * 2.4 + t * 1.1 + side as f32 * PI).sin() * amp,
@@ -508,16 +518,16 @@ impl Frame<'_> {
                     }
                     self.end();
                 }
-                for i in (0..96).step_by(2) {
-                    let f = i as f32 / 95.;
-                    let v = self.band(i, 96);
+                for i in (0..count).step_by(2) {
+                    let f = i as f32 / (count - 1) as f32;
+                    let v = self.band(i, count);
                     let dy = (f * TAU * 2.4 + t * 1.1).sin() * h * 0.276 * (0.35 + v * 0.9);
                     self.segment(x + f * w, cy - dy, x + f * w, cy + dy, 1., 0.25 + v * 0.6);
                 }
             }
             9 => {
                 // extras.js Strings
-                let count = 18;
+                let count = (self.detail() / 4).clamp(6, 24);
                 let slot = h / (count + 1) as f32;
                 for i in 0..count {
                     let v = self.band(i, count);
@@ -539,10 +549,12 @@ impl Frame<'_> {
                 // extras.js Lissajous (mono phase-space, not stereo balance).
                 let r = dim * 0.3864;
                 let a = t * 0.15;
+                let points = self.detail() * 3;
                 self.line(1.7, 0.9);
-                for i in 0..256 {
-                    let u = self.wave(i);
-                    let v = self.wave(i + 15);
+                for i in 0..points {
+                    let sample = i * 255 / (points - 1);
+                    let u = self.wave(sample);
+                    let v = self.wave(sample + 15);
                     self.point(
                         cx + (u * a.cos() - v * a.sin()) * r,
                         cy + (u * a.sin() + v * a.cos()) * r,
@@ -552,7 +564,7 @@ impl Frame<'_> {
             }
             _ => {
                 // extras.js Arcs
-                let count = 24;
+                let count = (self.detail() / 3).clamp(8, 32);
                 let r = dim * 0.46;
                 let inner = r * 0.12;
                 let step = (r - inner) / count as f32;

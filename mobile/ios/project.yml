@@ -6,14 +6,18 @@ options:
 settings:
   base:
     SWIFT_VERSION: '5.0'
-    MARKETING_VERSION: '0.1.0'
-    CURRENT_PROJECT_VERSION: '1'
+    MARKETING_VERSION: '0.2.6'
+    CURRENT_PROJECT_VERSION: '8'
     CODE_SIGNING_ALLOWED: NO
 targets:
   Vibefy:
     type: application
     platform: iOS
-    sources: [Sources]
+    sources:
+      - path: Sources
+        excludes: [NativePrototype.swift]
+      - path: ../shared/app-shell.js
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: online.usevibefy.mobile
@@ -26,6 +30,10 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        CFBundleURLTypes:
+          - CFBundleURLName: online.usevibefy.jam
+            CFBundleURLSchemes: [vibefy]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: false
