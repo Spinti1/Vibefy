@@ -23,9 +23,9 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
  private func trusted(_ url:URL?)->Bool {guard let url else{return false};return url.scheme=="https" && url.host=="vibefy-neon.vercel.app" && url.port==nil && url.user==nil && url.password==nil}
  override func viewDidLoad(){super.viewDidLoad();view.backgroundColor=UIColor(red:0.055,green:0.071,blue:0.082,alpha:1)
   let config=WKWebViewConfiguration();config.websiteDataStore = .default();config.allowsInlineMediaPlayback=true
-  let script="window.vibefyNativeInfo={platform: 'ios',version: '0.2.5',secureSession: true,renewableSession: true};\n" + ((try? String(contentsOf:Bundle.main.url(forResource:"app-shell",withExtension:"js")!,encoding:.utf8)) ?? "")
+  let script="window.vibefyNativeInfo={platform: 'ios',version: '0.2.6',secureSession: true,renewableSession: true};\n" + ((try? String(contentsOf:Bundle.main.url(forResource:"app-shell",withExtension:"js")!,encoding:.utf8)) ?? "")
   config.userContentController.addUserScript(WKUserScript(source:script,injectionTime:.atDocumentStart,forMainFrameOnly:true));config.userContentController.add(WeakShellHandler(self),name:"vibefyMobile")
-  web=WKWebView(frame:.zero,configuration:config);web.navigationDelegate=self;web.uiDelegate=self;web.isOpaque=false;web.backgroundColor=view.backgroundColor;web.scrollView.backgroundColor=view.backgroundColor;web.scrollView.bounces=false;web.allowsBackForwardNavigationGestures=true;web.translatesAutoresizingMaskIntoConstraints=false
+  web=WKWebView(frame:.zero,configuration:config);web.navigationDelegate=self;web.uiDelegate=self;web.isOpaque=false;web.backgroundColor=view.backgroundColor;web.scrollView.backgroundColor=view.backgroundColor;web.scrollView.bounces=false;web.scrollView.pinchGestureRecognizer?.isEnabled=false;web.allowsBackForwardNavigationGestures=true;web.translatesAutoresizingMaskIntoConstraints=false
   view.addSubview(web);NSLayoutConstraint.activate([web.topAnchor.constraint(equalTo:view.safeAreaLayoutGuide.topAnchor),web.bottomAnchor.constraint(equalTo:view.bottomAnchor),web.leadingAnchor.constraint(equalTo:view.safeAreaLayoutGuide.leadingAnchor),web.trailingAnchor.constraint(equalTo:view.safeAreaLayoutGuide.trailingAnchor)])
   cover.backgroundColor=view.backgroundColor;cover.translatesAutoresizingMaskIntoConstraints=false;view.addSubview(cover);NSLayoutConstraint.activate([cover.topAnchor.constraint(equalTo:web.topAnchor),cover.bottomAnchor.constraint(equalTo:web.bottomAnchor),cover.leadingAnchor.constraint(equalTo:web.leadingAnchor),cover.trailingAnchor.constraint(equalTo:web.trailingAnchor)])
   stack.axis = .vertical;stack.spacing=16;stack.alignment = .center;stack.translatesAutoresizingMaskIntoConstraints=false;cover.addSubview(stack);NSLayoutConstraint.activate([stack.centerXAnchor.constraint(equalTo:cover.centerXAnchor),stack.centerYAnchor.constraint(equalTo:cover.centerYAnchor),stack.widthAnchor.constraint(lessThanOrEqualTo:cover.widthAnchor,constant:-48)])
@@ -35,7 +35,7 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
   web.load(URLRequest(url:home,cachePolicy:.useProtocolCachePolicy,timeoutInterval:25))
  }
  @discardableResult func openLink(_ url:URL)->Bool {
-  if url.scheme=="vibefy" && url.host=="connect" {finishGoogle(url);return true};return openJam(url)
+  if url.scheme=="vibefy" && url.host=="connect" {finishGoogle(url);return true};if url.scheme=="vibefy" && url.host=="playlist",let id=URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name=="id"})?.value,id.range(of:"^[a-f0-9]{32}$",options:.regularExpression) != nil {loadViewIfNeeded();web.load(URLRequest(url:URL(string:home.absoluteString+"#share="+id)!));return true};return openJam(url)
  }
  @discardableResult func openJam(_ url:URL)->Bool {
   guard url.scheme=="vibefy",url.host=="jam",let code=URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name=="code"})?.value,code.range(of:"^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$",options:.regularExpression) != nil else{return false}

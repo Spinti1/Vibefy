@@ -41,3 +41,10 @@ dialog{background:#20272e;border:1px solid #37414b;border-radius:15px;padding:24
 @media(max-width:370px){.app-header{column-gap:5px}.app-header>.brand{font-size:18px}.app-header .header-actions{gap:2px}.app-header #header-connect{min-width:78px;padding:8px}.app-header .header-actions .icon-button{min-width:29px;width:29px}}
 
 .app-header a.brand,.app-header a.brand:hover,.desktop-rail a.brand,.desktop-rail a.brand:hover{text-decoration:none}
+
+/* Native phone cover view. This changes presentation, not the provider's stream format. */
+html[data-mobile-app=true] .now-artwork{position:relative;width:100%;max-width:365px;aspect-ratio:1;margin:auto;isolation:isolate}
+html[data-mobile-app=true] .now-artwork>#now-cover{position:absolute;inset:0;z-index:2;width:100%;height:100%;object-fit:cover;border-radius:16px;pointer-events:none;background:#151b20}
+html[data-mobile-app=true] .now-artwork>#youtube-frame{position:absolute;inset:0;width:100%;height:100%;border-radius:16px;min-height:0;min-width:0}
+html[data-mobile-app=true] #embed-notice,html[data-mobile-app=true] #open-source{display:none!important}
+#shared-playlist-dialog{max-width:440px}#shared-playlist-dialog>label{display:flex;align-items:center;gap:10px;margin:20px 0}#shared-playlist-dialog input[type=checkbox]{appearance:auto;width:20px;height:20px;accent-color:var(--mint)}

@@ -47,9 +47,12 @@
   const url=new URL(anchor.href,location.origin);
   if(anchor.matches('.brand,[data-app-home]')||(url.origin===location.origin&&['/','/index.html','/download'].includes(url.pathname))){event.preventDefault();event.stopImmediatePropagation();document.querySelector('.toolbar-home')?.click();}
  }
+ document.addEventListener('gesturestart',event=>event.preventDefault(),{passive:false});
  document.addEventListener('click',routeHome,true);window.vibefyMobileNavigationReady=true;
  window.vibefyMobileShellReady=true;
  function install(){
+  const viewport=document.querySelector?.('meta[name="viewport"]');if(viewport)viewport.setAttribute('content','width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover');
+
   if(document.documentElement)document.documentElement.dataset.mobileApp='true';
   if(!document.getElementById('vibefy-mobile-style')){const style=document.createElement('style');style.id='vibefy-mobile-style';style.textContent=`
    html[data-mobile-app=true]{color-scheme:dark;background:#0e1215;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
