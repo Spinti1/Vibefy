@@ -16,7 +16,7 @@ android {
 
 dependencies {
  // Only resolves public audio metadata on the device; no video stream is selected.
- implementation "com.github.teamnewpipe:NewPipeExtractor:v0.27.1"
+ implementation("com.github.teamnewpipe:NewPipeExtractor:v0.27.1") { exclude group: "org.mozilla", module: "rhino-engine" }
  coreLibraryDesugaring "com.android.tools:desugar_jdk_libs_nio:2.1.5"
  testImplementation "junit:junit:4.13.2"
  implementation "androidx.webkit:webkit:1.12.1"
