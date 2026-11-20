@@ -126,7 +126,7 @@ async def worker(work):
 
 @app.get("/api/capabilities")
 def capabilities():
-    return {"version": "0.4.66", "beta": True, "search": True, "playback": "official-embedded-player",
+    return {"version": "0.4.74", "beta": True, "search": True, "playback": "official-embedded-player",
             "nativeOnly": ["local Whisper Auto Sync", "audio-reactive desktop visualizers", "classic mini window"],
             "storage": "browser-local", "analytics": False, "jam": "shared Cloudflare relay; desktop and web"}
 

@@ -1,4 +1,4 @@
-# Vibefy mobile 0.2.5 hybrid preview
+# Vibefy mobile 0.2.6 hybrid preview
 
 The user authorized a lightweight hybrid app after the native-only port began. The current entry points use Android WebView and Apple WKWebView with app-style navigation and the existing mobile interface. Native-only prototype screens and player code are retained for later engine integration; they are not the active playback engine in this build.
 
@@ -39,3 +39,9 @@ iOS uses a device-bound Keychain item; Android uses app-specific Android Keystor
 New mobile connections use Google's authorization-code model through the system browser. The Vercel endpoint exchanges the code using the existing Vibefy Web client; only its secret is held in protected server configuration. The server does not persist user tokens. The encrypted one-time app callback carries the grant to the waiting app, which stores the refresh credential locally. Renewal submits that credential over HTTPS to the fixed same-origin endpoint and on to Google. API calls use the access token directly with Google.
 
 Expired access is renewed before library requests and after background suspension. Concurrent renewal is shared. Network/server/configuration errors keep the protected credential; only explicit disconnect or confirmed Google invalid_grant clears it. A YouTube API 401 triggers one renewal/retry instead of deleting the account. Reconnect once (Keep me signed in) after updating from an access-only version. Google can still revoke access or require consent; permanent authorization is not guaranteed. Physical-device authentication and background suspension remain to be validated on an iPhone and Android phone.
+
+## 0.2.6 QR imports and mobile presentation
+
+A desktop QR opens a metadata preview at /web#share=<id>. Save a local copy without signing in; Keep updated retrieves changes on opening it or returning to the foreground, with conditional requests and a one-minute minimum interval. vibefy://playlist?id=<id> opens the preview in installed apps. Turning off following allows independent local edits. Metadata backups retain the read-only subscription, never its desktop owner key.
+
+Native phone pinch/page zoom is disabled. YouTube now-playing displays cover artwork; this presentation change does not remove the existing YouTube video stream or guarantee audio-only network traffic. Background playback limitations remain.
