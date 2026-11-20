@@ -348,12 +348,14 @@ mod native_ui {
         );
         app.actions
             .push(Action::Addon(addons::Command::ChooseVisualizer(
-                Id::Backmusic,
+                Id::SoundVisualizer,
             )));
         frame(&ctx, &mut app, 760.0);
-        assert_eq!(app.settings.addons.visualizer, Some(Id::Backmusic));
-        app.actions
-            .push(Action::Addon(addons::Command::Enable(Id::Backmusic, true)));
+        assert_eq!(app.settings.addons.visualizer, Some(Id::SoundVisualizer));
+        app.actions.push(Action::Addon(addons::Command::Enable(
+            Id::SoundVisualizer,
+            true,
+        )));
         frame(&ctx, &mut app, 760.0);
         app.actions
             .push(Action::Addon(addons::Command::ConfigureVisual(
@@ -368,7 +370,10 @@ mod native_ui {
             .push(Action::Addon(addons::Command::ChooseVisualizer(Id::Vivy)));
         frame(&ctx, &mut app, 760.0);
         assert_eq!(app.settings.addons.visual(Id::Vivy).intensity, 1.0);
-        assert_eq!(app.settings.addons.visual(Id::Backmusic).intensity, 2.0);
+        assert_eq!(
+            app.settings.addons.visual(Id::SoundVisualizer).intensity,
+            2.0
+        );
         assert!(app.addons.fullscreen);
         app.backend.shutdown();
         std::fs::remove_dir_all(root).unwrap();
@@ -438,7 +443,8 @@ mod native_ui {
                 .any(|(_, n)| n.value().or(n.label()) == Some("YouTube Playlist Import"))
         );
         assert!(
-            tree.nodes
+            !tree
+                .nodes
                 .iter()
                 .any(|(_, n)| n.value().or(n.label()) == Some("WaveLink"))
         );
@@ -455,7 +461,7 @@ mod native_ui {
             app.settings.eq_bands_db,
         );
         for theme in ["light", "dark"] {
-            for mode in ["mods-vivy", "mods-backmusic"] {
+            for mode in ["mods-vivy", "mods-soundvisualizer"] {
                 spotifast::demo::apply_flags(
                     &mut app,
                     Some("mods"),

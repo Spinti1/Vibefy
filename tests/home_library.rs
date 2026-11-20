@@ -312,9 +312,8 @@ fn mods_catalogue_has_one_ordered_grid_and_collapses_optional_tools() {
         let out = frame(&ctx, &mut app, width, 1000.0, 0.0);
         let text = labels(&out);
         assert!(!text.iter().any(|s| s == "YouTube Playlist Import"));
-        let wave = text.iter().position(|s| s == "WaveLink").unwrap();
-        let juice = text.iter().position(|s| s == "JuiceVault").unwrap();
-        assert!(wave < juice);
+        assert!(!text.iter().any(|s| s == "WaveLink"));
+        assert!(text.iter().any(|s| s == "JuiceVault"));
         assert!(text.iter().any(|s| s == "Listen Together"));
         assert!(!text.iter().any(|s| s == "Intensity"));
     }

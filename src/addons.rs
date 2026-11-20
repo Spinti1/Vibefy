@@ -21,8 +21,7 @@ pub enum Id {
     SoundVisualizer,
 }
 
-pub const ALL: [Id; 6] = [
-    Id::WaveLink,
+pub const ALL: [Id; 5] = [
     Id::JuiceVault,
     Id::TrackPeek,
     Id::Nyan,
@@ -233,6 +232,10 @@ impl Preferences {
     }
 
     pub fn migrate_builtin_visualizers(&mut self) {
+        // Keep the legacy enum readable so existing profiles still deserialize.
+        self.installed.remove(&Id::WaveLink);
+        self.enabled.remove(&Id::WaveLink);
+        self.ready_packages.remove(&Id::WaveLink);
         self.installed
             .retain(|id| !id.is_visualizer() && *id != Id::YouTube);
         self.enabled
@@ -244,13 +247,16 @@ impl Preferences {
         }
     }
     pub fn active(&self, id: Id) -> bool {
+        if id == Id::WaveLink {
+            return false;
+        }
         id.is_visualizer()
             || (self.installed.contains(&id)
                 && self.enabled.contains(&id)
                 && (!self.require_packages || self.ready_packages.contains(&id)))
     }
     pub fn set(&mut self, id: Id, enabled: bool) {
-        if id.is_visualizer() {
+        if id.is_visualizer() || id == Id::WaveLink {
             return;
         }
         if enabled {

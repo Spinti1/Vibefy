@@ -50,6 +50,19 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.4.75" date="2026-11-20"><description><p>Retire WaveLink while preserving user profiles.</p></description></release>
+    <release version="0.4.73" date="2026-11-16"/>
+    <release version="0.4.72" date="2026-11-15"/>
+    <release version="0.4.67" date="2026-11-13"><description><p>Reliable shared Jam pause and seeking, compact host panel reopening, JuiceVault catalogue access and browser cat animations.</p></description></release>
+    <release version="0.4.66" date="2026-11-12"><description><p>Background Jam timing, shared queue and seeking, JuiceVault playback, and browser lyrics improvements.</p></description></release>
+    <release version="0.4.61" date="2026-11-12"><description><p>Web-only explanation of Google testing status and permissions before sign-in.</p></description></release>
+    <release version="0.4.60" date="2026-11-12"><description><p>Web-only Mods and import interface cleanup. No desktop binary changes.</p></description></release>
+    <release version="0.4.59" date="2026-11-12"><description><p>Web-only native-style controls and simplified YouTube connection. No desktop binary changes.</p></description></release>
+    <release version="0.4.58" date="2026-11-11"><description><p>Enhanced built-in visualizers and desktop-style browser playlist controls.</p></description></release>
+    <release version="0.4.57" date="2026-11-11"><description><p>Playback pause synchronization, stale decoder guards and next-track prefetch fixes.</p></description></release>
+    <release version="0.4.56" date="2026-11-08"><description><p>Verified Spotify connection state, Home playlist shelf and library-loading recovery.</p></description></release>
+    <release version="0.4.55" date="2026-11-07"><description><p>Spotify browser library reading without additional Web API metadata requests.</p></description></release>
+    <release version="0.4.54" date="2026-11-07"><description><p>Optional Windows Spotify browser connection, selectable account playlist and Liked Songs imports, and unlisted YouTube copies.</p></description></release>
     <release version="0.4.53" date="2026-11-06"><description><p>Clearer YouTube backup checkbox.</p></description></release>
     <release version="0.4.52" date="2026-11-05"><description><p>Playlist backup files, explicit search, public artist pages and a native local and YouTube library.</p></description></release>
     <release version="0.4.51" date="2026-11-05"><description><p>Public Spotify playlist import without Spotify sign-in.</p></description></release>
@@ -190,3 +203,4 @@
     </release>
   </releases>
 </component>
+

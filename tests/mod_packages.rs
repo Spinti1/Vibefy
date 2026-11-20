@@ -98,12 +98,31 @@ fn animation_frames_follow_the_song_clock() {
 fn disabled_or_unloaded_packages_cannot_activate() {
     let mut p = spotifast::addons::Preferences::default();
     p.require_packages = true;
-    p.set(Id::WaveLink, true);
-    assert!(!p.active(Id::WaveLink));
-    p.ready_packages.insert(Id::WaveLink);
-    assert!(p.active(Id::WaveLink));
-    p.set(Id::WaveLink, false);
-    assert!(!p.active(Id::WaveLink));
+    p.set(Id::JuiceVault, true);
+    assert!(!p.active(Id::JuiceVault));
+    p.ready_packages.insert(Id::JuiceVault);
+    assert!(p.active(Id::JuiceVault));
+    p.set(Id::JuiceVault, false);
+    assert!(!p.active(Id::JuiceVault));
+}
+#[test]
+fn retired_wavelink_does_not_reset_other_mod_preferences() {
+    let mut prefs: spotifast::addons::Preferences = serde_json::from_value(serde_json::json!({
+        "installed": ["WaveLink", "Nyan"], "enabled": ["WaveLink", "Nyan"], "cat_jam_scale": 1.2
+    }))
+    .unwrap();
+    prefs.migrate_builtin_visualizers();
+    assert!(!prefs.installed.contains(&Id::WaveLink));
+    assert!(!prefs.active(Id::WaveLink));
+    assert!(prefs.active(Id::Nyan));
+    assert_eq!(prefs.cat_scale(), 1.2);
+    assert!(
+        !mod_packages::catalog()
+            .iter()
+            .any(|entry| entry.id == Id::WaveLink)
+    );
+    prefs.set(Id::WaveLink, true);
+    assert!(!prefs.active(Id::WaveLink));
 }
 #[test]
 #[ignore = "downloads public release assets; run explicitly during release validation"]

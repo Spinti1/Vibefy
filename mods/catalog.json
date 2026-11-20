@@ -6,12 +6,6 @@
     "sha256": "95e5e863f19db2c7e13d982537c26b30311595ed0d3d30440bc83779363fb75c"
   },
   {
-    "id": "WaveLink",
-    "slug": "wavelink",
-    "bytes": 6735,
-    "sha256": "564101fa9a3cb1ad75d9f34ac463bd8d7d0944934b489f3d5ed6c198902798c7"
-  },
-  {
     "id": "JuiceVault",
     "slug": "juicevault",
     "bytes": 6745,

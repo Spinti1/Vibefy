@@ -1,8 +1,8 @@
 # Vibefy releases
 
-Current source version: **0.4.74**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
+Current source version: **0.4.75**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
 
-For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.75), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
+For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.76), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
 
 0.4.4: About and Mods credits, clearer buttons, cache management and 2 GB advisory, performance improvements.
 
@@ -148,3 +148,5 @@ Web companion for 0.4.53: explicit /web and /phone routes; presentation homepage
 0.4.73: Allocation-free visualizer audio windows and native input buffers, borrowed Track Peek neighbours, and preallocated animated background meshes. Same audio samples, frame pacing and visual detail.
 
 0.4.74: Opt-in QR playlist sharing with bounded metadata snapshots, protected owner credentials, read-only phone copies, conditional refreshes and revocable links. No music files are uploaded.
+
+0.4.75: Retire WaveLink from the desktop Mods catalogue and migrate its old enabled state without resetting account or playlist data. Phone web UI removes Cat Jam, fixes Nyan positioning and seek previews, embeds transport glyphs, and adds a verified More Lyrics fallback.
