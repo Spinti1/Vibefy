@@ -6,16 +6,16 @@
       "name": "Vibefy Preview",
       "bundleIdentifier": "online.usevibefy.mobile",
       "developerName": "Spinti1 and contributors",
-      "localizedDescription": "Mobile preview with device-protected YouTube session restoration across app restarts, persistent local playlists and native backup export. Google token expiry still requires reconnecting; reliable background YouTube playback is not guaranteed.",
+      "localizedDescription": "Mobile preview with device-protected YouTube session restoration across app restarts, persistent local playlists and native backup export. Reconnect once after updating to enable automatic Google access renewal. Access revoked by Google requires reconnecting; reliable background YouTube playback is not guaranteed.",
       "iconURL": "https://raw.githubusercontent.com/Spinti1/Vibefy/main/web/public/assets/icon.png",
       "versions": [
         {
-          "version": "0.2.4",
-          "date": "2026-11-19",
-          "downloadURL": "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.4/Vibefy-0.2.4.ipa",
-          "size": 1294776,
+          "version": "0.2.5",
+          "date": "2026-11-20",
+          "downloadURL": "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.5/Vibefy-0.2.5.ipa",
+          "size": 1294973,
           "minOSVersion": "15.0",
-          "localizedDescription": "Mobile preview with device-protected YouTube session restoration across app restarts, persistent local playlists and native backup export. Google token expiry still requires reconnecting; reliable background YouTube playback is not guaranteed."
+          "localizedDescription": "Mobile preview with device-protected YouTube session restoration across app restarts, persistent local playlists and native backup export. Reconnect once after updating to enable automatic Google access renewal. Access revoked by Google requires reconnecting; reliable background YouTube playback is not guaranteed."
         }
       ]
     }
