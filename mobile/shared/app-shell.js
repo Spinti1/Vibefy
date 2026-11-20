@@ -5,7 +5,7 @@
  const resumeKey='vibefy-mobile-resume-v1';
  const remembering=()=>{try{return JSON.parse(localStorage.getItem('vibefy-web-preferences')||'{}').rememberQueue!==false;}catch{return true;}};
  const originalSet=Storage.prototype.setItem,originalRemove=Storage.prototype.removeItem;
- const validResume=raw=>{if(typeof raw!=='string'||raw.length>1000000)return false;try{const v=JSON.parse(raw);return Array.isArray(v.queue)&&v.queue.length<=1000&&Number.isInteger(v.index)&&(v.queue.length===0?v.index===-1:v.index>=0&&v.index<v.queue.length)&&v.queue.every(t=>t&&typeof t.id==='string'&&/^(?:[A-Za-z0-9_-]{11}|jv:[0-9a-fA-F-]{36}|sc:\d{1,20})$/.test(t.id));}catch{return false;}};
+ const validResume=raw=>{if(typeof raw!=='string'||raw.length>1000000)return false;try{const v=JSON.parse(raw);return Array.isArray(v.queue)&&v.queue.length<=1000&&Number.isInteger(v.index)&&(v.queue.length===0?v.index===-1:v.index>=0&&v.index<v.queue.length)&&v.queue.every(t=>t&&typeof t.id==='string'&&/^(?:[A-Za-z0-9_-]{11}|spotify:[A-Za-z0-9]{22}|scurl:https:\/\/soundcloud\.com\/[A-Za-z0-9_%~-]+\/[A-Za-z0-9_%~-]+|jv:[0-9a-fA-F-]{36}|sc:\d{1,20})$/.test(t.id));}catch{return false;}};
  try {
   if(!remembering()){originalRemove.call(localStorage,resumeKey);originalRemove.call(sessionStorage,'vibefy-resume');}
   if(remembering()&&!sessionStorage.getItem('vibefy-resume')) {const held=localStorage.getItem(resumeKey);if(validResume(held))originalSet.call(sessionStorage,'vibefy-resume',held);}

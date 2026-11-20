@@ -282,6 +282,23 @@ def audio_url(identity):
         return uri, mime
     return cached(("audio", identity), 180, extract)
 
+@app.get("/api/soundcloud/resolve")
+async def resolve_soundcloud(url: str = Query(max_length=512)):
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname != "soundcloud.com" or parsed.username or parsed.password or parsed.port or parsed.query or parsed.fragment or not re.fullmatch(r"/[A-Za-z0-9_%~-]+/[A-Za-z0-9_%~-]+", parsed.path):
+        raise HTTPException(400, "Use a public SoundCloud song link.")
+    def resolve():
+        def fetch():
+            options = {"quiet":True,"no_warnings":True,"skip_download":True,"extract_flat":True,"socket_timeout":8,"retries":0,"cachedir":False}
+            with yt_dlp.YoutubeDL(options) as extractor:
+                data = extractor.extract_info(url, download=False)
+            identity = str((data or {}).get("id", ""))
+            if not re.fullmatch(r"\d{1,20}", identity):
+                raise ValueError("Unsupported recording")
+            return {"track":{"id":"sc:"+identity,"title":str(data.get("title","Untitled"))[:300],"artist":str(data.get("uploader","SoundCloud"))[:300],"duration":data.get("duration") or 0,"image":data.get("thumbnail") or "","album":"SoundCloud"}}
+        return cached(("sc-resolve",url),300,fetch)
+    return await worker(resolve)
+
 @app.get("/api/audio/{identity}")
 async def audio(identity: str, request: Request):
     if os.getenv("VERCEL") and os.getenv("VIBEFY_DIRECT_AUDIO") != "1":
