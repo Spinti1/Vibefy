@@ -23,7 +23,7 @@ class SecurityTests(unittest.TestCase):
         identity = "123456-demo.apps.googleusercontent.com"
         with patch.dict(module.os.environ, {"VIBEFY_GOOGLE_WEB_CLIENT_ID": identity, "GOOGLE_CLIENT_SECRET": "never-public"}):
             r = self.client.get("/api/google-config")
-            self.assertEqual(r.json(), {"clientId": identity})
+            self.assertEqual(r.json(), {"clientId": identity, "renewable": False})
             self.assertNotIn("never-public", r.text)
             self.assertEqual(r.headers["cache-control"], "no-store")
         with patch.dict(module.os.environ, {"VIBEFY_GOOGLE_WEB_CLIENT_ID": "invalid"}):

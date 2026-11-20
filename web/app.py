@@ -1,6 +1,5 @@
 """Vibefy web beta. Public catalogue only; never accepts account cookies or arbitrary URLs."""
 import asyncio
-import base64
 import json
 import os
 import re
@@ -14,14 +13,18 @@ from urllib.parse import urlparse
 import httpx
 import yt_dlp
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from ytmusicapi import YTMusic
 from services import spotify_page, soundcloud_search, recording_score
 from pydantic import BaseModel, Field
+from jam_gateway import router as jam_router
+from google_session import router as google_router, configured as google_renewal_configured
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI(title="Vibefy", docs_url=None, redoc_url=None, openapi_url=None)
+app.include_router(jam_router)
+app.include_router(google_router)
 VIDEO = re.compile(r"^[A-Za-z0-9_-]{11}$")
 PLAYLIST = re.compile(r"^(?:PL|OLAK5uy_|RDCLAK5uy_|RDAMPL|RDAMVM)[A-Za-z0-9_-]{8,180}$")
 CACHE = OrderedDict()
@@ -123,7 +126,7 @@ async def worker(work):
 
 @app.get("/api/capabilities")
 def capabilities():
-    return {"version": "0.4.53", "beta": True, "search": True, "playback": "official-embedded-player",
+    return {"version": "0.4.66", "beta": True, "search": True, "playback": "official-embedded-player",
             "nativeOnly": ["local Whisper Auto Sync", "audio-reactive desktop visualizers", "classic mini window"],
             "storage": "browser-local", "analytics": False, "jam": "shared Cloudflare relay; desktop and web"}
 
@@ -132,7 +135,7 @@ def google_config():
     identity = os.getenv("VIBEFY_GOOGLE_WEB_CLIENT_ID", "")
     if not re.fullmatch(r"[0-9]+-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com", identity):
         identity = ""
-    return {"clientId": identity}
+    return {"clientId": identity, "renewable": google_renewal_configured()}
 
 @app.get("/api/import/spotify")
 async def import_spotify(id: str = Query(max_length=22), offset: int = Query(default=0, ge=0, le=20000)):
@@ -155,23 +158,18 @@ async def match_recording(song: MatchSong):
 async def search_soundcloud(q: str = Query(min_length=2, max_length=160)):
     return await worker(lambda: cached(("soundcloud", q.casefold()), 120, lambda: soundcloud_search(q)))
 
-async def juice_request(path, token="", body=None, grant=""):
+async def juice_request(operation, token="", body=None):
+    """Compatibility endpoint; the browser calls the fixed Cloudflare adapter directly."""
     headers = {"Authorization": "Bearer " + token} if token else {}
-    if grant:
-        headers["X-CA"] = grant
-    async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
-        async with client.stream("POST" if body is not None else "GET", "https://api.juicevault.xyz" + path, json=body, headers=headers) as response:
-            if response.status_code == 403 or (response.status_code == 401 and not token and body is None):
-                raise HTTPException(503, "JuiceVault is blocking requests from this web host. Open JuiceVault directly or use the desktop add-on.")
-            if response.status_code == 401:
-                raise HTTPException(401, "JuiceVault could not authorize this request. Check your login or try again later.")
-            if response.status_code != 200:
-                raise HTTPException(502, "JuiceVault is temporarily unavailable.")
+    async with httpx.AsyncClient(timeout=20, follow_redirects=False) as client:
+        async with client.stream("POST" if body is not None else "GET", "https://vibefy-jam.pex-am.workers.dev/juice/" + operation, json=body, headers=headers) as response:
             data = bytearray()
             async for chunk in response.aiter_bytes():
                 data.extend(chunk)
                 if len(data) > 2 * 1024 * 1024:
                     raise HTTPException(502, "JuiceVault returned too much data.")
+            if response.status_code != 200:
+                raise HTTPException(429 if response.status_code == 429 else 401 if response.status_code == 401 else 502, "JuiceVault could not answer. Please try again later.")
             return json.loads(data)
 
 def juice_token(request):
@@ -188,36 +186,25 @@ class JuiceLogin(BaseModel):
 
 @app.post("/api/juice/login")
 async def juice_login(value: JuiceLogin):
-    ticket = await juice_request("/user/auth/token", body={})
-    token = ticket.get("data", {}).get("token", "")
-    try:
-        payload = token.split(".")[1]
-        grant = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["ca"]
-        if not isinstance(grant, str) or not re.fullmatch(r"[!-~]{1,16384}", grant):
-            raise ValueError()
-    except (ValueError, KeyError, IndexError, TypeError):
-        raise HTTPException(502, "JuiceVault sign-in is unavailable in this browser. Public search still works.") from None
-    result = await juice_request("/user/auth/login", body={"login": value.username, "password": value.password, "loginToken": token}, grant=grant)
-    access = result.get("data", {}).get("accessToken", "")
-    if not isinstance(access, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,16384}", access):
-        raise HTTPException(401, "JuiceVault did not grant a session.")
-    return {"accessToken": access}
+    return await juice_request("login", body=value.model_dump())
 
 @app.get("/api/juice/search")
 async def juice_search(q: str = Query(min_length=2, max_length=160)):
     from urllib.parse import urlencode
-    return await juice_request("/music/search?" + urlencode({"q": q}))
+    # Older cached clients can follow the same CORS-enabled public adapter,
+    # without another data-centre-to-provider request.
+    return RedirectResponse("https://vibefy-jam.pex-am.workers.dev/juice/search?" + urlencode({"q": q}), status_code=307)
 
 @app.get("/api/juice/playlists")
 async def juice_playlists(request: Request, username: str = Query(min_length=1, max_length=100)):
-    from urllib.parse import quote
-    return await juice_request("/user/playlists/user/" + quote(username, safe=""), token=juice_token(request))
+    from urllib.parse import urlencode
+    return await juice_request("playlists?" + urlencode({"username": username}), token=juice_token(request))
 
 @app.get("/api/juice/playlist")
 async def juice_playlist(request: Request, id: str = Query(max_length=36)):
     if not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", id):
         raise HTTPException(400, "Invalid playlist ID.")
-    return await juice_request("/user/playlists/" + id, token=juice_token(request))
+    return await juice_request("playlist?id=" + id, token=juice_token(request))
 
 @app.get("/api/search")
 async def search(q: str = Query(min_length=1, max_length=160)):
@@ -337,8 +324,9 @@ async def lyrics(title: str = Query(min_length=1, max_length=300), artist: str =
     if answer.status_code not in (200, 404) or len(answer.content) > 512 * 1024:
         raise HTTPException(502, "Lyrics are temporarily unavailable.")
     data = answer.json() if answer.status_code == 200 else {}
-    result = {"plain": str(data.get("plainLyrics") or "")[:100000], "synced": str(data.get("syncedLyrics") or "")[:100000], "source": "LRCLIB"}
+    result = {"plain": str(data.get("plainLyrics") or "")[:100000], "synced": str(data.get("syncedLyrics") or "")[:100000], "source": "LRCLIB", "complete": not bool(id)}
     if result["synced"] or not id:
+        result["complete"] = True
         return result
     def music_lyrics():
         api = YTMusic(requests_session=False)
@@ -354,6 +342,7 @@ async def lyrics(title: str = Query(min_length=1, max_length=300), artist: str =
         return {"plain": str(data.get("lyrics") or "")[:100000], "synced": "", "source": "YouTube Music · " + str(data.get("source") or "lyrics")[:100]}
     try:
         extra = await worker(lambda: cached(("lyrics", id), 3600, music_lyrics))
+        result["complete"] = True
         if extra and (extra["synced"] or not result["plain"]):
             return extra
     except HTTPException:

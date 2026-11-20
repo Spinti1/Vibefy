@@ -1,17 +1,34 @@
 'use strict';
-// Native clients keep unexpired grants in protected platform storage; browsers use memory.
+// Native refresh credentials stay in Keychain/Keystore; never in browser storage or backups.
 (() => {
  const $=id=>document.getElementById(id),readScope='https://www.googleapis.com/auth/youtube.readonly',writeScope='https://www.googleapis.com/auth/youtube.force-ssl',identityScope='openid profile';
  let client,token='',expires=0,writable=false,pending,expiryTimer,loading=false,initializing,displayName='',generation=0,grantedScopes='',restored=false,restoreAttempt;
+ let refreshToken='',renewing,renewRetryAt=0;
  let sessionWrites=Promise.resolve(),sessionSaveFailed=false,sessionReadFailed=false;
  const storage=()=>window.vibefyMobileSession;
- function persist(){if(!storage()||!connected())return Promise.resolve();const record={version:1,access_token:token,expires_at:expires,scope:grantedScopes,display_name:displayName};sessionWrites=sessionWrites.catch(()=>{}).then(()=>storage().write(record)).then(()=>{sessionSaveFailed=false;},error=>{sessionSaveFailed=true;throw error;});return sessionWrites;}
+ function persist(){if(!storage()||!connected())return Promise.resolve();const record={version:1,access_token:token,expires_at:expires,scope:grantedScopes,display_name:displayName,...(refreshToken?{refresh_token:refreshToken}:{})};sessionWrites=sessionWrites.catch(()=>{}).then(()=>storage().write(record)).then(()=>{sessionSaveFailed=false;},error=>{sessionSaveFailed=true;throw error;});return sessionWrites;}
  function clearStored(){if(storage())sessionWrites=sessionWrites.catch(()=>{}).then(()=>storage().clear()).catch(()=>{});}
- function applyGrant(record){if(!record||record.version!==1||typeof record.access_token!=='string'||record.access_token.length<1||record.access_token.length>8192||typeof record.expires_at!=='number'||record.expires_at<=Date.now()+5000||record.expires_at>Date.now()+86400000||!String(record.scope||'').split(' ').includes(readScope))return false;token=record.access_token;expires=record.expires_at;grantedScopes=String(record.scope);writable=grantedScopes.split(' ').includes(writeScope);displayName=String(record.display_name||'').slice(0,256);armExpiry();return true;}
- function armExpiry(){clearTimeout(expiryTimer);expiryTimer=setTimeout(()=>{clearStored();update();status('Google access needs renewal. Connect again to refresh your YouTube library. Your playlists are preserved.');},Math.max(0,expires-Date.now()));}
+ function validRefresh(value){return typeof value==='string'&&value.length>0&&value.length<=4096;}
+ function applyGrant(record){if(!record||record.version!==1||typeof record.access_token!=='string'||record.access_token.length<1||record.access_token.length>8192||typeof record.expires_at!=='number'||!Number.isFinite(record.expires_at)||record.expires_at<=0||record.expires_at>Date.now()+86400000||(!validRefresh(record.refresh_token)&&record.expires_at<=Date.now()+5000)||!String(record.scope||'').split(' ').includes(readScope))return false;token=record.access_token;expires=record.expires_at;refreshToken=validRefresh(record.refresh_token)?record.refresh_token:'';grantedScopes=String(record.scope);writable=grantedScopes.split(' ').includes(writeScope);displayName=String(record.display_name||'').slice(0,256);armExpiry();return true;}
+ function armExpiry(){clearTimeout(expiryTimer);expiryTimer=setTimeout(()=>{if(refreshToken)renewAccess().catch(error=>{status(error.message);});else{update();status('Google access needs renewal. Connect again to refresh your YouTube library. Your playlists are preserved.');}},Math.max(1000,expires-Date.now()-(refreshToken?60000:0)));}
+ async function renewAccess(force=false){
+  if(renewing)return renewing;if(!refreshToken)throw Error('Connect YouTube again to renew your access.');
+  if(!force&&Date.now()<renewRetryAt)throw Error('Your account is saved. Google is temporarily unavailable; retry shortly.');
+  const ticket=generation,credential=refreshToken;renewRetryAt=Date.now()+30000;
+  renewing=(async()=>{try{
+   const response=await fetch('/api/google-session/refresh',{method:'POST',headers:{'Content-Type':'application/json','X-Vibefy-Auth':'1'},body:JSON.stringify({refresh_token:credential}),signal:AbortSignal.timeout(20000)});
+   const data=await response.json();if(ticket!==generation)return;
+   if(response.status===401&&data.error==='invalid_grant'){disconnect();throw Error('Google access was revoked. Connect again to restore access. Your playlists are preserved.');}
+   if(!response.ok)throw Error('Your account is saved. Google is temporarily unavailable; retry shortly.');
+   const ttl=Number(data.expires_in);if(typeof data.access_token!=='string'||!data.access_token||data.access_token.length>8192||!Number.isFinite(ttl)||ttl<=5||ttl>86400)throw Error('Google could not renew access. Your account is saved; retry shortly.');
+   token=data.access_token;expires=Date.now()+(ttl-5)*1000;if(validRefresh(data.refresh_token))refreshToken=data.refresh_token;
+   renewRetryAt=0;armExpiry();await persist().catch(()=>{});update();
+  }catch(error){if(ticket===generation&&refreshToken){clearTimeout(expiryTimer);expiryTimer=setTimeout(()=>renewAccess().catch(e=>status(e.message)),30000);}throw error;}})().finally(()=>{renewing=null;});return renewing;
+ }
+ async function ensureAccess(){if(refreshToken&&expires<=Date.now()+60000)await renewAccess();if(!token||expires<=Date.now())throw Error('Connect YouTube again to renew your access.');}
  function restore(){if(!storage()||restored)return Promise.resolve();if(restoreAttempt)return restoreAttempt;const ticket=generation;restoreAttempt=(async()=>{let record;try{record=await storage().read();}catch{sessionReadFailed=true;status('Saved account could not be read. Your playlists are safe; try restarting Vibefy.');return;}restored=true;if(ticket!==generation||pending||connected())return;if(!applyGrant(record)){if(record)clearStored();return;}update();try{await refresh();}catch(error){status(error.message);}})().finally(()=>{restoreAttempt=null;});return restoreAttempt;}
 
- const connected=()=>!!token&&Date.now()<expires;
+ const connected=()=>!!token&&(Date.now()<expires||!!refreshToken);
  const status=message=>{$('youtube-status').textContent=message;};
  function update(){
   const active=connected(),compact=window.vibefyPhone||window.matchMedia?.('(max-width:900px)').matches;
@@ -22,13 +39,13 @@
   $('home-account-status').textContent=loading?'Finish connecting in the Google window…':active?'YouTube connected · Your local playlists and backups stay available.':'Saved on this device. Use the top bar to connect YouTube and load your playlists.';
   window.dispatchEvent(new Event('vibefy-account'));
  }
- function disconnect(){generation++;clearStored();clearTimeout(expiryTimer);token='';expires=0;writable=false;displayName='';grantedScopes='';$('youtube-playlists').replaceChildren();status('Disconnected. Your imported and local playlists are preserved.');update();}
+ function disconnect(){generation++;clearStored();clearTimeout(expiryTimer);token='';refreshToken='';renewRetryAt=0;expires=0;writable=false;displayName='';grantedScopes='';$('youtube-playlists').replaceChildren();status('Disconnected. Your imported and local playlists are preserved.');update();}
  function finishJob(error,response,job=pending){
   if(!job||pending!==job)return;pending=null;clearTimeout(job.timer);
   if(error){window.vibefyMobileCancelAuth?.();job.reject(error);return;}
   if(!response?.access_token||response.error){job.reject(Error('Google access was not granted. You can still use Vibefy as a guest.'));return;}
   if(!String(response.scope||'').split(' ').includes(readScope)){job.reject(Error('YouTube playlist permission was not granted. Your local library is unchanged.'));return;}
-  grantedScopes=String(response.scope||'');token=response.access_token;expires=Date.now()+Math.max(0,Number(response.expires_in||3600)-60)*1000;writable=String(response.scope||'').split(' ').includes(writeScope);
+  generation++;refreshToken=validRefresh(response.refresh_token)?response.refresh_token:'';renewRetryAt=0;grantedScopes=String(response.scope||'');token=response.access_token;expires=Date.now()+Math.max(1,Number(response.expires_in||3600)-5)*1000;writable=String(response.scope||'').split(' ').includes(writeScope);
   armExpiry();persist().catch(()=>status('Connected for this session. Secure storage could not save the account; try connecting again.'));
   if(job.write&&!writable)job.reject(Error('Permission to save YouTube playlists was not granted. Your local playlist is safe.'));else job.resolve(response);
  }
@@ -40,9 +57,11 @@
   try{const oauth=google.accounts.oauth2.initTokenClient({client_id:client.client_id,scope:readScope,include_granted_scopes:false,callback:response=>finishJob(null,response,job),error_callback:()=>finishJob(Error('Google sign-in was closed or blocked. Allow the popup and try again.'),null,job)});oauth.requestAccessToken({scope:write?readScope+' '+writeScope:identityScope+' '+readScope,include_granted_scopes:false,prompt:''});}catch{finishJob(Error('Google could not open. Allow popups for Vibefy and try again.'),null,job);}
  });}
  async function api(path,query={},method='GET',body){
-  if(!connected())throw Error('Connect YouTube again to renew your access.');const url=new URL('https://www.googleapis.com/youtube/v3/'+path);for(const [k,v]of Object.entries(query))url.searchParams.set(k,v);
-  const r=await fetch(url,{method,headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});
-  if(r.status===401){disconnect();throw Error('Your Google session expired. Connect again.');}if(!r.ok)throw Error(r.status===403?'YouTube could not authorize this action. Check Google account access or try again later.':'YouTube could not complete the request. Try again.');return r.status===204?{}:r.json();
+  await ensureAccess();const ticket=generation,url=new URL('https://www.googleapis.com/youtube/v3/'+path);for(const [k,v]of Object.entries(query))url.searchParams.set(k,v);
+  const request=()=>fetch(url,{method,headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});
+  let r=await request();
+  if(r.status===401&&refreshToken){await renewAccess(true);if(ticket!==generation)throw Error('Connection changed. Retry this action.');r=await request();}
+  if(r.status===401){expires=0;update();throw Error(refreshToken?'Google could not authorize this request. Your account is saved; retry shortly.':'Google access needs renewal. Connect again. Your playlists are preserved.');}if(!r.ok)throw Error(r.status===403?'YouTube could not authorize this action. Check Google account access or try again later.':'YouTube could not complete the request. Try again.');return r.status===204?{}:r.json();
  }
  async function importPlaylist(p,button){
   const ticket=generation;button.disabled=true;status('Importing '+(p.snippet?.title||'playlist')+'…');
@@ -79,5 +98,7 @@
    client={client_id:data.clientId};$('google-connect').onclick=connect;update();status('');await restoreTask;if(sessionReadFailed)status('Saved account could not be read. Your playlists are safe; try restarting Vibefy.');
   })().catch(async()=>{await restoreTask;unavailable();}).finally(()=>{initializing=null;});return initializing;
  }
+ window.addEventListener?.('pageshow',()=>{if(refreshToken&&expires<=Date.now()+60000)renewAccess().catch(e=>status(e.message));});
+ document.addEventListener?.('visibilitychange',()=>{if(document.visibilityState==='visible'&&refreshToken&&expires<=Date.now()+60000)renewAccess().catch(e=>status(e.message));});
  update();initialize();
 })();

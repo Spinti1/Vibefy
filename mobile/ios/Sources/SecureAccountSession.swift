@@ -8,7 +8,8 @@ enum SecureAccountSession {
  private static var query:[String:Any] {[kSecClass as String:kSecClassGenericPassword,kSecAttrService as String:service,kSecAttrAccount as String:account]}
  static func valid(_ value:[String:Any])->Bool {
   guard (value["version"] as? NSNumber)?.intValue==1,let token=value["access_token"] as? String,!token.isEmpty,token.utf8.count<=8192,let expiry=value["expires_at"] as? NSNumber,let scope=value["scope"] as? String,scope.split(separator:" ").contains("https://www.googleapis.com/auth/youtube.readonly") else{return false}
-  let now=Date().timeIntervalSince1970*1000;return expiry.doubleValue>now+5000 && expiry.doubleValue<=now+86_400_000
+  let now=Date().timeIntervalSince1970*1000;let refresh=value["refresh_token"] as? String;let renewable=refresh.map{!$0.isEmpty && $0.utf8.count<=4096} ?? false
+  return expiry.doubleValue>0 && expiry.doubleValue<=now+86_400_000 && (expiry.doubleValue>now+5000 || renewable)
  }
  static func load() throws -> [String:Any]? {
   var request=query;request[kSecReturnData as String]=true;request[kSecMatchLimit as String]=kSecMatchLimitOne

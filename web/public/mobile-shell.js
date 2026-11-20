@@ -1,7 +1,6 @@
-// Repair and maintain installed mobile clients.
-if(window.VibefyMobile?.postMessage||window.webkit?.messageHandlers?.vibefyMobile){
 (() => {
  'use strict';
+ if(!window.VibefyMobile&&!window.webkit?.messageHandlers?.vibefyMobile)return;
  if(window.top!==window.self||location.origin!=='https://vibefy-neon.vercel.app'||window.vibefyMobileShellReady)return;
  window.vibefyMobileShell=true;
  const resumeKey='vibefy-mobile-resume-v1';
@@ -31,7 +30,7 @@ if(window.VibefyMobile?.postMessage||window.webkit?.messageHandlers?.vibefyMobil
   if(authJob)return reject(Error('Finish connecting in your browser first.'));
   const key=crypto.getRandomValues(new Uint8Array(32)),state=enc(crypto.getRandomValues(new Uint8Array(24)));
   const job={key,state,resolve,reject};authJob=job;job.timer=setTimeout(()=>{if(authJob===job){authJob=null;reject(Error('Connection expired. Tap Connect YouTube to try again.'));}},300000);
-  if(!send({action:'connectGoogle',url:location.origin+'/mobile-connect.html#'+new URLSearchParams({key:enc(key),state,write:write?'1':'0'})})){clearTimeout(job.timer);authJob=null;reject(Error('The browser could not open.'));}
+  if(!send({action:'connectGoogle',url:location.origin+'/mobile-connect.html#'+new URLSearchParams({key:enc(key),state,write:write?'1':'0',renew:window.vibefyNativeInfo?.renewableSession?'1':'0'})})){clearTimeout(job.timer);authJob=null;reject(Error('The browser could not open.'));}
  });
  window.vibefyMobileAuthResult=async raw=>{
   const job=authJob;if(!job)return;
@@ -73,5 +72,3 @@ if(window.VibefyMobile?.postMessage||window.webkit?.messageHandlers?.vibefyMobil
  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install,{once:true});else install();
  window.addEventListener('pageshow',install);
 })();
-
-}
