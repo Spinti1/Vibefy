@@ -6,7 +6,7 @@ function animation(){
  const c={phone:false,timer:null,prefs:{catjam:true,nyan:true,size:90,tempo:135},cat:{style:{}},nyan:{style:{},getAttribute(){return this.src;}},$:id=>nodes[id],window:{vibefyPlayerBridge:{snapshot:()=>c.snapshot},vibefyPreferences:{}},snapshot:{track:{duration:200},position:100,paused:false},document:{hidden:false,body,querySelectorAll:()=>c.dialogs},dialogs:[],matchMedia:()=>({matches:false}),innerWidth:800,setTimeout:()=>1,Math,Number,Boolean};
  vm.createContext(c);vm.runInContext(source.slice(source.indexOf(' function schedule()'),source.indexOf(" document.addEventListener('vibefy-playback'")),c);return {...c,context:c,modal,nodes,frame:()=>vm.runInContext('frame()',c)};
 }
-test('cats render on the visible Jam seek bar even though the mini player is hidden',()=>{
+test('cats render on the visible mini seek bar while the closed now-playing dialog is ignored',()=>{
  const p=animation();p.frame();assert.equal(p.cat.hidden,false);assert.equal(p.nyan.hidden,false);assert.equal(p.nyan.style.left,'327px');assert.equal(p.nyan.style.top,'284px');assert.equal(p.cat.parentNode,p.context.document.body);
 });
 test('modal close restores animation and modal artwork uses coordinates relative to the dialog',()=>{
@@ -31,4 +31,8 @@ test('phone catalogue ignores an old Cat Jam installation and removes WaveLink w
  vm.runInNewContext(source,{window,document,localStorage:{getItem:()=>JSON.stringify({wavelink:true,catjam:true,nyan:true,juicevault:true,size:110})},matchMedia:()=>({matches:false}),Image:function(){return make();},MutationObserver:class{observe(){}},Event,Boolean,Number,Math,JSON,setTimeout:()=>1});
  assert.deepEqual(node('mod-catalogue').children.map(c=>c.dataset.mod),['juicevault','nyan']);assert.equal(window.vibefyBrowserMods.catjam,false);assert.equal(window.vibefyBrowserMods.nyan,true);assert.equal(window.vibefyBrowserMods.size,110);assert.equal('wavelink' in window.vibefyBrowserMods,false);
  assert.ok(!document.body.children.some(n=>n.className==='browser-mod cat-jam'));
+});
+
+test('inline Jam uses its visible seek bar even though its dialog is non-modal',()=>{
+ const p=animation();p.nodes['now-dialog']={open:true};p.nodes['mini-seek'].getClientRects=()=>[];p.frame();assert.equal(p.nyan.hidden,false);assert.equal(p.nyan.style.left,'327px');assert.equal(p.nyan.style.position,'fixed');
 });
