@@ -2,7 +2,7 @@ plugins { id 'com.android.application' }
 android {
  namespace 'online.usevibefy.mobile'
  compileSdk 35
- sourceSets { main { assets.srcDir '../../licenses' } }
+ sourceSets { main { assets.srcDirs = ['../../shared', '../../licenses'] } }
  defaultConfig {
   applicationId 'online.usevibefy.mobile'
   minSdk 26

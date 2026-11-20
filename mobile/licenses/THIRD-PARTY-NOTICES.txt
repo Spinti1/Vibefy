@@ -1,0 +1,26 @@
+Vibefy mobile audio components
+
+Android audio resolver:
+NewPipeExtractor v0.27.1, NewPipe e.V. and contributors.
+https://github.com/TeamNewPipe/NewPipeExtractor/tree/v0.27.1
+GPL-3.0-or-later. Full license is included in this folder.
+The Vibefy Android distribution is GPL-3.0-or-later; its wrapper source,
+build scripts and exact dependency versions are in mobile/android/ at the release commit.
+
+NewPipeExtractor dependencies: TeamNewPipe/nanojson (MIT), jsoup (MIT),
+Mozilla Rhino (MPL-2.0), Google Protobuf-lite (BSD-3-Clause), JSR-305
+(BSD-3-Clause), and Android desugar_jdk_libs (GPL-2.0 with Classpath Exception).
+Original artifact notices remain with their distributions; no ownership is claimed.
+The optional Rhino JSR-223 engine is excluded from the Android distribution.
+
+Apple audio resolver:
+YouTubeKit, Alexander Eichhorn and contributors, MIT.
+https://github.com/alexeichhorn/YouTubeKit
+Project-owned fork pinned at 7f75a2299dc329c0b7855afb25d47663a02855cb.
+Full original copyright and MIT license are included in this folder.
+Only local resolution is enabled. The library's third-party remote fallback is not used.
+
+AndroidX WebKit and Media3: Android Open Source Project, Apache-2.0.
+Apple frameworks are provided by the device operating system.
+See the main project's CREDITS.md and THIRD_PARTY_LICENSES.txt for UI assets
+and the existing desktop/web components.
