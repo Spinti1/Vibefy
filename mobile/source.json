@@ -6,16 +6,16 @@
       "name": "Vibefy Preview",
       "bundleIdentifier": "online.usevibefy.mobile",
       "developerName": "Spinti1 and contributors",
-      "localizedDescription": "Mobile preview with QR playlist imports, optional updates from desktop, device-protected Google renewal, persistent playlists, native backups and disabled app zoom. The mobile player displays cover artwork; YouTube playback still uses its existing video stream. Only users upgrading from 0.2.4 or earlier need to reconnect once for automatic Google access renewal. Access revoked by Google requires reconnecting; reliable background YouTube playback is not guaranteed.",
+      "localizedDescription": "Mobile preview with on-device audio-only YouTube playback: M4A/AAC streaming with artwork, without loading a video player. Includes QR playlist imports, protected Google renewal, persistent playlist metadata, backups and Jam controls. Provider restrictions still apply. Existing account and playlist data is retained. Background behavior depends on the device; physical-device validation remains ongoing. Android uses NewPipeExtractor (GPL-3.0-or-later); iOS uses YouTubeKit (MIT).",
       "iconURL": "https://raw.githubusercontent.com/Spinti1/Vibefy/main/web/public/assets/icon.png",
       "versions": [
         {
-          "version": "0.2.6",
+          "version": "0.2.7",
           "date": "2026-11-20",
-          "downloadURL": "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.6/Vibefy-0.2.6.ipa",
-          "size": 1295829,
+          "downloadURL": "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.7/Vibefy-0.2.7.ipa",
+          "size": 1699640,
           "minOSVersion": "15.0",
-          "localizedDescription": "Mobile preview with QR playlist imports, optional updates from desktop, device-protected Google renewal, persistent playlists, native backups and disabled app zoom. The mobile player displays cover artwork; YouTube playback still uses its existing video stream. Only users upgrading from 0.2.4 or earlier need to reconnect once for automatic Google access renewal. Access revoked by Google requires reconnecting; reliable background YouTube playback is not guaranteed."
+          "localizedDescription": "Mobile preview with on-device audio-only YouTube playback: M4A/AAC streaming with artwork, without loading a video player. Includes QR playlist imports, protected Google renewal, persistent playlist metadata, backups and Jam controls. Provider restrictions still apply. Existing account and playlist data is retained. Background behavior depends on the device; physical-device validation remains ongoing. Android uses NewPipeExtractor (GPL-3.0-or-later); iOS uses YouTubeKit (MIT)."
         }
       ]
     }
