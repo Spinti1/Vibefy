@@ -1,4 +1,4 @@
-const CACHE='vibefy-shell-076';
+const CACHE='vibefy-shell-077';
 const SHELL=['/web','/app','/phone','/device.js','/youtube-account.js','/web-library.js','/playlist-share.js','/mobile-mods.js','/mobile.css','/web.css','/workspace.css','/native-ui.css','/jam-player.css','/jam-room.css','/jam-room.js','/native-ui.js','/web-settings.js','/assets/ui-icons.svg','/player.js','/jam.js','/source-player.js','/embedded-player.js','/player.css','/style.css','/assets/icon.png','/manifest.webmanifest'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('vibefy-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));

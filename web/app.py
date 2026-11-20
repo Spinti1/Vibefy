@@ -335,6 +335,44 @@ async def audio(identity: str, request: Request):
     return Response(bytes(body), status_code=206, media_type=mime,
                     headers={"Accept-Ranges": "bytes", "Content-Range": content_range, "Cache-Control": "private, max-age=60"})
 
+async def more_lyrics(title, artist, duration):
+    """Accept a fallback only when it identifies the requested recording."""
+    try:
+        async with httpx.AsyncClient(timeout=5, follow_redirects=False) as client:
+            response = await client.get("https://lyrics.kamiloo13.me/api/get", params={"track": title, "artist": artist, "duration": duration})
+        if response.status_code == 404:
+            return None
+        if response.status_code != 200 or len(response.content) > 512 * 1024:
+            return None
+        data = response.json()
+        meta = data.get("metadata") or data
+        candidate = {"title": str(meta.get("trackName") or meta.get("track") or meta.get("title") or ""), "artist": str(meta.get("artistName") or meta.get("artist") or "")}
+        if not candidate["title"] or not candidate["artist"] or recording_score({"title": title, "artist": artist}, candidate) < .85:
+            return None
+        lines = data.get("lines")
+        if not isinstance(lines, list):
+            return None
+        plain, synced = [], []
+        for line in lines[:2000]:
+            if not isinstance(line, dict) or not isinstance(line.get("words"), str):
+                continue
+            words = line["words"][:2000]
+            plain.append(words)
+            if data.get("isSynced") is True:
+                try:
+                    milliseconds = int(line["startTimeMs"])
+                    if not 0 <= milliseconds <= 86400000:
+                        continue
+                    synced.append(f"[{milliseconds // 60000:02d}:{milliseconds % 60000 / 1000:05.2f}]{words}")
+                except (ValueError, TypeError, KeyError):
+                    pass
+        if not plain:
+            return None
+        provider = str(data.get("providerLyricsDisplayName") or data.get("provider") or "Lyrics")[:100]
+        return {"plain": "\n".join(plain)[:100000], "synced": "\n".join(synced)[:100000], "source": provider + " via More Lyrics", "complete": True}
+    except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+        return None
+
 @app.get("/api/lyrics")
 async def lyrics(title: str = Query(min_length=1, max_length=300), artist: str = Query(max_length=300), duration: int = Query(default=0, ge=0, le=86400), id: str = Query(default="", max_length=11)):
     if id and not VIDEO.fullmatch(id):
@@ -348,9 +386,13 @@ async def lyrics(title: str = Query(min_length=1, max_length=300), artist: str =
         raise HTTPException(502, "Lyrics are temporarily unavailable.")
     data = answer.json() if answer.status_code == 200 else {}
     result = {"plain": str(data.get("plainLyrics") or "")[:100000], "synced": str(data.get("syncedLyrics") or "")[:100000], "source": "LRCLIB", "complete": not bool(id)}
-    if result["synced"] or not id:
+    if result["synced"]:
         result["complete"] = True
         return result
+    more_task = asyncio.create_task(more_lyrics(title, artist, duration))
+    if not id:
+        extra = await more_task
+        return extra if extra and (extra["synced"] or not result["plain"]) else result
     def music_lyrics():
         api = YTMusic(requests_session=False)
         reference = api.get_watch_playlist(videoId=id).get("lyrics")
@@ -367,9 +409,12 @@ async def lyrics(title: str = Query(min_length=1, max_length=300), artist: str =
         extra = await worker(lambda: cached(("lyrics", id), 3600, music_lyrics))
         result["complete"] = True
         if extra and (extra["synced"] or not result["plain"]):
-            return extra
+            result = {**extra, "complete": True}
     except HTTPException:
         pass
+    extra = await more_task
+    if extra and not result["synced"] and (extra["synced"] or not result["plain"]):
+        return extra
     return result
 
 @app.get("/phone", include_in_schema=False)
