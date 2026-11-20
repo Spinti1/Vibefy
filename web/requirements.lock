@@ -18,5 +18,6 @@ typing-inspection==0.4.4
 typing_extensions==4.16.0
 urllib3==2.8.0
 uvicorn==0.54.0
+websockets==17.4
 yt-dlp==2026.10.26
 ytmusicapi==1.12.3
