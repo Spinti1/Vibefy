@@ -45,3 +45,8 @@ Expired access is renewed before library requests and after background suspensio
 A desktop QR opens a metadata preview at /web#share=<id>. Save a local copy without signing in; Keep updated retrieves changes on opening it or returning to the foreground, with conditional requests and a one-minute minimum interval. vibefy://playlist?id=<id> opens the preview in installed apps. Turning off following allows independent local edits. Metadata backups retain the read-only subscription, never its desktop owner key.
 
 Native phone pinch/page zoom is disabled. YouTube now-playing displays cover artwork; this presentation change does not remove the existing YouTube video stream or guarantee audio-only network traffic. Background playback limitations remain.
+
+
+### Audio-only playback in 0.2.7
+
+Public YouTube recordings resolve on the device. Only M4A audio streams are selected; the hybrid UI retains artwork and existing queue/Jam controls without loading a YouTube iframe. No audio files are retained. Native resolution uses NewPipeExtractor on Android (GPL-3.0-or-later; Android target distributed under the same license), and Alexander Eichhorn's YouTubeKit on iOS (MIT). See `licenses/` and the exact dependency pins. Corresponding Android source is the `mobile/android/` tree at the release commit. Provider restrictions and unavailable audio are reported without switching back to video.

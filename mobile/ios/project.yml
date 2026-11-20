@@ -6,17 +6,25 @@ options:
 settings:
   base:
     SWIFT_VERSION: '5.0'
-    MARKETING_VERSION: '0.2.6'
-    CURRENT_PROJECT_VERSION: '8'
+    MARKETING_VERSION: '0.2.7'
+    CURRENT_PROJECT_VERSION: '9'
     CODE_SIGNING_ALLOWED: NO
+packages:
+  YouTubeKit:
+    url: https://github.com/Spinti1/YouTubeKit
+    revision: 7f75a2299dc329c0b7855afb25d47663a02855cb
 targets:
   Vibefy:
+    dependencies:
+      - package: YouTubeKit
     type: application
     platform: iOS
     sources:
       - path: Sources
         excludes: [NativePrototype.swift]
       - path: ../shared/app-shell.js
+        buildPhase: resources
+      - path: ../licenses
         buildPhase: resources
     settings:
       base:

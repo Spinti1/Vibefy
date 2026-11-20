@@ -21,6 +21,17 @@
   window.vibefyMobileSession={read:()=>call('readSession'),write:value=>call('saveSession',value),clear:()=>call('clearSession')};
   window.vibefyMobileSessionResult=(id,value,error)=>{const job=sessionJobs.get(id);if(!job)return;sessionJobs.delete(id);clearTimeout(job.timer);if(error)job.reject(Error('Secure account storage is unavailable.'));else job.resolve(value);};
  }
+
+ if(window.vibefyNativeInfo?.audioOnly){
+  const jobs=new Map(),epoch=Array.from(crypto.getRandomValues(new Uint8Array(16)),v=>v.toString(16).padStart(2,'0')).join('');let sequence=0;
+  window.vibefyMobileAudio={resolve:video=>new Promise((resolve,reject)=>{
+   if(!/^[A-Za-z0-9_-]{11}$/.test(video))return reject(Error('Invalid recording.'));
+   for(const held of jobs.values()){clearTimeout(held.timer);held.reject(Error('Recording changed.'));}jobs.clear();
+   const id='audio-'+epoch+'-'+(++sequence),timer=setTimeout(()=>{jobs.delete(id);reject(Error('Audio source took too long. Try another recording.'));},30000);
+   jobs.set(id,{resolve,reject,timer});if(!send({action:'resolveAudio',id,video})){jobs.delete(id);clearTimeout(timer);reject(Error('Audio playback is unavailable.'));}
+  })};
+  window.vibefyMobileAudioResult=(id,url,error)=>{const job=jobs.get(id);if(!job)return;jobs.delete(id);clearTimeout(job.timer);try{const u=new URL(url);if(error||u.protocol!=='https:'||!u.hostname.endsWith('.googlevideo.com')||u.username||u.password||u.port)throw Error();job.resolve(u.href);}catch{job.reject(Error(error||'No compatible audio-only source is available.'));}};
+ }
  let authJob;
  window.vibefyMobileCancelAuth=()=>{const job=authJob;if(!job)return;authJob=null;clearTimeout(job.timer);job.key.fill(0);job.reject(Error('Connection cancelled. Tap Connect YouTube to try again.'));};
  const enc=bytes=>btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');

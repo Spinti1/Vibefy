@@ -275,10 +275,10 @@ def audio_url(identity):
     def extract():
         opts = {"quiet": True, "no_warnings": True, "noplaylist": True, "skip_download": True,
                 "socket_timeout": 12, "retries": 1, "extractor_retries": 1,
-                "format": "bestaudio[ext=m4a]/bestaudio", "cachedir": False}
+                "format": "bestaudio[vcodec=none][ext=m4a]/bestaudio[vcodec=none]", "cachedir": False}
         with yt_dlp.YoutubeDL(opts) as extractor:
             data = extractor.extract_info("https://www.youtube.com/watch?v=" + identity, download=False)
-        if not data or data.get("is_live") or data.get("has_drm"):
+        if not data or data.get("is_live") or data.get("has_drm") or data.get("vcodec") != "none" or data.get("acodec") in (None, "none"):
             raise ValueError("Unavailable recording")
         uri = data.get("url", "")
         parsed = urlparse(uri)
@@ -308,7 +308,7 @@ async def resolve_soundcloud(url: str = Query(max_length=512)):
 @app.get("/api/audio/{identity}")
 async def audio(identity: str, request: Request):
     if os.getenv("VERCEL") and os.getenv("VIBEFY_DIRECT_AUDIO") != "1":
-        raise HTTPException(501, "Use the official browser player on this deployment.")
+        raise HTTPException(501, "Audio-only YouTube playback requires the updated mobile or desktop app on this host.")
     if not VIDEO.fullmatch(identity):
         raise HTTPException(400, "Invalid recording ID.")
     range_header = request.headers.get("range", "bytes=0-")
