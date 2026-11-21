@@ -6,8 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: '5.0'
-    MARKETING_VERSION: '0.2.7'
-    CURRENT_PROJECT_VERSION: '9'
+    MARKETING_VERSION: '0.2.8'
+    CURRENT_PROJECT_VERSION: '10'
     CODE_SIGNING_ALLOWED: NO
 packages:
   YouTubeKit:
@@ -35,6 +35,7 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: Vibefy
+        NSCameraUsageDescription: Scan a playlist QR code from Vibefy on your computer. Images stay on your device.
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}

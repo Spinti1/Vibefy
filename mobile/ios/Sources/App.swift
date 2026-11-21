@@ -23,7 +23,7 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
  private func trusted(_ url:URL?)->Bool {guard let url else{return false};return url.scheme=="https" && url.host=="vibefy-neon.vercel.app" && url.port==nil && url.user==nil && url.password==nil}
  override func viewDidLoad(){super.viewDidLoad();view.backgroundColor=UIColor(red:0.055,green:0.071,blue:0.082,alpha:1)
   let config=WKWebViewConfiguration();config.websiteDataStore = .default();config.allowsInlineMediaPlayback=true;config.mediaTypesRequiringUserActionForPlayback=[]
-  let script="window.vibefyNativeInfo={platform: 'ios',version: '0.2.7',secureSession: true,renewableSession: true,audioOnly: true};\n" + ((try? String(contentsOf:Bundle.main.url(forResource:"app-shell",withExtension:"js")!,encoding:.utf8)) ?? "")
+  let script="window.vibefyNativeInfo={platform: 'ios',version: '0.2.8',secureSession: true,renewableSession: true,audioOnly: true,qrCamera: true};\n" + ((try? String(contentsOf:Bundle.main.url(forResource:"app-shell",withExtension:"js")!,encoding:.utf8)) ?? "")
   config.userContentController.addUserScript(WKUserScript(source:script,injectionTime:.atDocumentStart,forMainFrameOnly:true));config.userContentController.add(WeakShellHandler(self),name:"vibefyMobile")
   web=WKWebView(frame:.zero,configuration:config);web.navigationDelegate=self;web.uiDelegate=self;web.isOpaque=false;web.backgroundColor=view.backgroundColor;web.scrollView.backgroundColor=view.backgroundColor;web.scrollView.bounces=false;web.scrollView.pinchGestureRecognizer?.isEnabled=false;web.allowsBackForwardNavigationGestures=true;web.translatesAutoresizingMaskIntoConstraints=false
   view.addSubview(web);NSLayoutConstraint.activate([web.topAnchor.constraint(equalTo:view.safeAreaLayoutGuide.topAnchor),web.bottomAnchor.constraint(equalTo:view.bottomAnchor),web.leadingAnchor.constraint(equalTo:view.safeAreaLayoutGuide.leadingAnchor),web.trailingAnchor.constraint(equalTo:view.safeAreaLayoutGuide.trailingAnchor)])
@@ -40,6 +40,10 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
  @discardableResult func openJam(_ url:URL)->Bool {
   guard url.scheme=="vibefy",url.host=="jam",let code=URLComponents(url:url,resolvingAgainstBaseURL:false)?.queryItems?.first(where:{$0.name=="code"})?.value,code.range(of:"^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}$",options:.regularExpression) != nil else{return false}
   loadViewIfNeeded();web.load(URLRequest(url:URL(string:home.absoluteString+"?jam="+code)!));return true
+ }
+ func webView(_ webView:WKWebView,requestMediaCapturePermissionFor origin:WKSecurityOrigin,initiatedByFrame frame:WKFrameInfo,type:WKMediaCaptureType,decisionHandler:@escaping(WKPermissionDecision)->Void){
+  guard frame.isMainFrame,origin.protocol=="https",origin.host=="vibefy-neon.vercel.app",origin.port==443 || origin.port==0,trusted(webView.url),type == .camera else{decisionHandler(.deny);return}
+  decisionHandler(.prompt)
  }
  func webView(_ webView:WKWebView,didStartProvisionalNavigation navigation:WKNavigation!){failed=false}
  func webView(_ webView:WKWebView,didCommit navigation:WKNavigation!){if trusted(web.url){cover.isHidden=true}}

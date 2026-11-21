@@ -50,3 +50,5 @@ Native phone pinch/page zoom is disabled. YouTube now-playing displays cover art
 ### Audio-only playback in 0.2.7
 
 Public YouTube recordings resolve on the device. Only M4A audio streams are selected; the hybrid UI retains artwork and existing queue/Jam controls without loading a YouTube iframe. No audio files are retained. Native resolution uses NewPipeExtractor on Android (GPL-3.0-or-later; Android target distributed under the same license), and Alexander Eichhorn's YouTubeKit on iOS (MIT). See `licenses/` and the exact dependency pins. Corresponding Android source is the `mobile/android/` tree at the release commit. Provider restrictions and unavailable audio are reported without switching back to video.
+
+Mobile 0.2.8 adds in-app playlist QR scanning with camera-only permission. Frames are decoded locally with jsQR 1.4.0 (Apache-2.0); no recording/upload. Capture stops on close, successful scan and background. Phone Home places Scan above Create; phone backup buttons and the redundant header library shortcut are hidden. Existing playlist metadata and sessions are preserved.

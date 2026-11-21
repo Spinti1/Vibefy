@@ -89,3 +89,54 @@ html[data-cover-mode=true] .now-artwork>#soundcloud-frame{position:relative;widt
  .app-header .header-actions .icon-button{width:29px;min-width:29px;padding:5px}
  .app-header .account-connect{padding:7px 8px!important;font-size:10px!important}
 }
+/* Touch feedback without a sticky focus ring; hardware keyboard focus stays visible. */
+html[data-touch-input=true] button:focus,html[data-touch-input=true] a:focus{outline:none!important;box-shadow:none}
+button,a,input{-webkit-tap-highlight-color:transparent}
+.big-play{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.big-play .ui-icon{width:28px;height:28px;color:inherit}
+@media(max-width:900px){
+ .mini-player .mini-transport{gap:2px}.mini-player #mini-play{color:#f6faf9}
+ .mini-player .ui-icon{width:23px;height:23px}
+ .mini-player:has(#mini-seek:not(:disabled)){height:82px;min-height:82px;padding-bottom:17px}
+ .mini-player .mini-timeline{display:flex;position:absolute;left:14px;right:14px;bottom:2px;align-items:center;gap:0;height:18px}
+ .mini-timeline>span{display:none}.mini-timeline input{width:100%;height:18px;margin:0;accent-color:var(--mint);touch-action:pan-y}
+ .mini-player #mini-progress{display:none}
+ #now-dialog{padding:calc(14px + env(safe-area-inset-top)) 24px calc(20px + env(safe-area-inset-bottom));overflow-y:auto;overscroll-behavior:contain}
+ #now-dialog .dialog-header{margin:0 0 20px;min-height:44px}#now-dialog .dialog-header>span{font-size:10px;letter-spacing:1.6px;color:var(--muted)}
+ #now-dialog .now-artwork{max-width:min(100%,40dvh);margin:0 auto 22px}#now-dialog .now-heading{margin:14px 0 18px}
+ #now-dialog .now-heading h2{font-size:23px;line-height:1.25;letter-spacing:-.5px;margin:0 0 7px}#now-dialog .now-heading p{font-size:14px;color:var(--muted)}
+ #now-dialog #seek{width:100%;height:28px;margin:0;accent-color:var(--mint);touch-action:pan-y}
+ #now-dialog .timestamps{font-size:11px;color:var(--muted);margin:0 0 18px}
+ #now-dialog .transport{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:12px 0 22px}
+ #now-dialog .transport .icon-button{width:44px;height:44px;color:#dfe8e5}#now-dialog .transport .ui-icon{width:25px;height:25px}
+ #now-dialog #now-play{width:64px;height:64px;min-width:64px;min-height:64px;border:0;border-radius:50%;color:#0e1715;background:#f4faf7}
+ #now-dialog #now-play .ui-icon{width:29px;height:29px}#now-dialog .now-tools{justify-content:space-between;gap:16px}
+ #now-dialog .now-tools button{min-height:44px;font-size:13px}#now-dialog #playback-status:empty{display:none}
+ #mods-dialog .mod-footer{align-items:center;min-height:40px}#mod-catalogue .mod-action-buttons{display:flex;align-items:center;gap:8px}
+ .nyan{z-index:12;pointer-events:none}
+}
+/* The range keeps a large touch target, with a compact visual track. */
+@media(max-width:900px){
+ #seek,#mini-seek{appearance:none;-webkit-appearance:none;background:transparent;border:0;padding:0;outline:0;cursor:pointer}
+ #seek::-webkit-slider-runnable-track,#mini-seek::-webkit-slider-runnable-track{height:3px;border:0;border-radius:3px;background:linear-gradient(to right,var(--mint) var(--progress,0%),#b2c4bf55 var(--progress,0%))}
+ #seek::-webkit-slider-thumb,#mini-seek::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:12px;height:12px;margin-top:-4.5px;border:0;border-radius:50%;background:#edf7f3;box-shadow:none}
+ #seek::-moz-range-track,#mini-seek::-moz-range-track{height:3px;border:0;border-radius:3px;background:linear-gradient(to right,var(--mint) var(--progress,0%),#b2c4bf55 var(--progress,0%))}
+ #seek::-moz-range-progress,#mini-seek::-moz-range-progress{height:3px;background:var(--mint)}
+ #seek::-moz-range-thumb,#mini-seek::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:#edf7f3}
+ #seek:focus-visible,#mini-seek:focus-visible{outline:2px solid var(--mint);outline-offset:3px;border-radius:6px}
+}
+
+/* Phone library tools: scan first, create next, imports last. Desktop toolbar is unchanged. */
+.scan-playlist{display:none}#playlist-scanner{width:min(440px,calc(100% - 32px))}#playlist-scanner h2{font-size:24px}.scanner-frame{aspect-ratio:1;overflow:hidden;border:1px solid #3f625d;border-radius:18px;background:#080e10}.scanner-frame video{width:100%;height:100%;object-fit:cover}#playlist-scanner p{line-height:1.6}
+@media(max-width:900px){
+ .app-header #toggle-library{display:none}
+ .app-header{gap:8px;padding:10px 14px}
+ .app-header .toolbar-home{order:0}.app-header .mobile-search-button{order:1}
+ .app-header>.toolbar-mods{order:2;margin-left:2px}
+ .app-header>.header-actions{order:3;margin-left:auto;gap:6px}
+ .app-header .icon-button{border-radius:12px}
+ .scan-playlist{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin-top:20px;border:1px solid #4c8176;background:#163a33;color:#c7fff0;font-weight:650;border-radius:12px}
+ .welcome-card .library-toolbar{margin-top:9px}
+ .welcome-card .library-toolbar [data-dialog=create]{grid-column:1/-1}
+ .home-backup-actions,#home-backup-summary,#export-library,label.file-label:has(#restore-library){display:none!important}
+}
