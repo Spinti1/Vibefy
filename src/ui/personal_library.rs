@@ -47,14 +47,6 @@ pub fn controls(app: &mut App, ui: &mut egui::Ui, source: &str) {
     let title = list.title.clone();
     ui.horizontal_wrapped(|ui| {
         if theme::pill_button(ui, &p, "Share to phone · QR", false).clicked() {send(app,Edit::PhoneShare{source:source.into(),revoke:false});}
-        if theme::pill_button(ui, &p, "Find songs", false).clicked() {
-            app.actions.push(Action::Open(Page::Search));
-        }
-        ui.label(
-            egui::RichText::new(app.personal_status(source))
-                .color(p.secondary)
-                .size(12.0),
-        );
         if library::owned(source) && theme::pill_button(ui, &p, "Rename", false).clicked() {
             send(
                 app,

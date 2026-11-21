@@ -982,30 +982,4 @@ impl App {
             }
         }
     }
-    pub fn personal_status(&self, source: &str) -> String {
-        if self
-            .personal
-            .tasks
-            .values()
-            .any(|p| p.source.as_deref() == Some(source) && p.backup)
-        {
-            return "Saved locally · Syncing to YouTube…".into();
-        }
-        if let Some(report) = self.personal.backups.get(source) {
-            if report.message.is_some() {
-                return "Saved locally · YouTube backup needs attention".into();
-            }
-            if self.personal.current.get(source) == Some(&report.fingerprint) {
-                return if report.missing == 0 {
-                    "Saved locally · Saved to YouTube".into()
-                } else {
-                    format!(
-                        "Saved locally · {} songs not matched on YouTube",
-                        report.missing
-                    )
-                };
-            }
-        }
-        "Saved locally · This device".into()
-    }
 }
