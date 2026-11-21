@@ -140,3 +140,5 @@ button,a,input{-webkit-tap-highlight-color:transparent}
  .welcome-card .library-toolbar [data-dialog=create]{grid-column:1/-1}
  .home-backup-actions,#home-backup-summary,#export-library,label.file-label:has(#restore-library){display:none!important}
 }
+
+.spotify-sync-tools{margin:16px 0;display:flex;align-items:center;gap:14px;flex-wrap:wrap}.spotify-sync-tools[hidden]{display:none}.spotify-follow-option{display:flex;align-items:center;gap:8px;font-size:12px}.spotify-sync-tools p{flex-basis:100%;margin:0}.spotify-follow-option input{accent-color:var(--mint);width:18px;height:18px}

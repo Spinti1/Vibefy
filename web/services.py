@@ -52,7 +52,7 @@ async def spotify_page(identity, offset):
         if t.get("__typename") != "Track":
             continue
         artists = t.get("artists", {}).get("items", [])
-        tracks.append({"title": str(t.get("name", ""))[:300], "artist": ", ".join(str(a.get("profile", {}).get("name", "")) for a in artists)[:300], "primary_artist": str(artists[0].get("profile", {}).get("name", ""))[:300] if artists else "", "duration": t.get("duration", {}).get("totalMilliseconds", 0) / 1000, "explicit": t.get("contentRating", {}).get("label") == "EXPLICIT"})
+        tracks.append({"id": t.get("uri", "") if re.fullmatch(r"spotify:track:[A-Za-z0-9]{22}", str(t.get("uri", ""))) else "", "title": str(t.get("name", ""))[:300], "artist": ", ".join(str(a.get("profile", {}).get("name", "")) for a in artists)[:300], "primary_artist": str(artists[0].get("profile", {}).get("name", ""))[:300] if artists else "", "duration": t.get("duration", {}).get("totalMilliseconds", 0) / 1000, "explicit": t.get("contentRating", {}).get("label") == "EXPLICIT"})
     next_offset = content.get("pagingInfo", {}).get("nextOffset")
     total = content.get("totalCount", 0)
     if not isinstance(total, int) or not 0 <= total <= 20000 or (next_offset is not None and (not isinstance(next_offset, int) or next_offset != offset + len(rows) or next_offset <= offset or next_offset >= total)):

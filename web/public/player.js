@@ -28,7 +28,7 @@ function artwork(value) {
 }
 function normalizeTrack(t) {
   if (!t || (!/^scurl:https:\/\/soundcloud\.com\/[A-Za-z0-9_%~-]+\/[A-Za-z0-9_%~-]+$/.test(t.id||'')&&!/^(?:[A-Za-z0-9_-]{11}|spotify:[A-Za-z0-9]{22}|sc:\d{1,20}|jv:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})$/.test(t.id))) return null;
-  return {id:t.id,artistId:/^UC[A-Za-z0-9_-]{22}$/.test(t.artistId||'')?t.artistId:'',title:String(t.title||'Untitled').slice(0,300),artist:String(t.artist||'').slice(0,300),album:String(t.album||'').slice(0,300),duration:Number.isFinite(t.duration)?Math.max(0,Math.min(86400,t.duration)):0,image:artwork(t.image)};
+  return {id:t.id,spotifyId:/^[A-Za-z0-9]{22}$/.test(t.spotifyId||'')?t.spotifyId:undefined,artistId:/^UC[A-Za-z0-9_-]{22}$/.test(t.artistId||'')?t.artistId:'',title:String(t.title||'Untitled').slice(0,300),artist:String(t.artist||'').slice(0,300),album:String(t.album||'').slice(0,300),duration:Number.isFinite(t.duration)?Math.max(0,Math.min(86400,t.duration)):0,image:artwork(t.image)};
 }
 function normalizeLibrary(value) {
   if (!value || !Array.isArray(value.likes) || !Array.isArray(value.collections)) throw new Error('Not a Vibefy library backup.');
