@@ -22,13 +22,33 @@ pub enum Failure {
 const ORIGIN: &str = "https://music.youtube.com";
 const MAX_SESSION: usize = 64 * 1024;
 
-fn managed_prefix(current: &[(String, String)], desired: &[String]) -> usize {
-    current
+pub fn pending_playlist_additions(current: &[(String, String)], desired: &[String]) -> Vec<String> {
+    let present: HashSet<_> = current.iter().map(|(video, _)| video).collect();
+    let mut unique = HashSet::new();
+    desired
         .iter()
-        .map(|(video, _)| video)
-        .zip(desired)
-        .take_while(|(a, b)| a == b)
-        .count()
+        .filter(|video| !present.contains(video) && unique.insert(*video))
+        .cloned()
+        .collect()
+}
+
+/// Music may display an audio counterpart while the playlist still stores the
+/// requested video. Trust only an explicit same-row like target as that alias.
+pub fn playlist_row_video<'a>(row: &'a Value, desired: &HashSet<&str>) -> Option<&'a str> {
+    let video = row.pointer("/playlistItemData/videoId")?.as_str()?;
+    if desired.contains(video) {
+        return Some(video);
+    }
+    if let Some(buttons) = row.pointer("/menu/menuRenderer/topLevelButtons").and_then(Value::as_array) {
+        for button in buttons {
+            if let Some(original) = button.pointer("/likeButtonRenderer/target/videoId").and_then(Value::as_str) {
+                if crate::addons::valid_video_id(original) && desired.contains(original) {
+                    return Some(original);
+                }
+            }
+        }
+    }
+    Some(video)
 }
 
 fn find_section<'a>(value: &'a Value, key: &str, depth: usize) -> Option<&'a Value> {
@@ -212,7 +232,9 @@ impl Session {
         })
     }
     pub fn append_batch_size(&self) -> usize {
-        if self.google.is_some() { 1 } else { 50 }
+        // Individual writes preserve ordering if YouTube partially accepts a
+        // request. Confirmed replies avoid extra reads between songs.
+        1
     }
     pub async fn display_name(&self, proxy: &ProxyConfig) -> Result<String> {
         if let Some(google) = &self.google {
@@ -621,7 +643,12 @@ impl Session {
                 && videos.iter().all(|id| crate::addons::valid_video_id(id)),
             "Invalid playlist addition"
         );
-        let actions: Vec<_> = videos.iter().map(|id|json!({"action":"ACTION_ADD_VIDEO","addedVideoId":id,"dedupeOption":"DEDUPE_OPTION_SKIP"})).collect();
+        // Do not bypass YouTube's duplicate check. DEDUPE_OPTION_SKIP means
+        // skip that check, not skip an already-present video.
+        let actions: Vec<_> = videos
+            .iter()
+            .map(|id| json!({"action":"ACTION_ADD_VIDEO","addedVideoId":id}))
+            .collect();
         let value = self
             .post(
                 &Self::client(proxy)?,
@@ -685,6 +712,7 @@ impl Session {
         id: &str,
         marker: &str,
         desired: &[String],
+        prune: bool,
     ) -> Result<()> {
         ensure!(
             self.google.is_none(),
@@ -701,10 +729,70 @@ impl Session {
             private && description.contains(marker),
             "This playlist is no longer a private or unlisted Vibefy backup"
         );
-        let current = self.managed_rows(proxy, id).await?;
-        let prefix = managed_prefix(&current, desired);
-        for batch in current[prefix..].chunks(50) {
-            let actions:Vec<_>=batch.iter().map(|(video,set)|json!({"action":"ACTION_REMOVE_VIDEO","removedVideoId":video,"setVideoId":set})).collect();
+        let current = self.managed_rows(proxy, id, desired).await?;
+        let additions = pending_playlist_additions(&current, desired);
+        // Complete additions first. An interrupted save must never shrink a
+        // previously usable playlist by deleting its tail before it can refill it.
+        for batch in additions.chunks(self.append_batch_size()) {
+            // A successful HTTP/status response can still apply only some
+            // actions. Re-read before retrying, including after a timeout.
+            let mut missing = batch.to_vec();
+            for attempt in 0..3 {
+                let sent = self.append(proxy, id, &missing).await;
+                if matches!(sent, Ok(true)) {
+                    break;
+                }
+                if matches!(
+                    sent.as_ref()
+                        .err()
+                        .and_then(|e| e.downcast_ref::<Failure>()),
+                    Some(Failure::RateLimited(_) | Failure::Rejected(_) | Failure::NotSent)
+                ) {
+                    sent?;
+                }
+                let mut rows = self.managed_rows(proxy, id, desired).await?;
+                for delay in [1, 2] {
+                    if batch
+                        .iter()
+                        .all(|v| rows.iter().any(|(found, _)| found == v))
+                    {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_secs(delay)).await;
+                    rows = self.managed_rows(proxy, id, desired).await?;
+                }
+                missing = pending_playlist_additions(&rows, batch);
+                if missing.is_empty() {
+                    break;
+                }
+                ensure!(attempt < 2, Failure::Unconfirmed);
+            }
+        }
+        let result = self.managed_rows(proxy, id, desired).await?;
+        let selected: Vec<_> = desired
+            .iter()
+            .map(|video| {
+                result
+                    .iter()
+                    .find(|(found, _)| found == video)
+                    .cloned()
+                    .ok_or(Failure::Unconfirmed)
+            })
+            .collect::<std::result::Result<_, _>>()?;
+        if !prune {
+            return Ok(());
+        }
+        let keep: HashSet<_> = selected.iter().map(|(_, set)| set.as_str()).collect();
+        // Preserve the existing YouTube order when resuming. A transfer is
+        // complete when all intended songs are present, not when the service's
+        // independently sorted view happens to match local row positions.
+        // Every desired row was verified above before pruning obsolete rows.
+        let extras: Vec<_> = result
+            .iter()
+            .filter(|(_, set)| !keep.contains(set.as_str()))
+            .collect();
+        for batch in extras.chunks(50) {
+            let actions: Vec<_> = batch.iter().map(|(video,set)|json!({"action":"ACTION_REMOVE_VIDEO","removedVideoId":video,"setVideoId":set})).collect();
             let value = self
                 .post(
                     &Self::client(proxy)?,
@@ -718,31 +806,29 @@ impl Session {
                 Failure::Unconfirmed
             );
         }
-        // Read back removals before adding, so an uncertain deletion never duplicates songs.
-        let remaining = self.managed_rows(proxy, id).await?;
-        ensure!(
-            remaining
-                .iter()
-                .map(|(v, _)| v)
-                .eq(desired[..prefix].iter()),
-            Failure::Unconfirmed
-        );
-        for batch in desired[prefix..].chunks(self.append_batch_size()) {
-            self.append(proxy, id, batch).await?;
+        let mut result = self.managed_rows(proxy, id, desired).await?;
+        for delay in [1, 2] {
+            if crate::playlist_tools::counts(result.iter().map(|(v, _)| v.clone()))
+                == crate::playlist_tools::counts(desired.iter().cloned())
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_secs(delay)).await;
+            result = self.managed_rows(proxy, id, desired).await?;
         }
-        let result = self.managed_rows(proxy, id).await?;
         ensure!(
-            result.iter().map(|(v, _)| v).eq(desired.iter()),
+            crate::playlist_tools::counts(result.iter().map(|(v, _)| v.clone()))
+                == crate::playlist_tools::counts(desired.iter().cloned()),
             Failure::Unconfirmed
         );
         Ok(())
     }
-    async fn managed_rows(&self, proxy: &ProxyConfig, id: &str) -> Result<Vec<(String, String)>> {
-        fn rows(value: &Value, result: &mut Vec<(String, String)>, depth: usize) -> Result<()> {
+    async fn managed_rows(&self, proxy: &ProxyConfig, id: &str, desired: &[String]) -> Result<Vec<(String, String)>> {
+        fn rows(value: &Value, result: &mut Vec<(String, String)>, desired: &HashSet<&str>, depth: usize) -> Result<()> {
             ensure!(depth <= 60, "Unsupported playlist response");
             if let Some(row) = value.get("musicResponsiveListItemRenderer") {
                 let data = &row["playlistItemData"];
-                if let Some(video) = data["videoId"].as_str() {
+                if let Some(video) = playlist_row_video(row, desired) {
                     let set = data["playlistSetVideoId"].as_str().ok_or_else(|| {
                         anyhow::anyhow!("YouTube did not provide editable song identities")
                     })?;
@@ -759,12 +845,12 @@ impl Session {
             match value {
                 Value::Object(map) => {
                     for child in map.values() {
-                        rows(child, result, depth + 1)?;
+                        rows(child, result, desired, depth + 1)?;
                     }
                 }
                 Value::Array(list) => {
                     for child in list {
-                        rows(child, result, depth + 1)?;
+                        rows(child, result, desired, depth + 1)?;
                     }
                 }
                 _ => {}
@@ -775,11 +861,12 @@ impl Session {
         let mut next = None;
         let mut seen = HashSet::new();
         let mut result = Vec::new();
+        let desired: HashSet<_> = desired.iter().map(String::as_str).collect();
         for _ in 0..400 {
             let value = self
                 .request(&client, next.as_deref(), &format!("VL{id}"))
                 .await?;
-            rows(playlist_section(&value)?, &mut result, 0)?;
+            rows(playlist_section(&value)?, &mut result, &desired, 0)?;
             ensure!(result.len() <= 20_000, "Playlist exceeds 20,000 songs");
             match parse_playlist_page(&value)?.continuation {
                 Some(token) => {
@@ -872,19 +959,4 @@ pub fn valid_playlist_id(id: &str) -> bool {
         && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-}
-
-#[cfg(test)]
-mod personal_playlist_tests {
-    use super::*;
-    #[test]
-    fn personal_library_managed_reconciliation_preserves_confirmed_prefix() {
-        let current = vec![("a".into(), "row-a".into()), ("b".into(), "row-b".into())];
-        let ids = |values: &[&str]| values.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(managed_prefix(&current, &ids(&["a", "b"])), 2);
-        assert_eq!(managed_prefix(&current, &ids(&["a", "b", "c"])), 2);
-        assert_eq!(managed_prefix(&current, &ids(&["a", "c"])), 1);
-        assert_eq!(managed_prefix(&current, &ids(&["b", "a"])), 0);
-        assert_eq!(managed_prefix(&current, &[]), 0);
-    }
 }

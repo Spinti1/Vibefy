@@ -684,7 +684,6 @@ async fn sync(
                 .entries
                 .into_iter()
                 .filter_map(|e| e.track)
-                .take(8)
                 .collect::<Vec<_>>();
             if let Some(chosen) = crate::playlist_tools::choose_recording(track, &candidates) {
                 journal.matches.insert(track.uri.clone(), chosen);
@@ -703,12 +702,15 @@ async fn sync(
     }
     let mut unique = HashSet::new();
     desired.retain(|id| unique.insert(id.clone()));
+    journal.report.missing = missing;
+    journal.report.remote = journal.remote.clone();
+    write(path, journal).await?;
     (context.progress)(format!(
         "Updating YouTube copy · {} matched songs",
         desired.len()
     ));
     session
-        .sync_managed(&context.proxy, &journal.remote, &marker, &desired)
+        .sync_managed(&context.proxy, &journal.remote, &marker, &desired, missing == 0)
         .await?;
     journal.report = Report {
         retry_at: 0,

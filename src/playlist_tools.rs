@@ -52,7 +52,7 @@ pub fn counts(ids: impl IntoIterator<Item = String>) -> BTreeMap<String, usize> 
 /// High-confidence catalogue matches only. Ambiguous versions remain unmatched.
 pub fn choose_recording(source: &LocalTrack, candidates: &[LocalTrack]) -> Option<LocalTrack> {
     let norm = crate::audio_match::normalized;
-    let title = norm(&source.title);
+    let title = norm(&crate::audio_match::clean_title(&source.title));
     let artist = source.artists.first().map(|a| norm(&a.name))?;
     if title.is_empty() || artist.is_empty() || source.duration_ms == 0 {
         return None;
@@ -63,15 +63,18 @@ pub fn choose_recording(source: &LocalTrack, candidates: &[LocalTrack]) -> Optio
             c.uri
                 .strip_prefix("vibefy:youtube:")
                 .is_some_and(crate::addons::valid_video_id)
-                && norm(&c.title) == title
+                && norm(&crate::audio_match::clean_title(&c.title)) == title
                 && c.artists.iter().any(|a| norm(&a.name) == artist)
                 && source.artists.iter().all(|expected| {
                     c.artists
                         .iter()
                         .any(|found| norm(&found.name) == norm(&expected.name))
+                        || (c.title.to_lowercase().contains("feat.")
+                            && format!(" {} ", norm(&c.title))
+                                .contains(&format!(" {} ", norm(&expected.name))))
                 })
                 && c.duration_ms > 0
-                && source.duration_ms.abs_diff(c.duration_ms) <= 3500
+                && source.duration_ms.abs_diff(c.duration_ms) <= 8000
                 && crate::audio_match::compatible_version(&source.title, &c.title)
                 && crate::audio_match::audio_edition_allowed(
                     &format!("{} {}", source.title, source.album),
@@ -91,8 +94,9 @@ pub fn choose_recording(source: &LocalTrack, candidates: &[LocalTrack]) -> Optio
     scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
     let (score, best) = scored.first()?;
     if let Some((second, other)) = scored.get(1) {
-        let equivalent = norm(&best.album) == norm(&other.album)
-            && best.duration_ms.abs_diff(other.duration_ms) <= 1000;
+        // The same studio recording is commonly released on an album, single
+        // and compilation. Different album names alone do not make it ambiguous.
+        let equivalent = best.duration_ms.abs_diff(other.duration_ms) <= 3500;
         if score - second < 10 && !equivalent {
             return None;
         }

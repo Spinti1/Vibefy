@@ -118,7 +118,7 @@ fn matching_rejects_other_artists_versions_and_missing_durations() {
     }
 }
 #[test]
-fn ambiguous_releases_require_review_but_equivalent_catalogue_ids_are_usable() {
+fn equivalent_studio_releases_do_not_require_identical_album_names() {
     let source = song(
         "spotify:track:0123456789012345678901",
         "Example",
@@ -140,7 +140,7 @@ fn ambiguous_releases_require_review_but_equivalent_catalogue_ids_are_usable() {
         180000,
         "Release B",
     );
-    assert!(playlist_tools::choose_recording(&source, &[first.clone(), second.clone()]).is_none());
+    assert!(playlist_tools::choose_recording(&source, &[first.clone(), second.clone()]).is_some());
     second.album = first.album.clone();
     assert!(playlist_tools::choose_recording(&source, &[first, second]).is_some());
 }
@@ -194,4 +194,82 @@ fn playlist_names_accept_unicode_but_reject_empty_controls_and_overflow() {
     assert!(!playlist_tools::valid_title("  "));
     assert!(!playlist_tools::valid_title("bad\nname"));
     assert!(!playlist_tools::valid_title(&"a".repeat(101)));
+}
+
+#[test]
+fn studio_reissues_allow_small_timing_and_remaster_label_differences() {
+    let source = song(
+        "spotify:track:0123456789012345678901",
+        "Example - Remastered 2011",
+        "Artist",
+        180000,
+        "Album",
+    );
+    let same = song(
+        "vibefy:youtube:abcdefghijk",
+        "Example",
+        "Artist",
+        186000,
+        "Greatest Hits",
+    );
+    assert!(playlist_tools::choose_recording(&source, &[same]).is_some());
+    let live = song(
+        "vibefy:youtube:abcdefghijk",
+        "Example (Live)",
+        "Artist",
+        180000,
+        "Album",
+    );
+    assert!(playlist_tools::choose_recording(&source, &[live]).is_none());
+}
+
+#[test]
+fn interrupted_playlist_additions_retry_only_absent_ids_in_order() {
+    let desired = vec!["a".into(), "b".into(), "b".into(), "c".into()];
+    let current = vec![("a".into(), "row-a".into()), ("c".into(), "row-c".into())];
+    assert_eq!(
+        music_session::pending_playlist_additions(&current, &desired),
+        vec!["b"]
+    );
+    assert_eq!(
+        music_session::pending_playlist_additions(&[], &desired),
+        vec!["a", "b", "c"]
+    );
+}
+
+#[test]
+fn featured_artist_can_be_credited_in_the_official_track_title() {
+    let mut source = song(
+        "spotify:track:0123456789012345678901",
+        "Example - US Version",
+        "Artist",
+        180000,
+        "Album",
+    );
+    source.artists.push(ArtistRef {
+        name: "Guest".into(),
+        ..Default::default()
+    });
+    let candidate = song(
+        "vibefy:youtube:abcdefghijk",
+        "Example (US Version) (feat. Guest)",
+        "Artist",
+        181000,
+        "Album",
+    );
+    assert!(playlist_tools::choose_recording(&source, &[candidate]).is_some());
+}
+
+#[test]
+fn substituted_music_rows_keep_the_explicit_original_video_identity() {
+    let desired = std::collections::HashSet::from(["abcdefghijk"]);
+    let row = json!({
+        "playlistItemData":{"videoId":"zyxwvutsrqp"},
+        "menu":{"menuRenderer":{"topLevelButtons":[{"likeButtonRenderer":{"target":{"videoId":"abcdefghijk"}}}]}}
+    });
+    assert_eq!(music_session::playlist_row_video(&row, &desired), Some("abcdefghijk"));
+    let other = std::collections::HashSet::from(["123456789ab"]);
+    assert_eq!(music_session::playlist_row_video(&row, &other), Some("zyxwvutsrqp"));
+    let unrelated_menu = json!({"playlistItemData":{"videoId":"zyxwvutsrqp"},"menu":{"unrelated":{"videoId":"abcdefghijk"}}});
+    assert_eq!(music_session::playlist_row_video(&unrelated_menu, &desired), Some("zyxwvutsrqp"));
 }
