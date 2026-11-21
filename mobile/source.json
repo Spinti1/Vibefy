@@ -6,18 +6,24 @@
       "name": "Vibefy Preview",
       "bundleIdentifier": "online.usevibefy.mobile",
       "developerName": "Spinti1 and contributors",
-      "localizedDescription": "Mobile preview with on-device audio-only YouTube playback: M4A/AAC streaming with artwork, without loading a video player. Includes QR playlist imports, protected Google renewal, persistent playlist metadata, backups and Jam controls. Provider restrictions still apply. Existing account and playlist data is retained. Background behavior depends on the device; physical-device validation remains ongoing. Android uses NewPipeExtractor (GPL-3.0-or-later); iOS uses YouTubeKit (MIT).",
+      "localizedDescription": "Mobile preview with on-device audio-only YouTube playback: M4A/AAC streaming with artwork, without loading a video player. Includes QR playlist imports, protected Google renewal, persistent playlist metadata, in-app QR camera scanning and Jam controls. Provider restrictions still apply. Existing account and playlist data is retained. Background behavior depends on the device; physical-device validation remains ongoing. Android uses NewPipeExtractor (GPL-3.0-or-later); iOS uses YouTubeKit (MIT).",
       "iconURL": "https://raw.githubusercontent.com/Spinti1/Vibefy/main/web/public/assets/icon.png",
       "versions": [
         {
-          "version": "0.2.7",
-          "date": "2026-11-20",
-          "downloadURL": "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.7/Vibefy-0.2.7.ipa",
-          "size": 1699640,
+          "version": "0.2.8",
+          "date": "2026-11-21",
+          "downloadURL": "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.8/Vibefy-0.2.8.ipa",
+          "size": 1700190,
           "minOSVersion": "15.0",
-          "localizedDescription": "Mobile preview with on-device audio-only YouTube playback: M4A/AAC streaming with artwork, without loading a video player. Includes QR playlist imports, protected Google renewal, persistent playlist metadata, backups and Jam controls. Provider restrictions still apply. Existing account and playlist data is retained. Background behavior depends on the device; physical-device validation remains ongoing. Android uses NewPipeExtractor (GPL-3.0-or-later); iOS uses YouTubeKit (MIT)."
+          "localizedDescription": "Mobile preview with on-device audio-only YouTube playback: M4A/AAC streaming with artwork, without loading a video player. Includes QR playlist imports, protected Google renewal, persistent playlist metadata, in-app QR camera scanning and Jam controls. Provider restrictions still apply. Existing account and playlist data is retained. Background behavior depends on the device; physical-device validation remains ongoing. Android uses NewPipeExtractor (GPL-3.0-or-later); iOS uses YouTubeKit (MIT)."
         }
-      ]
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSCameraUsageDescription": "Scan a playlist QR code from Vibefy on your computer. Images stay on your device."
+        }
+      }
     }
   ],
   "news": []
