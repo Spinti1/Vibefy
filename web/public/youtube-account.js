@@ -61,7 +61,7 @@
   let sentToken;const request=()=>{sentToken=token;return fetch(url,{method,headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});};
   let r=await request();
   if(r.status===401&&refreshToken){if(sentToken===token)await renewAccess(true);if(ticket!==generation)throw Error('Connection changed. Retry this action.');r=await request();}
-  if(r.status===401){expires=0;update();throw Error(refreshToken?'Google could not authorize this request. Your account is saved; retry shortly.':'Google access needs renewal. Connect again. Your playlists are preserved.');}if(!r.ok)throw Error(r.status===403?'YouTube could not authorize this action. Check Google account access or try again later.':'YouTube could not complete the request. Try again.');return r.status===204?{}:r.json();
+  if(r.status===401){expires=0;update();throw Error(refreshToken?'Google could not authorize this request. Your account is saved; retry shortly.':'Google access needs renewal. Connect again. Your playlists are preserved.');}if(!r.ok){const error=Error(r.status===403?'YouTube could not authorize this action. Check Google account access or try again later.':r.status===429?'YouTube is limiting requests. Try again later.':'YouTube could not complete the request. Try again.');error.status=r.status;throw error;}return r.status===204?{}:r.json();
  }
  async function playlistTracks(id){
   const tracks=[],pages=new Set();let page='';
@@ -91,10 +91,40 @@
  $('google-disconnect').onclick=()=>{if(token&&window.google?.accounts?.oauth2)google.accounts.oauth2.revoke(token,()=>{});disconnect();};
  $('youtube-refresh').onclick=async()=>{if(!connected())return connect();if(loading)return;loading=true;update();try{await refresh(true);}catch(error){status(error.message);}finally{loading=false;update();}};
  const saves=new Map();
+ async function recoverCreation(collection){
+  const marker='Vibefy copy: '+collection.youtubeCopyKey,found=[];const pages=new Set();let page='';
+  for(let n=0;n<200;n++){
+   const data=await api('playlists',{part:'snippet',mine:true,maxResults:50,...(page?{pageToken:page}:{})});
+   if(!Array.isArray(data.items))throw Error('YouTube did not confirm the previous creation. Retry shortly.');
+   for(const p of data.items)if(String(p.snippet?.description||'').split('\n').includes(marker))found.push(p.id);
+   page=data.nextPageToken||'';
+   if(!page){if(found.length!==1)throw Error(found.length?'Several YouTube copies were found. Check YouTube before retrying.':'YouTube has not confirmed the previous creation. Check your account and retry shortly.');return found[0];}
+   if(pages.has(page))throw Error('YouTube repeated a library page. Retry shortly.');pages.add(page);
+  }
+  throw Error('The complete YouTube library could not load. Retry shortly.');
+ }
  async function saveCopy(collection){
   if(!writable||!connected())await authorize(true);
   const ticket=generation;let id=collection.youtubeId;
-  if(!id){const created=await api('playlists',{part:'snippet,status'},'POST',{snippet:{title:collection.title,description:'Created with Vibefy'},status:{privacyStatus:'unlisted'}});if(!created.id)throw Error('YouTube did not confirm playlist creation.');id=collection.youtubeId=created.id;window.vibefyWebLibrary.save(collection);}
+  if(id){
+   let absent=false;
+   try{const data=await api('playlists',{part:'id',id});if(!Array.isArray(data.items))throw Error('YouTube did not confirm the existing copy. Retry sync.');absent=!data.items.some(p=>p.id===id);}
+   catch(error){if(error.status!==404)throw error;absent=true;}
+   if(ticket!==generation)throw Error('YouTube account changed. Retry sync.');
+   if(absent){delete collection.youtubeId;delete collection.youtubeSync;window.vibefyWebLibrary.save(collection);id='';status('The previous YouTube copy was removed. Creating your copy again…');}
+  }
+  if(!id){
+   if(collection.youtubeCreating){id=await recoverCreation(collection);}
+   else{
+    collection.youtubeCopyKey ||= crypto.randomUUID();collection.youtubeCreating=true;window.vibefyWebLibrary.save(collection);
+    let created;
+    try{created=await api('playlists',{part:'snippet,status'},'POST',{snippet:{title:collection.title,description:'Created with Vibefy.\nVibefy copy: '+collection.youtubeCopyKey},status:{privacyStatus:'unlisted'}});}
+    catch(error){if(error.status>=400&&error.status<500&&error.status!==408){delete collection.youtubeCreating;window.vibefyWebLibrary.save(collection);}throw error;}
+    if(!created.id)throw Error('YouTube did not confirm playlist creation. Retry to check the existing copy.');id=created.id;
+   }
+   if(ticket!==generation)throw Error('YouTube account changed. Retry sync.');
+   collection.youtubeId=id;delete collection.youtubeCreating;window.vibefyWebLibrary.save(collection);
+  }
   const present=new Set();let page='';const pages=new Set();
   do{const data=await api('playlistItems',{part:'contentDetails',playlistId:id,maxResults:50,...(page?{pageToken:page}:{})});for(const item of data.items||[])if(item.contentDetails?.videoId)present.add(item.contentDetails.videoId);page=data.nextPageToken||'';if(page&&pages.has(page))throw Error('YouTube repeated a playlist page. Retry sync.');pages.add(page);}while(page);
   let missing=0;
