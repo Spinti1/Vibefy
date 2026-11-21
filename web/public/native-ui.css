@@ -118,9 +118,9 @@ button,a,input{-webkit-tap-highlight-color:transparent}
 /* The range keeps a large touch target, with a compact visual track. */
 @media(max-width:900px){
  #seek,#mini-seek{appearance:none;-webkit-appearance:none;background:transparent;border:0;padding:0;outline:0;cursor:pointer}
- #seek::-webkit-slider-runnable-track,#mini-seek::-webkit-slider-runnable-track{height:3px;border:0;border-radius:3px;background:#b2c4bf55}
+ #seek::-webkit-slider-runnable-track,#mini-seek::-webkit-slider-runnable-track{height:3px;border:0;border-radius:3px;background:linear-gradient(to right,var(--mint) var(--progress,0%),#b2c4bf55 var(--progress,0%))}
  #seek::-webkit-slider-thumb,#mini-seek::-webkit-slider-thumb{appearance:none;-webkit-appearance:none;width:12px;height:12px;margin-top:-4.5px;border:0;border-radius:50%;background:#edf7f3;box-shadow:none}
- #seek::-moz-range-track,#mini-seek::-moz-range-track{height:3px;border:0;border-radius:3px;background:#b2c4bf55}
+ #seek::-moz-range-track,#mini-seek::-moz-range-track{height:3px;border:0;border-radius:3px;background:linear-gradient(to right,var(--mint) var(--progress,0%),#b2c4bf55 var(--progress,0%))}
  #seek::-moz-range-progress,#mini-seek::-moz-range-progress{height:3px;background:var(--mint)}
  #seek::-moz-range-thumb,#mini-seek::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:#edf7f3}
  #seek:focus-visible,#mini-seek:focus-visible{outline:2px solid var(--mint);outline-offset:3px;border-radius:6px}
