@@ -73,6 +73,13 @@ pub fn controls(app: &mut App, ui: &mut egui::Ui, source: &str) {
             send(app, Edit::Show(Dialog::Delete(source.into())));
         }
     });
+    if app.personal.spotify.is_some() && (library::spotify_id(source).is_some() || app.settings.spotify_playlists.contains_key(source)) {
+        let busy=app.personal.tasks.values().any(|t|t.source.as_deref()==Some(source) && t.fingerprint.starts_with("spotify-watch"));
+        ui.add_enabled_ui(!busy && !app.personal.spotify_busy && !app.personal.spotify_importing,|ui|{
+            if theme::pill_button(ui,&p,if busy {"Syncing Spotify…"}else{"Sync Spotify playlist"},false).clicked(){send(app,Edit::SpotifyRefresh(source.into()));}
+        });
+        if let Some(task)=app.personal.tasks.values().find(|t|t.source.as_deref()==Some(source) && t.fingerprint.starts_with("spotify-watch")){ui.small(&task.message);}
+    }
     if let Some(binding) = app.settings.spotify_playlists.get(source) {
         let mut enabled = binding.writes;
         if checked_option(

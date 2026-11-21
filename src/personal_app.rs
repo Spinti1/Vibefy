@@ -234,6 +234,23 @@ impl App {
                 self.open(Page::Home);
                 self.next_spotify_import();
             }
+            Edit::SpotifyRefresh(source) => {
+                if self.personal.spotify_busy || self.personal.spotify_importing || self.personal.tasks.values().any(|p|p.source.as_deref()==Some(&source) && p.fingerprint.starts_with("spotify-watch")){return;}
+                let wait=crate::spotify_library::retry_remaining();
+                if wait>0 {self.personal.message=Some(format!("Spotify is limiting requests. Try again in {wait} seconds. Your local playlist is unchanged."));return;}
+                let Some(catalog)=&self.personal.spotify else {self.personal.message=Some("Connect Spotify to sync this playlist.".into());return;};
+                let account=crate::spotify_sync::account_key(&catalog.account);
+                let binding=if let Some(b)=self.settings.spotify_playlists.get(&source){
+                    if b.account!=account {self.personal.message=Some("Connect the Spotify account associated with this playlist.".into());return;}
+                    b.clone()
+                }else if let Some(id)=library::spotify_id(&source){crate::spotify_sync::Binding{account,id,writes:false,snapshot:String::new()}}
+                else{return;};
+                if self.source_collection(&source).is_none(){return;}
+                self.settings.spotify_playlists.insert(source.clone(),binding.clone());self.settings_dirty=true;
+                let now=std::time::Instant::now();self.personal.spotify_checked.insert(source.clone(),now);
+                self.personal.spotify_poll_due=Some(now+std::time::Duration::from_secs(20));
+                self.personal_request(Task::SpotifyWatch{source:source.clone(),binding},Some(source),false,"spotify-watch-manual".into(),"Reading Spotify playlist additions…");
+            }
             Edit::SpotifyToggleSync { source, enabled } => {
                 if let Some(binding) = self.settings.spotify_playlists.get_mut(&source) {
                     binding.writes = enabled;
@@ -608,11 +625,14 @@ impl App {
             Ok(Output::SpotifyChanged{source,account,snapshot,collection}) => {
                 if self.personal.spotify.as_ref().is_none_or(|c|crate::spotify_sync::account_key(&c.account)!=account) {return;}
                 if self.settings.spotify_playlists.get(&source).is_none_or(|b|b.account!=account) {return;}
+                let mut added=0;
                 if let Some(remote)=collection {
                     if let Some(mut local)=self.source_collection(&source).cloned() {
-                        if crate::spotify_sync::append_remote(&mut local,remote.tracks)>0 && !self.save_source_collection(local) {return;}
+                        added=crate::spotify_sync::append_remote(&mut local,remote.tracks);
+                        if added>0 && !self.save_source_collection(local) {return;}
                     }
                 }
+                if pending.fingerprint=="spotify-watch-manual" {self.personal.message=Some(if added==0 {"Spotify playlist is up to date.".into()}else{format!("Added {added} new songs from Spotify. Local songs were kept.")});}
                 if let Some(binding)=self.settings.spotify_playlists.get_mut(&source) {binding.snapshot=snapshot;self.settings_dirty=true;}
             }
             Ok(Output::SpotifyCatalog(mut catalog)) => {
@@ -703,7 +723,7 @@ impl App {
                 self.personal.backups.insert(source,report);
             }
             Err(error)=>{
-                if pending.fingerprint=="spotify-watch" {
+                if pending.fingerprint.starts_with("spotify-watch") {
                     let wait=crate::spotify_library::retry_remaining();
                     if wait>0 {self.personal.spotify_poll_due=Some(std::time::Instant::now()+std::time::Duration::from_secs(wait));}
                     else {self.personal.spotify_poll_due=Some(std::time::Instant::now()+std::time::Duration::from_secs(60));}

@@ -132,6 +132,7 @@ pub enum Action {
         backup: bool,
         follow: bool,
     },
+    SpotifyRefresh(String),
     SpotifyToggleSync {
         source: String,
         enabled: bool,
