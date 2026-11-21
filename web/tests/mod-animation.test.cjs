@@ -36,3 +36,12 @@ test('phone catalogue ignores an old Cat Jam installation and removes WaveLink w
 test('inline Jam uses its visible seek bar even though its dialog is non-modal',()=>{
  const p=animation();p.nodes['now-dialog']={open:true};p.nodes['mini-seek'].getClientRects=()=>[];p.frame();assert.equal(p.nyan.hidden,false);assert.equal(p.nyan.style.left,'327px');assert.equal(p.nyan.style.position,'fixed');
 });
+
+test('disabled mods and hidden pages do not read player state or measure layout',()=>{
+ const p=animation();p.context.window.vibefyPlayerBridge.snapshot=()=>{throw Error('Unnecessary snapshot');};
+ p.context.prefs.catjam=false;p.context.prefs.nyan=false;p.frame();
+ assert.equal(p.cat.hidden,true);assert.equal(p.nyan.hidden,true);
+ vm.runInContext('schedule()',p.context);assert.equal(p.context.timer,null);
+ p.context.prefs.nyan=true;p.context.document.hidden=true;p.frame();
+ vm.runInContext('schedule()',p.context);assert.equal(p.context.timer,null);
+});

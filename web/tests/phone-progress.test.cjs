@@ -8,6 +8,15 @@ function progress(duration){
 test('unknown stream duration uses track metadata and notifies Nyan after the slider is updated',()=>{
  const p=progress(NaN);p.c.updatePosition();assert.equal(p.node('seek').max,180);assert.equal(p.node('mini-seek').max,180);assert.equal(p.node('mini-progress').value,.25);assert.equal(p.observed(),45);
 });
+
+test('lyric DOM updates only on line changes, including seeking backwards',()=>{
+ const p=progress(200);let scans=0;const nodes=[0,1].map(()=>({classList:{toggle(){}},setAttribute(){},removeAttribute(){}}));
+ Object.assign(p.c,{lyricLines:[{at:0},{at:60}],lyricOffset:0,activeLyric:-1,lyricScrollUntil:Infinity});
+ p.c.document.querySelectorAll=()=>{scans++;return nodes;};
+ p.c.updatePosition();p.c.updatePosition();assert.equal(scans,1);
+ p.c.shownPosition=()=>80;p.c.updatePosition();assert.equal(scans,2);
+ p.c.shownPosition=()=>20;p.c.updatePosition();assert.equal(scans,3);
+});
 test('position updates never pull a dragged thumb back to the playing position',()=>{
  const p=progress(200);p.c.seekingSlider=true;p.node('seek').value=120;p.node('mini-seek').value=120;p.c.updatePosition();assert.equal(p.node('seek').value,120);assert.equal(p.node('mini-seek').value,120);assert.equal(p.node('position').textContent,'120');assert.equal(p.node('mini-progress').value,.6);
 });

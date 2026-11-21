@@ -24,7 +24,7 @@
   clearTimeout(connectTimer);welcomed=false;
   let ws;try{ws=socket=new WebSocket((usingDirect?DIRECT:BASE).replace(/^http/,'ws')+'/rooms/'+code);}catch{leave(false);status('This browser could not open Jam. Try again in a standard browser.');return;}
   connectTimer=setTimeout(()=>{if(ws===socket&&!welcomed){status('Connection timed out · retrying…');ws.close();}},12000);
-  ws.onopen=()=>{if(ws===socket&&!stopping)send({type:'hello',protocol:2,host_token:token,name:'Vibefy web',shared_controls:true});};
+  ws.onopen=()=>{if(ws===socket&&!stopping)send({type:'hello',protocol:2,host_token:token,name:window.vibefyNativeInfo?.platform==='ios'?'Vibefy iPhone':window.vibefyNativeInfo?.platform==='android'?'Vibefy Android':'Vibefy browser',shared_controls:true});};
   ws.onmessage=e=>{if(ws!==socket||typeof e.data!=='string'||e.data.length>64000)return;let p;try{p=JSON.parse(e.data);}catch{return;}if(!p||typeof p!=='object')return;
    if(p.type==='welcome'){clearTimeout(connectTimer);const first=!state.following;welcomed=true;attempt=0;state.active=true;state.host=host;state.code=code;window.vibefyJamRoom?.activate(true);state.following=!host;if(!host)bridge().followMode(true);status(host?'Hosting · code '+code.match(/.{4}/g).join('-'):'Joined session · waiting for the host');if(!host&&first)notify('Joined the Jam. Press Play if your browser asks.');clearInterval(timer);timer=setInterval(()=>{broadcast();if(Date.now()-lastPing>10000){lastPing=Date.now();send({type:'ping',echo:lastPing});}},1000);broadcast();return;}
    if(p.type==='pong'&&p.echo===lastPing){rtt=Math.min(1500,Math.max(0,(Date.now()-lastPing)/2));return;}

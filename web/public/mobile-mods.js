@@ -23,8 +23,12 @@
  const cat=el('div',''),nyan=new Image();cat.className='browser-mod cat-jam';nyan.className='browser-mod nyan';nyan.alt='';for(const node of (phone?[nyan]:[cat,nyan])){node.hidden=true;node.setAttribute('aria-hidden','true');document.body.append(node);}let timer=null;
  function updateSettings(){$('cat-controls').hidden=!prefs.catjam;for(const [id,key,suffix] of [['cat-size','size','%'],['cat-tempo','tempo',' BPM']]){$(id).value=prefs[key];$(id+'-label').textContent=prefs[key]+suffix;}}
  for(const [id,key] of [['cat-size','size'],['cat-tempo','tempo']])$(id).oninput=()=>{prefs[key]=Number($(id).value);save();updateSettings();schedule();};
- function schedule(){if(timer===null)timer=setTimeout(frame,100);}
- function frame(){timer=null;const s=window.vibefyPlayerBridge.snapshot(),visible=!document.hidden,playing=s.track&&!s.paused;
+ function schedule(){if(timer===null&&!document.hidden&&(prefs.catjam||prefs.nyan||!cat.hidden||!nyan.hidden))timer=setTimeout(frame,100);}
+ function frame(){timer=null;
+  // Playback events also arrive with no visual mods installed. Avoid copying
+  // player state and measuring the DOM in that overwhelmingly common case.
+  if(document.hidden||(!prefs.catjam&&!prefs.nyan)){cat.hidden=true;nyan.hidden=true;return;}
+  const s=window.vibefyPlayerBridge.snapshot(),visible=!document.hidden,playing=s.track&&!s.paused;
   const dialogs=[...document.querySelectorAll('dialog[open]')],modal=dialogs.find(d=>d.matches(':modal')),parent=modal||document.body;
   for(const node of (phone?[nyan]:[cat,nyan]))if(node.parentNode!==parent)parent.append(node);
   const blocked=Boolean(modal&&modal.id!=='now-dialog');cat.hidden=!prefs.catjam||!s.track||!visible||blocked;nyan.hidden=!prefs.nyan||!s.track||!visible||blocked;
