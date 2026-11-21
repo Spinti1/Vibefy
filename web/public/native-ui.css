@@ -125,3 +125,18 @@ button,a,input{-webkit-tap-highlight-color:transparent}
  #seek::-moz-range-thumb,#mini-seek::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:#edf7f3}
  #seek:focus-visible,#mini-seek:focus-visible{outline:2px solid var(--mint);outline-offset:3px;border-radius:6px}
 }
+
+/* Phone library tools: scan first, create next, imports last. Desktop toolbar is unchanged. */
+.scan-playlist{display:none}#playlist-scanner{width:min(440px,calc(100% - 32px))}#playlist-scanner h2{font-size:24px}.scanner-frame{aspect-ratio:1;overflow:hidden;border:1px solid #3f625d;border-radius:18px;background:#080e10}.scanner-frame video{width:100%;height:100%;object-fit:cover}#playlist-scanner p{line-height:1.6}
+@media(max-width:900px){
+ .app-header #toggle-library{display:none}
+ .app-header{gap:8px;padding:10px 14px}
+ .app-header .toolbar-home{order:0}.app-header .mobile-search-button{order:1}
+ .app-header>.toolbar-mods{order:2;margin-left:2px}
+ .app-header>.header-actions{order:3;margin-left:auto;gap:6px}
+ .app-header .icon-button{border-radius:12px}
+ .scan-playlist{display:flex;align-items:center;justify-content:center;width:100%;min-height:48px;margin-top:20px;border:1px solid #4c8176;background:#163a33;color:#c7fff0;font-weight:650;border-radius:12px}
+ .welcome-card .library-toolbar{margin-top:9px}
+ .welcome-card .library-toolbar [data-dialog=create]{grid-column:1/-1}
+ .home-backup-actions,#home-backup-summary,#export-library,label.file-label:has(#restore-library){display:none!important}
+}

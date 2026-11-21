@@ -30,6 +30,6 @@
  document.getElementById('home-export').onclick=()=>document.getElementById('export-library').click();
  document.getElementById('home-restore').onclick=()=>document.getElementById('restore-library').click();
  const toggle=document.getElementById('toggle-library');let collapsed=false;try{collapsed=localStorage.getItem('vibefy-web-sidebar')==='collapsed';}catch{}
- function sidebar(){document.body.classList.toggle('library-collapsed',collapsed);toggle.setAttribute('aria-expanded',String(!collapsed));}sidebar();if(window.matchMedia('(max-width:900px)').matches){setIcon(toggle,'library');toggle.setAttribute('aria-label','Your library');toggle.setAttribute('title','Your library');toggle.removeAttribute('aria-expanded');}
- toggle.onclick=()=>{if(window.matchMedia('(max-width:900px)').matches){document.querySelector('.desktop-rail [data-page=library]')?.click();return;}collapsed=!collapsed;sidebar();try{localStorage.setItem('vibefy-web-sidebar',collapsed?'collapsed':'open');}catch{}};
+ function sidebar(){document.body.classList.toggle('library-collapsed',collapsed);toggle.setAttribute('aria-expanded',String(!collapsed));}sidebar();
+ toggle.onclick=()=>{collapsed=!collapsed;sidebar();try{localStorage.setItem('vibefy-web-sidebar',collapsed?'collapsed':'open');}catch{}};
 })();
