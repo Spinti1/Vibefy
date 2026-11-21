@@ -17,13 +17,16 @@ private final class WeakShellHandler:NSObject,WKScriptMessageHandler {
  func userContentController(_ controller:WKUserContentController,didReceive message:WKScriptMessage){target?.userContentController(controller,didReceive:message)}
 }
 final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,WKScriptMessageHandler,UIDocumentPickerDelegate {
+ private var nearby:NearbyReceiver?
+ @objc private func nearbyActive(){if nearby==nil{nearby=NearbyReceiver(controller:self){[weak self] code in guard let self,self.trusted(self.web.url) else{return};self.web.evaluateJavaScript("window.vibefyJam?.join?.(\""+code+"\")"){[weak self] result,_ in guard let self else{return};if (result as? Bool) != true {self.web.load(URLRequest(url:URL(string:self.home.absoluteString+"?jam="+code)!))}}}}}
+ @objc private func nearbyInactive(){nearby?.close();nearby=nil}
  private let home=URL(string:"https://vibefy-neon.vercel.app/web")!
  private var web:WKWebView!;private let cover=UIView();private let stack=UIStackView();private let progress=UIProgressView(progressViewStyle:.bar);private var loading:NSKeyValueObservation?;private var temporaryExport:URL?;private var failed=false
  override var preferredStatusBarStyle:UIStatusBarStyle{.lightContent}
  private func trusted(_ url:URL?)->Bool {guard let url else{return false};return url.scheme=="https" && url.host=="vibefy-neon.vercel.app" && url.port==nil && url.user==nil && url.password==nil}
  override func viewDidLoad(){super.viewDidLoad();view.backgroundColor=UIColor(red:0.055,green:0.071,blue:0.082,alpha:1)
   let config=WKWebViewConfiguration();config.websiteDataStore = .default();config.allowsInlineMediaPlayback=true;config.mediaTypesRequiringUserActionForPlayback=[]
-  let script="window.vibefyNativeInfo={platform: 'ios',version: '0.2.8',secureSession: true,renewableSession: true,audioOnly: true,qrCamera: true};\n" + ((try? String(contentsOf:Bundle.main.url(forResource:"app-shell",withExtension:"js")!,encoding:.utf8)) ?? "")
+  let script="window.vibefyNativeInfo={platform: 'ios',version: '0.2.9',secureSession: true,renewableSession: true,audioOnly: true,qrCamera: true};\n" + ((try? String(contentsOf:Bundle.main.url(forResource:"app-shell",withExtension:"js")!,encoding:.utf8)) ?? "")
   config.userContentController.addUserScript(WKUserScript(source:script,injectionTime:.atDocumentStart,forMainFrameOnly:true));config.userContentController.add(WeakShellHandler(self),name:"vibefyMobile")
   web=WKWebView(frame:.zero,configuration:config);web.navigationDelegate=self;web.uiDelegate=self;web.isOpaque=false;web.backgroundColor=view.backgroundColor;web.scrollView.backgroundColor=view.backgroundColor;web.scrollView.bounces=false;web.scrollView.pinchGestureRecognizer?.isEnabled=false;web.allowsBackForwardNavigationGestures=true;web.translatesAutoresizingMaskIntoConstraints=false
   view.addSubview(web);NSLayoutConstraint.activate([web.topAnchor.constraint(equalTo:view.safeAreaLayoutGuide.topAnchor),web.bottomAnchor.constraint(equalTo:view.bottomAnchor),web.leadingAnchor.constraint(equalTo:view.safeAreaLayoutGuide.leadingAnchor),web.trailingAnchor.constraint(equalTo:view.safeAreaLayoutGuide.trailingAnchor)])
@@ -32,6 +35,9 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
   let title=UILabel();title.text="Vibefy";title.font = .systemFont(ofSize:34,weight:.bold);title.textColor = .white;stack.addArrangedSubview(title)
   progress.tintColor=UIColor(red:0,green:0.83,blue:0.75,alpha:1);progress.translatesAutoresizingMaskIntoConstraints=false;view.addSubview(progress);NSLayoutConstraint.activate([progress.topAnchor.constraint(equalTo:web.topAnchor),progress.leadingAnchor.constraint(equalTo:web.leadingAnchor),progress.trailingAnchor.constraint(equalTo:web.trailingAnchor)])
   loading=web.observe(\.estimatedProgress,options:[.new]){[weak self] web,_ in self?.progress.progress=Float(web.estimatedProgress);self?.progress.isHidden=web.estimatedProgress>=1}
+  NotificationCenter.default.addObserver(self,selector:#selector(nearbyActive),name:UIApplication.didBecomeActiveNotification,object:nil)
+  NotificationCenter.default.addObserver(self,selector:#selector(nearbyInactive),name:UIApplication.willResignActiveNotification,object:nil)
+  if UIApplication.shared.applicationState == .active {nearbyActive()}
   web.load(URLRequest(url:home,cachePolicy:.useProtocolCachePolicy,timeoutInterval:25))
  }
  @discardableResult func openLink(_ url:URL)->Bool {
@@ -93,5 +99,5 @@ final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,
  private func cleanExport(){if let file=temporaryExport{try? FileManager.default.removeItem(at:file);temporaryExport=nil}}
  func documentPickerWasCancelled(_ controller:UIDocumentPickerViewController){cleanExport()}
  func documentPicker(_ controller:UIDocumentPickerViewController,didPickDocumentsAt urls:[URL]){cleanExport()}
- deinit{audioTask?.cancel();loading?.invalidate()}
+ deinit{NotificationCenter.default.removeObserver(self);nearby?.close();audioTask?.cancel();loading?.invalidate()}
 }
