@@ -159,50 +159,22 @@ fn partial_split_search_does_not_enter_the_cache() {
 }
 
 #[test]
-fn soundcloud_button_requires_installation_and_fits_beside_global_search() {
+fn retired_soundcloud_button_is_not_restored_by_old_preferences() {
     let (ctx, mut app, root) = app();
     app.open(Page::Home);
-    for installed in [false, true] {
-        if installed {
-            app.settings.addons.set(addons::Id::WaveLink, true);
-        }
-        for width in [760.0, 1280.0] {
-            let mut out = frame(&ctx, &mut app, width);
-            for _ in 0..2 {
-                out = frame(&ctx, &mut app, width);
-            }
-            let nodes = &out.platform_output.accesskit_update.as_ref().unwrap().nodes;
-            let button = nodes
+    app.settings.addons.installed.insert(addons::Id::WaveLink);
+    app.settings.addons.enabled.insert(addons::Id::WaveLink);
+    app.settings.addons.migrate_builtin_visualizers();
+    for width in [760.0, 1280.0] {
+        let out = frame(&ctx, &mut app, width);
+        let nodes = &out.platform_output.accesskit_update.as_ref().unwrap().nodes;
+        assert!(
+            !nodes
                 .iter()
-                .find(|(_, node)| node.label() == Some("SoundCloud search"));
-            assert_eq!(button.is_some(), installed);
-            if let Some((_, button)) = button {
-                let b = button.bounds().unwrap();
-                assert!(b.x1 <= f64::from(width) && b.x0 >= 0.0, "{width}: {b:?}");
-                let search = nodes
-                    .iter()
-                    .find(|(_, node)| {
-                        node.role() == egui::accesskit::Role::TextInput
-                            && node.label().is_some_and(|s| s.contains("Search music"))
-                    })
-                    .unwrap()
-                    .1
-                    .bounds()
-                    .unwrap();
-                assert!(
-                    b.x0 >= search.x1 && (b.y0 - search.y0).abs() < 10.0,
-                    "button must remain beside search"
-                );
-            }
-        }
+                .any(|(_, node)| node.label() == Some("SoundCloud search"))
+        );
     }
-    app.open(Page::SoundCloud);
-    app.search.query = "spotify query".into();
-    app.addons.query = "soundcloud query".into();
-    frame(&ctx, &mut app, 1280.0);
-    assert_eq!(app.search.query, "spotify query");
-    assert_eq!(app.addons.query, "soundcloud query");
-    assert!(ctx.memory(|memory| memory.has_focus(egui::Id::new("soundcloud-query"))));
+    // Old navigation and saved source metadata remain readable.
     assert_eq!(
         Page::decode(&Page::SoundCloud.encode()),
         Some(Page::SoundCloud)
@@ -212,9 +184,8 @@ fn soundcloud_button_requires_installation_and_fits_beside_global_search() {
 }
 
 #[test]
-fn youtube_import_cannot_replace_soundcloud_results_or_the_saved_selection() {
+fn legacy_soundcloud_metadata_survives_another_import_and_mod_removal() {
     let (ctx, mut app, root) = app();
-    app.settings.addons.set(addons::Id::WaveLink, true);
     app.addons.fetching_soundcloud = true;
     let soundcloud = addons::Collection {
         title: "SoundCloud result".into(),
