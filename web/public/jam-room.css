@@ -1,0 +1,48 @@
+/* One playback surface during Jam. The normal library and search remain available. */
+#jam-room[hidden]{display:none!important}
+.jam-room{margin:0 0 24px;border:1px solid #39735d;border-radius:18px;background:radial-gradient(ellipse at 10% 0,#194a37,transparent 75%),#14201c;overflow:hidden;min-width:0}
+.jam-room-header{padding:12px;display:grid;grid-template-columns:52px minmax(0,1fr);gap:8px;align-items:center;border-bottom:1px solid #ffffff12}
+.jam-room-art{width:52px;height:52px;border-radius:10px;object-fit:cover}
+.jam-room-header h2{font-size:18px;line-height:1.25;margin:4px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jam-room-header p{margin:0;color:#acc8b8;font-size:12px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.jam-live-label{display:block;line-height:1.2;font-size:9px;font-weight:700;letter-spacing:1.2px;color:#66efa6}
+.jam-room-actions{grid-column:1/-1;display:flex;gap:8px;align-items:center;justify-content:flex-end}
+.jam-room-actions .button{font-size:11px;line-height:1.2;min-height:32px;padding:8px 12px}.jam-room-actions .icon-button{margin-right:auto;font-size:18px;min-height:32px;min-width:32px}
+.jam-room-grid{display:block}.jam-source-slot{min-width:0}
+.jam-active #now-dialog{position:relative!important;inset:auto!important;transform:none!important;display:block;width:100%!important;height:auto!important;min-height:0!important;max-width:none!important;max-height:none!important;margin:0!important;border:0!important;border-radius:0!important;box-shadow:none!important;background:transparent!important;padding:16px!important;overflow:visible!important;color:inherit}
+.jam-active #now-dialog:not([open]){display:none!important}
+.jam-active #now-dialog .dialog-header,.jam-active #now-dialog .now-heading,.jam-active #now-dialog #open-source,.jam-active #now-dialog #copy-to-youtube,.jam-active #now-dialog #now-add{display:none!important}
+.jam-active #now-dialog .now-artwork{max-width:180px;margin:0 auto 16px}.jam-active #now-dialog #youtube-frame{min-height:0}
+.jam-active #now-dialog #embed-notice{font-size:10px}
+.jam-active #now-dialog .transport{margin:8px 0!important;gap:16px}
+.jam-active #now-dialog .big-play{width:44px!important;height:44px!important;min-height:44px!important}
+.jam-active #now-dialog .now-tools{display:flex;gap:8px;margin:6px 0 0!important;padding:0!important;border:0!important}
+.jam-active #now-dialog .now-tools button{padding:8px 12px;font-size:11px;min-height:34px}
+.jam-active #now-dialog .now-tools [data-dialog="queue"]{display:none!important}
+.jam-active #now-dialog .timestamps{margin:4px 0 0!important;font-size:10px}.jam-active #now-dialog #playback-status:empty{display:none}.jam-active #now-dialog #now-panel{max-height:360px;overflow:auto}.jam-active #now-dialog #now-panel[hidden]{display:none!important}
+.jam-active #mini-player{display:none!important}.jam-active .welcome-card{display:none}
+.jam-active #view{padding-bottom:28px}.jam-active #home-greeting{font-size:23px}.jam-active #home-view>.intro{display:none}
+.jam-guest #shuffle,.jam-guest #repeat,.jam-guest #previous{display:none!important}
+.jam-volume[hidden]{display:none!important}.jam-volume{margin-top:10px;padding-top:10px;border-top:1px solid #ffffff12}
+.jam-volume-heading{display:flex;justify-content:space-between;gap:12px;font-size:10px;color:#acc8b8;margin-bottom:4px}
+.jam-volume-heading output{font-variant-numeric:tabular-nums;color:#d2e9dc}
+.jam-volume-inputs{display:flex;align-items:center;gap:10px}.jam-volume #volume-toggle{display:grid!important;place-items:center;min-width:30px;min-height:30px;background:transparent!important;color:#c2ddcd!important}
+.jam-volume #volume{display:block!important;flex:1;width:100%!important;min-width:0;height:20px;margin:0;accent-color:var(--mint,#06dcc1)}
+.jam-shared-queue{padding:12px 18px;border-top:1px solid #ffffff12;min-width:0}
+.jam-shared-queue h3{display:flex;align-items:center;justify-content:space-between;margin:0 0 8px;font-size:14px}.jam-shared-queue h3 small{font-size:10px;font-weight:400;color:#9bb3a7}
+.jam-queue-list{max-height:min(28vh,260px);overflow:auto;scrollbar-width:thin;scrollbar-color:#4a6758 transparent}
+.jam-queue-track{display:flex;align-items:center;gap:10px;width:100%;padding:8px 4px;background:transparent;border:0;text-align:left;border-radius:8px;color:#edf6f0;cursor:pointer}
+.jam-queue-track:hover{background:#ffffff0a}.jam-queue-track:disabled{opacity:.55;cursor:default}
+.jam-queue-track img{width:36px;height:36px;object-fit:cover;border-radius:5px}.jam-queue-track>span:last-child{min-width:0}
+.jam-queue-track strong,.jam-queue-track small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.jam-queue-track strong{font-size:12px}.jam-queue-track small{font-size:10px;color:#9bb3a7;margin-top:4px}.jam-track-number{color:#8eaa9b;font-size:10px;min-width:14px}
+.jam-room-controls{padding:12px 18px;border-top:1px solid #ffffff12;display:flex;flex-direction:column;gap:13px}
+.jam-room-controls>div:first-child{display:flex;gap:8px 10px;align-items:center;flex-wrap:wrap;min-width:0}.jam-room-controls .fine-print{margin:0;font-size:10px;color:#acc8b8}#jam-room-count{font-size:11px;white-space:nowrap}
+.jam-people{display:flex;flex-wrap:wrap;gap:8px;width:100%}.jam-person{display:flex;align-items:center;gap:5px;font-size:10px;color:#bdd5c6;max-width:100%}.jam-avatar{display:grid;place-items:center;width:23px;height:23px;flex-shrink:0;border-radius:50%;background:#254e3c;border:1px solid #4b8060;font-weight:700;color:#b4f9cb}
+[data-dialog="lyrics"][hidden]{display:none!important}
+@media(min-width:1180px){.jam-active #view{display:grid;grid-template-columns:minmax(0,1fr) minmax(350px,400px);align-items:start;gap:24px;max-width:none}.jam-active #view>#jam-room{grid-column:2;grid-row:1;position:sticky;top:84px;max-height:calc(100dvh - 108px);overflow-y:auto;scrollbar-width:thin;margin:0}.jam-active #home-view,.jam-active #search-view,.jam-active #library-view{grid-column:1;grid-row:1;min-width:0}.jam-active .app-shell{padding-bottom:0}}
+@media(min-width:761px) and (max-width:1179px){.jam-room-grid{display:grid;grid-template-columns:minmax(280px,1fr) minmax(220px,.85fr)}.jam-shared-queue{border-top:0;border-left:1px solid #ffffff12}.jam-room-header{grid-template-columns:52px minmax(0,1fr) auto}.jam-room-actions{grid-column:3;grid-row:1}.jam-room-controls{flex-direction:row;align-items:center;justify-content:space-between}}
+@media(max-width:760px){.jam-room{border-radius:15px;margin-bottom:24px}.jam-room-header{padding:16px;grid-template-columns:46px minmax(0,1fr)}.jam-room-art{width:46px;height:46px}.jam-room-header h2{font-size:18px}.jam-active #view{padding-bottom:92px}.jam-active .app-shell{padding-bottom:0}.jam-shared-queue{padding:14px 17px}.jam-queue-list{max-height:185px}.jam-active #now-dialog{padding:16px!important}.jam-active #now-dialog .transport{margin:10px 0!important}}
+.jam-room:fullscreen{width:100vw;height:100dvh;max-height:none!important;overflow:auto;margin:0;border:0;border-radius:0;padding:0 max(16px,calc((100vw - 1100px)/2));background:#12211b}.jam-room:fullscreen .jam-room-grid{display:grid;grid-template-columns:minmax(280px,1fr) minmax(220px,.85fr)}.jam-room:fullscreen .jam-shared-queue{border-top:0;border-left:1px solid #ffffff12}.jam-room:fullscreen .jam-queue-list{max-height:50vh}@media(max-width:760px){.jam-room:fullscreen .jam-room-grid{display:block}.jam-room:fullscreen .jam-shared-queue{border-left:0;border-top:1px solid #ffffff12}}
+
+/* Centered invitation dialog, matching the native Jam menu. */
+#jam-dialog{width:min(480px,calc(100vw - 32px));max-width:480px;border:1px solid var(--line);border-radius:20px;padding:25px;background:var(--panel);box-shadow:0 24px 80px #0007}#jam-dialog::backdrop{background:#050b0dbb;backdrop-filter:blur(5px)}.jam-dialog-kicker{font-size:10px;letter-spacing:1.7px;color:var(--mint);font-weight:700}#jam-dialog h2{font-size:25px;margin:8px 0 0}.jam-dialog-intro{font-size:13px;color:var(--muted);line-height:1.6}.jam-start-card{border:1px solid #2c6554;background:linear-gradient(115deg,#193c30,#162b29);border-radius:13px;padding:17px;margin:20px 0}.jam-start-card>p{font-size:12px;color:#b5ccbf;line-height:1.6;margin:8px 0 14px}.jam-join-row{display:flex;gap:8px;align-items:center}#jam-dialog #jam-code{flex:1;min-width:0;border-radius:9px}#jam-dialog #jam-join{margin:0;white-space:nowrap;min-height:39px}.jam-dialog-footnote{border-top:1px solid var(--line);padding-top:16px}#jam-room-count{white-space:nowrap}.jam-room-controls>div:first-child{min-width:0}@media(max-width:480px){#jam-dialog{padding:20px}#jam-dialog h2{font-size:23px}.jam-join-row{flex-wrap:wrap}#jam-dialog #jam-code{flex-basis:100%}#jam-dialog #jam-join{width:100%}}

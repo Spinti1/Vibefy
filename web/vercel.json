@@ -29,7 +29,7 @@
   ],
   "functions": {
     "app.py": {
-      "maxDuration": 60
+      "maxDuration": 300
     }
   },
   "headers": [
@@ -50,11 +50,28 @@
         },
         {
           "key": "Permissions-Policy",
-          "value": "camera=(), microphone=(), geolocation=()"
+          "value": "camera=(self), microphone=(), geolocation=()"
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' https://www.youtube.com https://accounts.google.com https://w.soundcloud.com; style-src 'self' https://accounts.google.com https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://i.ytimg.com https://*.googleusercontent.com https://*.ggpht.com https://i.scdn.co https://mosaic.scdn.co https://*.sndcdn.com https://api.juicevault.xyz data:; connect-src 'self' https://www.googleapis.com https://openidconnect.googleapis.com https://oauth2.googleapis.com https://accounts.google.com https://api.juicevault.xyz https://vibefy-jam.pex-am.workers.dev wss://vibefy-jam.pex-am.workers.dev; media-src 'self' blob: https://api.juicevault.xyz; object-src 'none'; base-uri 'self'; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://accounts.google.com https://w.soundcloud.com; frame-ancestors 'none'; form-action 'self'"
+          "value": "default-src 'self'; script-src 'self' https://www.youtube.com https://accounts.google.com https://w.soundcloud.com; style-src 'self' https://accounts.google.com https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https://i.ytimg.com https://*.googleusercontent.com https://*.ggpht.com https://i.scdn.co https://mosaic.scdn.co https://*.sndcdn.com https://api.juicevault.xyz data:; connect-src 'self' wss://vibefy-neon.vercel.app wss://usevibefy.online wss://www.usevibefy.online https://www.googleapis.com https://openidconnect.googleapis.com https://oauth2.googleapis.com https://accounts.google.com https://api.juicevault.xyz https://vibefy-jam.pex-am.workers.dev wss://vibefy-jam.pex-am.workers.dev; media-src 'self' blob: https://api.juicevault.xyz https://*.googlevideo.com; object-src 'none'; base-uri 'self'; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://accounts.google.com https://w.soundcloud.com; frame-ancestors 'none'; form-action 'self'"
+        }
+      ]
+    },
+    {
+      "source": "/mobile-connect.html",
+      "headers": [
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin-allow-popups"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
         }
       ]
     }

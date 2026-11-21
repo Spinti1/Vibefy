@@ -33,7 +33,6 @@ These are native adaptations, not the original extensions running inside Spiceti
 | [BlafKing / Cat Jam Synced](https://github.com/BlafKing/spicetify-cat-jam-synced) | Original transparent animation converted to a native PNG atlas, estimated BPM playback |
 | [xoft122 / WaveLink](https://github.com/xoft122/wavelink) | Native public SoundCloud search / playback adaptation; MIT notice retained |
 | [wairence / Vivy](https://github.com/wairence/vivy) | Independent live audio visual adaptation; MIT notice retained |
-| [rolandyangg / Backmusic](https://github.com/rolandyangg/backmusic_extension) | Visual inspiration for independent spectrum / rings / particles implementation; unlicensed extension code was not copied |
 | [Grason Chan / Spotify Spice](https://github.com/grasonchan/spotify-spice) | Track Peek inspiration / native adaptation only, no Vinyl; MIT notice retained |
 | [CaYatur / SoundVisualizer](https://github.com/CaYatur/SoundVisualizer) | 12 built-in 2D effect geometries and audio mappings adapted from Çağan Turgut / CaYaDev, revision c3e7fc6bc3fa826e323486256268fa764a317963. MIT notice preserved in assets/mods/LICENSE-SoundVisualizer.txt. Canvas bloom, GPU and MilkDrop modes are not included. |
 | [Kyzenkms / Spicetify Jam](https://github.com/Kyzenkms/spicetify-jam) | Inspiration for independent shared listening; current transport uses a Vibefy Cloudflare relay, not Spotify Jam |
@@ -42,6 +41,8 @@ These are native adaptations, not the original extensions running inside Spiceti
 The inspected Nyan and Cat Jam repositories do not contain explicit artwork license notices. **This project's MIT license does not relicense that artwork.** Source revisions, original URLs, conversion details and hashes are recorded in [assets/mods/README.md](assets/mods/README.md). Other mod notices are retained under `assets/mods/LICENSE_*.txt` and in the distribution's third-party notices.
 
 ## Fonts, icons and other dependencies
+
+The browser player reuses the native application's Lucide/Spotifast SVG icons. ISC notices are included in `web/public/assets/ui-icons-LICENSE.txt`. The desktop-derived interface and controls remain credited to Spotifast and its contributors.
 
 The website uses **DM Sans** (Colophon Foundry and contributors) and **Space Grotesk** (Florian Karsten), under the SIL Open Font License, served by Google Fonts. Native fonts, icon sets and additional asset notices are retained under `assets/` and the dependency notices. Vibefy's V logo and application branding are separate from the original Spotifast branding.
 
@@ -75,3 +76,17 @@ JuiceVault (https://juicevault.xyz/) provides archive metadata, playback and acc
 ### Wasmi
 
 Optional in-app WebAssembly mod runtime: [Wasmi](https://github.com/wasmi-labs/wasmi), dual MIT/Apache-2.0. Modules receive bounded playback/drawing interfaces, not account credentials.
+## Web Jam transport
+
+The browser Jam gateway uses the Python `websockets` package (BSD-3-Clause), alongside FastAPI and HTTPX. The Vercel gateway forwards the existing shared room protocol to the Cloudflare relay; music files and music-account tokens are not forwarded.
+
+## JuiceVault Quick Lyrics
+
+The native JuiceVault Genius-search shortcut follows Quick Lyrics from [JuiceVault Enhancer](https://github.com/Spinti1/juicevault-lyrics-extension), by Spinti1, MIT. This opens a user-triggered search; it does not claim to supply timed Genius lyrics. The original license is retained in assets/licenses/juicevault-enhancer-LICENSE.txt and installed under licenses/juicevault-enhancer-LICENSE.txt.
+
+- QR encoding: [qrcode-rust](https://github.com/kennytm/qrcode-rust), MIT/Apache-2.0. Default image features disabled; modules are drawn by the native UI.
+
+
+## Native mobile audio
+
+Android 0.2.7 uses [NewPipeExtractor v0.27.1](https://github.com/TeamNewPipe/NewPipeExtractor/tree/v0.27.1), GPL-3.0-or-later. The Android target is distributed under GPL-3.0-or-later with corresponding source and pinned dependencies. iOS uses [YouTubeKit](https://github.com/alexeichhorn/YouTubeKit) by Alexander Eichhorn and contributors, MIT, pinned to 7f75a2299dc329c0b7855afb25d47663a02855cb in the project-owned fork. Native resolution selects only public M4A audio streams and never sends Google account tokens to the extractors. See `mobile/licenses/` for notices.

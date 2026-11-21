@@ -23,7 +23,7 @@ class SecurityTests(unittest.TestCase):
         identity = "123456-demo.apps.googleusercontent.com"
         with patch.dict(module.os.environ, {"VIBEFY_GOOGLE_WEB_CLIENT_ID": identity, "GOOGLE_CLIENT_SECRET": "never-public"}):
             r = self.client.get("/api/google-config")
-            self.assertEqual(r.json(), {"clientId": identity})
+            self.assertEqual(r.json(), {"clientId": identity, "renewable": False})
             self.assertNotIn("never-public", r.text)
             self.assertEqual(r.headers["cache-control"], "no-store")
         with patch.dict(module.os.environ, {"VIBEFY_GOOGLE_WEB_CLIENT_ID": "invalid"}):
@@ -68,10 +68,27 @@ class SecurityTests(unittest.TestCase):
             self.assertEqual(module.safe_art(uri), "")
         self.assertEqual(module.safe_art("https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg"), "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg")
 
-    def test_music_videos_and_unclassified_rows_are_omitted(self):
-        for kind in [None, "MUSIC_VIDEO_TYPE_OMV", "MUSIC_VIDEO_TYPE_UGC"]:
-            self.assertIsNone(module.track({"videoId":"abcdefghijk", "videoType":kind}))
-        self.assertIsNotNone(module.track({"videoId":"abcdefghijk", "videoType":"MUSIC_VIDEO_TYPE_ATV"}))
+    def test_artwork_presentation_does_not_exclude_music_clips(self):
+        for kind in [None, "MUSIC_VIDEO_TYPE_OMV", "MUSIC_VIDEO_TYPE_UGC", "MUSIC_VIDEO_TYPE_ATV"]:
+            self.assertIsNotNone(module.track({"videoId": "abcdefghijk", "videoType": kind}))
+        self.assertIsNone(module.track({"videoId": "abcdefghijk", "isAvailable": False}))
+        self.assertIsNone(module.track({"videoId": "invalid"}))
+
+    def test_search_includes_clip_only_recordings_and_deduplicates_ids(self):
+        module.CACHE.clear()
+        rows = [
+            {"resultType": "song", "videoId": "abcdefghijk", "title": "Album recording"},
+            {"resultType": "video", "videoId": "zyxwvutsrqp", "title": "Clip only", "videoType": "MUSIC_VIDEO_TYPE_OMV"},
+            {"resultType": "video", "videoId": "abcdefghijk", "title": "Duplicate"},
+            {"resultType": "episode", "videoId": "12345678901", "title": "Podcast"},
+            {"resultType": "artist", "browseId": "UCexample", "title": "Artist"},
+        ]
+        with patch.object(module, "YTMusic") as api:
+            api.return_value.search.return_value = rows
+            response = self.client.get("/api/search", params={"q": "Demo recording"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual([t["id"] for t in response.json()["tracks"]], ["abcdefghijk", "zyxwvutsrqp"])
+            api.return_value.search.assert_called_once_with("Demo recording", limit=40)
 
     def test_metadata_is_data_not_html(self):
         t = module.track({"videoId":"abcdefghijk", "videoType":"MUSIC_VIDEO_TYPE_ATV", "title":"<script>alert(1)</script>"})
