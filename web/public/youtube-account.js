@@ -63,14 +63,20 @@
   if(r.status===401&&refreshToken){if(sentToken===token)await renewAccess(true);if(ticket!==generation)throw Error('Connection changed. Retry this action.');r=await request();}
   if(r.status===401){expires=0;update();throw Error(refreshToken?'Google could not authorize this request. Your account is saved; retry shortly.':'Google access needs renewal. Connect again. Your playlists are preserved.');}if(!r.ok)throw Error(r.status===403?'YouTube could not authorize this action. Check Google account access or try again later.':'YouTube could not complete the request. Try again.');return r.status===204?{}:r.json();
  }
+ async function playlistTracks(id){
+  const tracks=[],pages=new Set();let page='';
+  do{const data=await api('playlistItems',{part:'snippet,contentDetails',playlistId:id,maxResults:50,...(page?{pageToken:page}:{})});for(const i of data.items||[]){const s=i.snippet||{},video=i.contentDetails?.videoId;if(!/^[A-Za-z0-9_-]{11}$/.test(video)||['Private video','Deleted video'].includes(s.title))continue;tracks.push({id:video,title:s.title,artist:s.videoOwnerChannelTitle||'',album:'YouTube',duration:0,image:s.thumbnails?.medium?.url||''});}page=data.nextPageToken||'';if(page&&(pages.has(page)||tracks.length>=10000))throw Error('The complete YouTube playlist could not load. Your saved copy is unchanged.');pages.add(page);}while(page);
+  return tracks;
+ }
  async function importPlaylist(p,button){
   const ticket=generation;button.disabled=true;status('Importing '+(p.snippet?.title||'playlist')+'…');
-  try{const tracks=[];let page='';do{const data=await api('playlistItems',{part:'snippet,contentDetails',playlistId:p.id,maxResults:50,...(page?{pageToken:page}:{})});for(const i of data.items||[]){const s=i.snippet||{},id=i.contentDetails?.videoId;if(!/^[A-Za-z0-9_-]{11}$/.test(id)||['Private video','Deleted video'].includes(s.title))continue;tracks.push({id,title:s.title,artist:s.videoOwnerChannelTitle||'',album:'YouTube',duration:0,image:s.thumbnails?.medium?.url||''});}page=data.nextPageToken||'';}while(page&&tracks.length<10000);
+  try{const tracks=await playlistTracks(p.id);
    if(ticket!==generation||!connected())return;window.vibefyWebLibrary.save({id:'youtube:'+p.id,title:p.snippet?.title||'YouTube playlist',tracks,youtubeId:p.id});for(const box of [$('youtube-playlists')])for(const card of [...box.children])if(card.dataset.playlistId===p.id)card.remove();status('Saved on Home. '+tracks.length+' songs imported.');window.vibefyWebLibrary.open('youtube:'+p.id);window.vibefyWebLibrary.toast('Playlist ready · '+tracks.length+' songs');
   }catch(error){status(error.message);}finally{button.disabled=false;}
  }
- async function refresh(){
+ async function refresh(force=false){
   const ticket=generation;status('Loading your YouTube playlists…');const playlists=[];let page='';do{const data=await api('playlists',{part:'snippet,contentDetails',mine:'true',maxResults:50,...(page?{pageToken:page}:{})});if(ticket!==generation||!connected())return;playlists.push(...(data.items||[]));page=data.nextPageToken||'';}while(page&&playlists.length<1000);
+  for(const p of playlists){const existing=window.vibefyWebLibrary.collections().find(c=>c.id==='youtube:'+p.id);if(!existing||(!force&&existing.tracks.length===p.contentDetails?.itemCount))continue;const tracks=await playlistTracks(p.id);if(ticket!==generation||!connected())return;window.vibefyWebLibrary.save({...existing,title:p.snippet?.title||existing.title,tracks});}
   for(const box of [$('youtube-playlists')]){box.replaceChildren();for(const p of playlists){if(window.vibefyWebLibrary.collections().some(c=>c.youtubeId===p.id||c.id==='youtube:'+p.id))continue;const b=document.createElement('button');b.className='collection-tile';b.type='button';b.dataset.playlistId=p.id;const img=new Image();img.src=window.vibefyWebLibrary.art(p.snippet?.thumbnails?.medium?.url);img.alt='';img.className='collection-art';img.loading='lazy';const title=document.createElement('strong');title.textContent=p.snippet?.title||'YouTube playlist';const note=document.createElement('small');note.textContent=(p.contentDetails?.itemCount||0)+' songs · Open playlist';b.append(img,title,note);b.onclick=()=>importPlaylist(p,b);box.append(b);}}
   status(playlists.length?playlists.length+' playlists found. Choose the ones to add to Home.':'No playlists found in this YouTube account. Your local library is available on Home.');
  }
@@ -83,9 +89,30 @@
  $('header-connect').onclick=()=>{if(!$('account-dialog').open)$('account-dialog').showModal();};
  $('account-dialog').addEventListener('close',()=>{if(pending&&!connected())finishJob(Error('Connection cancelled. Connect again when you are ready.'));});
  $('google-disconnect').onclick=()=>{if(token&&window.google?.accounts?.oauth2)google.accounts.oauth2.revoke(token,()=>{});disconnect();};
- $('youtube-refresh').onclick=async()=>{if(!connected())return connect();if(loading)return;loading=true;update();try{await refresh();}catch(error){status(error.message);}finally{loading=false;update();}};
+ $('youtube-refresh').onclick=async()=>{if(!connected())return connect();if(loading)return;loading=true;update();try{await refresh(true);}catch(error){status(error.message);}finally{loading=false;update();}};
+ const saves=new Map();
+ async function saveCopy(collection){
+  if(!writable||!connected())await authorize(true);
+  const ticket=generation;let id=collection.youtubeId;
+  if(!id){const created=await api('playlists',{part:'snippet,status'},'POST',{snippet:{title:collection.title,description:'Created with Vibefy'},status:{privacyStatus:'unlisted'}});if(!created.id)throw Error('YouTube did not confirm playlist creation.');id=collection.youtubeId=created.id;window.vibefyWebLibrary.save(collection);}
+  const present=new Set();let page='';const pages=new Set();
+  do{const data=await api('playlistItems',{part:'contentDetails',playlistId:id,maxResults:50,...(page?{pageToken:page}:{})});for(const item of data.items||[])if(item.contentDetails?.videoId)present.add(item.contentDetails.videoId);page=data.nextPageToken||'';if(page&&pages.has(page))throw Error('YouTube repeated a playlist page. Retry sync.');pages.add(page);}while(page);
+  let missing=0;
+  for(const track of collection.tracks){
+   if(ticket!==generation)throw Error('YouTube account changed. Retry sync.');
+   let video=track.id;
+   if(video.startsWith('spotify:')){try{const response=await fetch('/api/match',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:track.title,artist:track.artist,duration:track.duration}),signal:AbortSignal.timeout(25000)});const data=await response.json();video=response.ok?data.track?.id:'';}catch{video='';}}
+   if(!/^[A-Za-z0-9_-]{11}$/.test(video||'')){missing++;continue;}
+   if(present.has(video))continue;
+   // On an uncertain write, stop. The next sync reads YouTube before retrying.
+   await api('playlistItems',{part:'snippet'},'POST',{snippet:{playlistId:id,resourceId:{kind:'youtube#video',videoId:video}}});present.add(video);
+  }
+  collection.youtubeSync={missing,completed:missing===0};window.vibefyWebLibrary.save(collection);
+  if(missing)throw Error(`${missing} songs could not be matched to YouTube. The other songs were saved; retry sync to check the remaining songs.`);
+  return id;
+ }
  window.vibefyYouTube={forget:disconnect,get connected(){return connected();},connect,
-  async save(collection){if(!writable||!connected())await authorize(true);const created=await api('playlists',{part:'snippet,status'},'POST',{snippet:{title:collection.title,description:'Created with Vibefy'},status:{privacyStatus:'unlisted'}});collection.youtubeId=created.id;window.vibefyWebLibrary.save(collection);for(const t of collection.tracks)await this.add(collection.youtubeId,t);return created.id;},
+  save(collection){const key=collection.id;if(saves.has(key))return saves.get(key);const task=saveCopy(collection).finally(()=>saves.delete(key));saves.set(key,task);return task;},
   async add(id,track){if(!/^[A-Za-z0-9_-]{11}$/.test(track.id))return;if(!writable||!connected())await authorize(true);await api('playlistItems',{part:'snippet'},'POST',{snippet:{playlistId:id,resourceId:{kind:'youtube#video',videoId:track.id}}});},
   async rename(id,title){if(!writable||!connected())await authorize(true);const data=await api('playlists',{part:'snippet',id});const p=data.items?.[0];if(!p)throw Error('This playlist is unavailable.');await api('playlists',{part:'snippet'},'PUT',{id,snippet:{title,description:p.snippet.description||'',...(p.snippet.defaultLanguage?{defaultLanguage:p.snippet.defaultLanguage}:{})}});}
  };

@@ -7,8 +7,8 @@ async function page(options={}){
  const makeNode=()=>({textContent:'',hidden:false,disabled:false,open:false,dataset:{},children:[],events:{},classList:{toggle(){}},setAttribute(){},addEventListener(name,fn){this.events[name]=fn;},replaceChildren(){this.children=[];},append(...children){this.children.push(...children);},showModal(){this.open=true;},close(){this.open=false;},remove(){}});
  const node=id=>{if(!nodes.has(id))nodes.set(id,makeNode());return nodes.get(id);};
  const oauth={initTokenClient(c){config=c;return {requestAccessToken(request){grants.push(request);responses.push({success:()=>c.callback({access_token:'test-only-token',expires_in:3600,scope:deny?'':request.scope}),error:()=>c.error_callback({type:'popup_closed'})});if(!options.hold)queueMicrotask(()=>popupError?c.error_callback({type:'popup_closed'}):c.callback({access_token:'test-only-token',expires_in:3600,scope:deny?'':request.scope}));}};},hasGrantedAllScopes(response,...scopes){return scopes.every(scope=>response.scope.split(' ').includes(scope));},revoke(token,done){done();}};
- const google={accounts:{oauth2:oauth}},window={google,vibefyWebLibrary:{collections:()=>[],save(){},art:value=>value},dispatchEvent(){}};
- const fetch=async(url,request={})=>{calls.push({url:String(url),method:request.method||'GET'});return {ok:true,status:200,json:async()=>String(url)==='/api/google-config'?{clientId:options.missing?'':'123-demo.apps.googleusercontent.com'}:String(url).includes('/userinfo')?{name:'Demo listener'}:{items:options.playlists||[]}};};
+ const google={accounts:{oauth2:oauth}},window={google,vibefyWebLibrary:{collections:()=>options.collections||[],save(c){options.saved?.push(c);},art:value=>value},dispatchEvent(){}};
+ const fetch=async(url,request={})=>{calls.push({url:String(url),method:request.method||'GET'});if(options.api&&String(url).includes('/youtube/v3/'))return options.api(new URL(url),request);return {ok:true,status:200,json:async()=>String(url)==='/api/google-config'?{clientId:options.missing?'':'123-demo.apps.googleusercontent.com'}:String(url).includes('/userinfo')?{name:'Demo listener'}:{items:options.playlists||[]}};};
  vm.runInNewContext(source,{Image:function(){return makeNode();},document:{getElementById:node,createElement:makeNode,head:{append(script){queueMicrotask(()=>script.onload());}}},window,google,fetch,URL,Date,Number,String,Error,Event,AbortSignal,queueMicrotask,setTimeout(fn,ms){const t={fn,ms};timers.push(t);return t;},clearTimeout(){}});
  await new Promise(setImmediate);return {node,hasNode:id=>nodes.has(id),grants,calls,window,timers,responses,deny(){deny=true;},closePopup(){popupError=true;}};
 }
@@ -22,3 +22,28 @@ test('cancelling restores controls and late callbacks cannot cancel a newer conn
 
 test('toolbar opens the explanation without requesting Google access',async()=>{const p=await page();await p.node('header-connect').onclick();assert.equal(p.node('account-dialog').open,true);assert.equal(p.grants.length,0);assert.ok(!p.calls.some(c=>c.url.includes('/youtube/v3/')));});
 test('connected account playlists appear only on Home and the account modal closes',async()=>{const p=await page({playlists:[{id:'PLabcdefghijklmnop',snippet:{title:'Demo playlist',thumbnails:{}},contentDetails:{itemCount:3}}]});await p.node('google-connect').onclick();assert.equal(p.node('youtube-playlists').children.length,1);assert.equal(p.node('youtube-playlists').children[0].dataset.playlistId,'PLabcdefghijklmnop');assert.equal(p.hasNode('account-playlists'),false);assert.equal(p.node('account-dialog').open,false);});
+
+ test('partial YouTube saves resume the existing copy without duplicate songs',async()=>{
+ let creates=0,fail=true;const remote=new Set(),written=[];
+ const p=await page({api:async(url,request)=>{
+  const body=request.body?JSON.parse(request.body):{};
+  if(url.pathname.endsWith('/playlists')&&request.method==='POST'){creates++;return {ok:true,status:200,json:async()=>({id:'PLexamplecopy'})};}
+  if(url.pathname.endsWith('/playlistItems')&&request.method==='POST'){
+   const id=body.snippet.resourceId.videoId;
+   if(id==='bbbbbbbbbbb'&&fail){fail=false;return {ok:false,status:503,json:async()=>({})};}
+   written.push(id);remote.add(id);return {ok:true,status:200,json:async()=>({id:'entry'})};
+  }
+  return {ok:true,status:200,json:async()=>({items:[...remote].map(videoId=>({contentDetails:{videoId}}))})};
+ }});
+ await p.node('google-connect').onclick();
+ const list={id:'local:demo',title:'Example',tracks:['aaaaaaaaaaa','bbbbbbbbbbb','ccccccccccc'].map(id=>({id}))};
+ await assert.rejects(p.window.vibefyYouTube.save(list));assert.equal(list.youtubeId,'PLexamplecopy');assert.equal(remote.size,1);
+ await p.window.vibefyYouTube.save(list);assert.equal(creates,1);assert.deepEqual(written,['aaaaaaaaaaa','bbbbbbbbbbb','ccccccccccc']);
+ await p.window.vibefyYouTube.save(list);assert.equal(written.length,3);
+ });
+
+test('refresh updates an imported YouTube copy without replacing the complete local original',async()=>{
+ const local={id:'local:original',youtubeId:'PLexamplecopy',tracks:[{id:'aaaaaaaaaaa'},{id:'bbbbbbbbbbb'}]},remote={id:'youtube:PLexamplecopy',youtubeId:'PLexamplecopy',tracks:[]},saved=[];
+ const p=await page({collections:[local,remote],saved,api:async url=>({ok:true,status:200,json:async()=>url.pathname.endsWith('/playlists')?{items:[{id:'PLexamplecopy',snippet:{title:'Example'},contentDetails:{itemCount:1}}]}:{items:[{snippet:{title:'Example',videoOwnerChannelTitle:'Artist'},contentDetails:{videoId:'aaaaaaaaaaa'}}]}})});
+ await p.node('google-connect').onclick();assert.equal(saved.length,1);assert.equal(saved[0].id,remote.id);assert.equal(saved[0].tracks.length,1);assert.equal(local.tracks.length,2);
+});
