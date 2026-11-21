@@ -72,8 +72,8 @@ pub fn controls(app: &mut App, ui: &mut egui::Ui, source: &str) {
         ui.add_enabled_ui(
             app.music_accounts[0].connected && app.personal.scope.is_some() && !busy,
             |ui| {
-                if theme::pill_button(ui, &p, "Save to YouTube", false).clicked() {
-                    send(app, Edit::Backup(source.into()));
+                if theme::pill_button(ui, &p, if busy { "Saving…" } else { "Save to YouTube" }, false).on_hover_text("Add missing songs to the existing copy, or recreate a removed copy. Existing YouTube songs are kept.").clicked() {
+                    send(app, Edit::SaveBackup(source.into()));
                 }
             },
         );
@@ -112,6 +112,9 @@ pub fn controls(app: &mut App, ui: &mut egui::Ui, source: &str) {
             ));
         }
     }
+    if let Some(pending) = app.personal.tasks.values().find(|task| task.backup && task.source.as_deref() == Some(source)) {
+        ui.horizontal(|ui| { ui.spinner(); ui.small(&pending.message); });
+    }
     if let Some(report) = app.personal.backups.get(source)
         && let Some(error) = &report.message
     {
@@ -141,7 +144,7 @@ pub fn menu(app: &mut App, ui: &mut egui::Ui, source: &str, name: &str) {
     if app.music_accounts[0].connected
         && super::widgets::menu_item(ui, &p, Some(Icon::ListPlus), "Save to YouTube")
     {
-        send(app, Edit::Backup(source.into()));
+        send(app, Edit::SaveBackup(source.into()));
     }
     super::widgets::playlist_visibility_menu(ui, app, source);
     if super::widgets::menu_item(ui, &p, Some(Icon::Trash), "Remove local copy") {

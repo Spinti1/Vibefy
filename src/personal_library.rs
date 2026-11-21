@@ -174,6 +174,7 @@ pub enum Action {
         backup: bool,
     },
     Backup(String),
+    SaveBackup(String),
     Export,
     Restore,
 }
@@ -295,6 +296,7 @@ pub enum Task {
     Backup {
         collection: Collection,
         scope: String,
+        recreate_missing: bool,
     },
     Account,
 }
@@ -446,7 +448,7 @@ pub async fn execute(task: Task, context: ContextData) -> Result<Output> {
             let reports = load_reports(context.root.join(&scope)).await?;
             Ok(Output::Account { scope, reports })
         }
-        Task::Backup { collection, scope } => backup(collection, &scope, context).await,
+        Task::Backup { collection, scope, recreate_missing } => backup(collection, &scope, recreate_missing, context).await,
     }
 }
 
@@ -510,7 +512,7 @@ async fn load_reports(root: PathBuf) -> Result<BTreeMap<String, Report>> {
     })
     .await?
 }
-async fn backup(collection: Collection, scope: &str, context: ContextData) -> Result<Output> {
+async fn backup(collection: Collection, scope: &str, recreate_missing: bool, context: ContextData) -> Result<Output> {
     ensure!(validate(&collection), "Invalid playlist metadata");
     // Serialize remote reconciliation, even when several lists were edited together.
     static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
@@ -540,7 +542,7 @@ async fn backup(collection: Collection, scope: &str, context: ContextData) -> Re
         crate::playlist_tools::now() >= journal.retry_at,
         "YouTube is limiting requests. Your local playlist is safe; try again later."
     );
-    let result = sync(&session, &context, &collection, &path, &mut journal).await;
+    let result = sync(&session, &context, &collection, &path, &mut journal, recreate_missing).await;
     if let Err(error) = result {
         record_failure(&mut journal, &error, crate::playlist_tools::now());
         write(&path, &journal).await?;
@@ -565,20 +567,57 @@ fn record_failure(journal: &mut Journal, error: &anyhow::Error, now: u64) {
     journal.report.remote = journal.remote.clone();
     journal.report.retry_at = journal.retry_at;
 }
+fn forget_deleted_copy(journal: &mut Journal, manual: bool) -> Result<()> {
+    ensure!(manual, crate::music_session::Failure::PlaylistMissing);
+    journal.remote.clear();
+    journal.title.clear();
+    journal.creating = false;
+    journal.retry_at = 0;
+    journal.report = Report::default();
+    // Retain matches so recreation does not search for every song again.
+    Ok(())
+}
 async fn sync(
     session: &Session,
     context: &ContextData,
     collection: &Collection,
     path: &Path,
     journal: &mut Journal,
+    recreate_missing: bool,
 ) -> Result<()> {
     let marker = format!("Vibefy playlist: {}", hash(collection.source.as_bytes()));
+    let mut existing_details = None;
+    let mut recovery_lists = None;
+    if !journal.remote.is_empty() {
+        match session.details(&context.proxy, &journal.remote).await {
+            Ok(details) => existing_details = Some(details),
+            Err(error) if matches!(error.downcast_ref::<crate::music_session::Failure>(),
+                Some(crate::music_session::Failure::PlaylistMissing | crate::music_session::Failure::Rejected(404))) => {
+                ensure!(recreate_missing, crate::music_session::Failure::PlaylistMissing);
+                (context.progress)("Checking whether the previous YouTube copy was removed…".into());
+                let mut lists = session.playlists(&context.proxy).await?;
+                for seconds in [1, 2] {
+                    if !lists.iter().any(|list| list.id.strip_prefix("VL").unwrap_or(&list.id) == journal.remote) { break; }
+                    tokio::time::sleep(std::time::Duration::from_secs(seconds)).await;
+                    lists = session.playlists(&context.proxy).await?;
+                }
+                ensure!(!lists.iter().any(|list| list.id.strip_prefix("VL").unwrap_or(&list.id) == journal.remote),
+                    "YouTube still lists this copy but could not open it. Retry later; no new playlist was created.");
+                forget_deleted_copy(journal, true)?;
+                write(path, journal).await?;
+                recovery_lists = Some(lists);
+                (context.progress)("The previous YouTube copy was removed. Recreating your copy…".into());
+            }
+            Err(error) => return Err(error),
+        }
+    }
     let creating = journal.remote.is_empty();
     if creating && !journal.creating {
         // Recover an existing same-name copy after restoring local metadata on another device.
-        let candidates = session
-            .playlists(&context.proxy)
-            .await?
+        let candidates = match recovery_lists.take() {
+            Some(lists) => lists,
+            None => session.playlists(&context.proxy).await?,
+        }
             .into_iter()
             .filter(|p| p.title == collection.title)
             .collect::<Vec<_>>();
@@ -637,7 +676,10 @@ async fn sync(
         journal.title = collection.title.clone();
         write(path, journal).await?;
     }
-    let (mut private, mut description) = session.details(&context.proxy, &journal.remote).await?;
+    let (mut private, mut description) = match existing_details {
+        Some(details) => details,
+        None => session.details(&context.proxy, &journal.remote).await?,
+    };
     if creating {
         for seconds in [1, 2, 4] {
             if private && description.contains(&marker) {
@@ -710,7 +752,7 @@ async fn sync(
         desired.len()
     ));
     session
-        .sync_managed(&context.proxy, &journal.remote, &marker, &desired, missing == 0)
+        .sync_managed(&context.proxy, &journal.remote, &marker, &desired)
         .await?;
     journal.report = Report {
         retry_at: 0,
@@ -729,6 +771,20 @@ pub fn decode_backup(bytes: &[u8]) -> Result<Vec<Collection>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn deleted_copy_reset_is_manual_and_retains_cached_recording_matches() {
+        let mut journal = Journal { source: "local-source".into(), remote: "PLold".into(), title: "Example".into(), ..Default::default() };
+        journal.matches.insert("spotify:example".into(), LocalTrack { uri: "vibefy:youtube:abcdefghijk".into(), ..Default::default() });
+        journal.report.remote = journal.remote.clone();
+        journal.report.fingerprint = "old-success".into();
+        assert!(forget_deleted_copy(&mut journal, false).is_err());
+        assert_eq!(journal.remote, "PLold");
+        assert!(forget_deleted_copy(&mut journal, true).is_ok());
+        assert!(journal.remote.is_empty() && journal.report.remote.is_empty() && journal.report.fingerprint.is_empty());
+        assert_eq!(journal.source, "local-source");
+        assert_eq!(journal.matches.len(), 1);
+        assert!(!journal.creating);
+    }
     #[test]
     fn personal_library_creation_recovery_retains_uncertain_intents_and_cooldowns() {
         use crate::music_session::Failure;

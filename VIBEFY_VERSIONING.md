@@ -1,8 +1,8 @@
 # Vibefy releases
 
-Current source version: **0.4.76**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
+Current source version: **0.4.77**. The imported Spotifast base was 0.14.2; its version is not the Vibefy version.
 
-For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.77), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
+For each future user-requested functional update, increment the Vibefy patch version once (next: 0.4.78), update Cargo.toml and the root package in Cargo.lock, and record the changes here. Do not auto-update this fork from the Spotifast release feed.
 
 0.4.4: About and Mods credits, clearer buttons, cache management and 2 GB advisory, performance improvements.
 
@@ -152,3 +152,5 @@ Web companion for 0.4.53: explicit /web and /phone routes; presentation homepage
 0.4.75: Retire WaveLink from the desktop Mods catalogue and migrate its old enabled state without resetting account or playlist data. Phone web UI removes Cat Jam, fixes Nyan positioning and seek previews, embeds transport glyphs, and adds a verified More Lyrics fallback.
 
 0.4.76: Resume incomplete YouTube playlist copies, verify uncertain additions before retrying, recognize YouTube audio substitutions, accept equivalent studio reissues and display unmatched songs honestly. Web saves reuse their existing YouTube playlist instead of creating duplicates.
+
+0.4.77: Manual saves recover confirmed removed YouTube copies; background sync never recreates them. Existing copies receive missing songs only, preserving YouTube additions and order. Visible save progress and web copy existence checks.

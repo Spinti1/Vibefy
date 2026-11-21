@@ -17,6 +17,8 @@ pub enum Failure {
     Rejected(u16),
     #[error("YouTube Music did not confirm the change; verify the playlist before retrying")]
     Unconfirmed,
+    #[error("The YouTube copy is no longer available. Click Save to YouTube to create it again.")]
+    PlaylistMissing,
 }
 
 const ORIGIN: &str = "https://music.youtube.com";
@@ -63,6 +65,15 @@ fn find_section<'a>(value: &'a Value, key: &str, depth: usize) -> Option<&'a Val
         Value::Array(list) => list.iter().find_map(|v| find_section(v, key, depth + 1)),
         _ => None,
     }
+}
+
+/// A deleted browse ID can return HTTP 200 with response context only.
+/// Other unsupported pages must not be mistaken for a deleted playlist.
+pub fn missing_playlist_response(value: &Value) -> bool {
+    value.as_object().is_some_and(|object| {
+        object.get("responseContext").is_some_and(Value::is_object)
+            && object.keys().all(|key| matches!(key.as_str(), "responseContext" | "trackingParams" | "microformat"))
+    })
 }
 
 fn playlist_section(value: &Value) -> Result<&Value> {
@@ -546,6 +557,7 @@ impl Session {
         let value = self
             .request(&Self::client(proxy)?, None, &format!("VL{id}"))
             .await?;
+        ensure!(!missing_playlist_response(&value), Failure::PlaylistMissing);
         Ok(playlist_details(&value))
     }
     pub async fn create_unlisted(
@@ -704,7 +716,7 @@ impl Session {
             "The Music library exceeded the supported page limit; no partial library was saved"
         )
     }
-    /// Reconcile only a Vibefy-created copy, using server row identities for removals.
+    /// Add missing songs only to a verified Vibefy-created copy.
     /// Every retry reads the current list first, including after an interrupted write.
     pub async fn sync_managed(
         &self,
@@ -712,7 +724,6 @@ impl Session {
         id: &str,
         marker: &str,
         desired: &[String],
-        prune: bool,
     ) -> Result<()> {
         ensure!(
             self.google.is_none(),
@@ -769,58 +780,10 @@ impl Session {
             }
         }
         let result = self.managed_rows(proxy, id, desired).await?;
-        let selected: Vec<_> = desired
-            .iter()
-            .map(|video| {
-                result
-                    .iter()
-                    .find(|(found, _)| found == video)
-                    .cloned()
-                    .ok_or(Failure::Unconfirmed)
-            })
-            .collect::<std::result::Result<_, _>>()?;
-        if !prune {
-            return Ok(());
-        }
-        let keep: HashSet<_> = selected.iter().map(|(_, set)| set.as_str()).collect();
-        // Preserve the existing YouTube order when resuming. A transfer is
-        // complete when all intended songs are present, not when the service's
-        // independently sorted view happens to match local row positions.
-        // Every desired row was verified above before pruning obsolete rows.
-        let extras: Vec<_> = result
-            .iter()
-            .filter(|(_, set)| !keep.contains(set.as_str()))
-            .collect();
-        for batch in extras.chunks(50) {
-            let actions: Vec<_> = batch.iter().map(|(video,set)|json!({"action":"ACTION_REMOVE_VIDEO","removedVideoId":video,"setVideoId":set})).collect();
-            let value = self
-                .post(
-                    &Self::client(proxy)?,
-                    "browse/edit_playlist",
-                    json!({"playlistId":id,"actions":actions}),
-                    None,
-                )
-                .await?;
-            ensure!(
-                value["status"].as_str() == Some("STATUS_SUCCEEDED"),
-                Failure::Unconfirmed
-            );
-        }
-        let mut result = self.managed_rows(proxy, id, desired).await?;
-        for delay in [1, 2] {
-            if crate::playlist_tools::counts(result.iter().map(|(v, _)| v.clone()))
-                == crate::playlist_tools::counts(desired.iter().cloned())
-            {
-                break;
-            }
-            tokio::time::sleep(Duration::from_secs(delay)).await;
-            result = self.managed_rows(proxy, id, desired).await?;
-        }
-        ensure!(
-            crate::playlist_tools::counts(result.iter().map(|(v, _)| v.clone()))
-                == crate::playlist_tools::counts(desired.iter().cloned()),
-            Failure::Unconfirmed
-        );
+        // Copy updates are additions-only. Songs added on YouTube, their order
+        // and existing occurrences remain untouched.
+        let present: HashSet<_> = result.iter().map(|(video, _)| video.as_str()).collect();
+        ensure!(desired.iter().all(|video| present.contains(video.as_str())), Failure::Unconfirmed);
         Ok(())
     }
     async fn managed_rows(&self, proxy: &ProxyConfig, id: &str, desired: &[String]) -> Result<Vec<(String, String)>> {

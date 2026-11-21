@@ -6,10 +6,110 @@ nav_order: 1
 
 ## Vibefy HTTPS and sign-in transport
 
+## YouTube copy recovery (0.4.77)
+
+Copy updates append missing songs without removing or reordering existing YouTube entries.
+An explicit Save to YouTube can replace a missing linked copy after a successful full
+account-library read confirms the old ID is absent. Automatic sync reports the missing
+copy for manual action instead. Transport, authorization, rate-limit and unsupported-page
+failures retain the previous link. Cached recording matches survive recreation; uncertain
+creation still uses the existing recovery journal before any retry.
+
 ## Optional accounts and playlist backups (0.4.48)
 
+### Spotify connection state (0.4.56, Windows)
+
+Startup verifies the saved isolated session and then loads the library in the
+background. A verified identity stays connected if a library refresh fails; the
+previous list is retained only for the same account. Explicit disconnection clears
+the connection. Home groups Spotify copies and available account playlists below
+Vibefy playlists; selecting an unimported item opens the import selector.
+
+Library count changes restart the positioned scan from the top, at most three
+times. Complete-position and account checks still apply. Metadata reads are not
+blocked by a Web API search/write cooldown, as they issue no Web API requests.
+The sign-in window remains isolated WebView2. Default-browser OAuth needs a
+registered Vibefy application; legacy third-party app identities are not reused.
+
+### Spotify rendered-page import (0.4.55, Windows)
+
+The library import no longer issues Web API metadata GETs. It reads the signed-in
+profile link, library links and visible playlist rows in the isolated first-party
+Spotify page. The reader scrolls only the list viewport, collects virtualized rows
+by their position and requires every advertised position before saving. Repeats
+remain separate occurrences. Account identity is checked around a snapshot;
+missing/changed rows fail without replacing the existing local copy.
+
+Only two bounded snapshots are cached in the existing browser's memory, for at
+most five minutes and until the browser's idle shutdown. A manual library refresh,
+import or write preflight invalidates them. The signed-in profile link comes from
+the account menu; the reader never opens credential forms, reads browser storage,
+extracts cookies, or sends its own fetch/XHR metadata requests. No Premium plan or
+developer Client ID is required by this reader. Spotify's page must still work.
+Collapsed playlist folders must be expanded if the page does not expose them.
+
+Song search and confirmed remote writes still use the previous authenticated
+request path, honoring its service cooldowns. Reading the existing web page does
+not make write quotas disappear. This is an unofficial integration, with no
+promise of unrestricted availability. The 0.4.54 architecture below is historical;
+its Web API metadata-read path has been replaced.
+
+### Optional Spotify browser import (0.4.54, Windows)
+
+Home places **Connect Spotify** next to the public-link importer. The connection
+opens Spotify's first-party sign-in page in an isolated WebView2 profile. It does
+not read the user's other browsers, request a developer Client ID or reactivate
+the legacy OAuth/playback grants. Authentication and security challenges remain
+on Spotify's pages, with the stock browser user agent and protections enabled.
+
+Only authenticated metadata reads are implemented: account identity, playlist
+list, saved songs and selected playlist contents. The web player's own request
+authorization stays in memory on its browser thread. Native code requests only
+fixed resources and validated additions; page messages require the exact open.spotify.com origin,
+a per-request random correlation ID and bounded response size. No native command
+bindings, arbitrary URLs or external authentication exports are exposed.
+Cookies remain in WebView2's OS-protected profile. Only its random identifier is
+saved using the existing user-bound protected store under the spotify-library key.
+
+The full library header list loads when the connection/import menu opens.
+Following selected copies also permits an identity check after restart. It
+includes Liked Songs and up to 2,000 playlist headers, with covers and selection
+controls. Imports are sequential and bounded to 20,000 entries per collection.
+Complete pages, account identity and playlist snapshots are checked before a
+local copy replaces an older import. Source order and repeated tracks are kept;
+unavailable, local-file and podcast entries are counted. Completed imports survive
+a later failure. Reimporting a playlist refreshes its existing local identity;
+Liked Songs identities are account-specific. Metadata-only file backups include
+these collections. Local saving retains the existing 200-list/20-MB limits.
+
+YouTube copies require the same explicit selection as other import dialogs.
+They are scheduled after the local Spotify batch, preventing browser-profile
+switches between every imported page. Copies remain unlisted and retain the
+existing account-scoped journals, matching checks and recovery rules. A YouTube
+account change does not redirect an earlier selection into the new account.
+
+Following selected copies is optional. While Vibefy runs, a selected playlist is
+checked approximately every 15 minutes, sequentially with at least 20 seconds
+between playlist checks. Large libraries and cooldowns may take longer. Missing
+occurrences are appended locally; pending songs and existing repeats remain.
+There are no automatic deletions or renames. Disconnect stops checks.
+
+Adding from Vibefy requires confirming the Spotify recording and an editable
+playlist or Liked Songs. The optional local copy is saved before submission.
+A matching account and confirmed edit permission are required. A separate durable
+metadata-only outbox respects Retry-After across restarts and checks membership
+before append. Refused authorization stops; uncertain writes are not blindly
+repeated. Following copies is not instant bidirectional mirroring.
+
+This is an unofficial web-session integration, not a supported Spotify API
+contract. Spotify can refuse a read, expire the session or change its schema.
+Explicit Retry-After waits stop the batch; authorization failures remain visible.
+There is no CAPTCHA, rate-limit or access-control bypass, and no promise of
+unlimited access. Disconnect removes only this connection, keeping local imports.
+The public-link importer and guest playback remain independent.
+
 Since 0.4.51 the desktop welcome screen offers YouTube and Continue as guest.
-Spotify connection controls and automatic grant restoration are removed. Stored
+Legacy Spotify OAuth connection controls and automatic grant restoration remain removed. Stored
 credentials are left untouched but are not loaded. Guest playback uses the existing
 YouTube engine. The mobile web beta is separate.
 
@@ -18,7 +118,7 @@ playlists open directly from the connected library shelf, without a separate
 YouTube import button.
 Playlist imports copy metadata without modifying the original. Reimporting the
 same URL refreshes one local copy. Spotify imports require a public playlist;
-private playlists and Liked Songs are not supported. A fresh direct client reads
+private playlists and Liked Songs require the separate Windows account importer described above. A fresh direct client reads
 the public embed page without cookies or account tokens, keeps its anonymous
 public-session token in memory, then reads the public web player’s registered
 queryPlaylist operation sequentially in 100-entry pages. The endpoint and query
@@ -1272,7 +1372,9 @@ previews remain available independently.
 
 ## Cloud relay Jam (0.4.44)
 
-Listen Together is built in and has a fixed Users button in the top bar. The old LAN listener and browser PeerJS/STUN transport are replaced by an independent shared TLS WebSocket protocol through a Cloudflare Worker and SQLite Durable Object per room. Neither app opens an inbound listening port. Participants see no peer IP addresses; Cloudflare processes them. Only exact resolved YouTube recording IDs, bounded song metadata, upcoming supported tracks and play/pause/timing are exchanged. No audio, music tokens, cookies, account names or third-party cover URLs cross the relay.
+Listen Together is built in and has a fixed Users button in the top bar. The old LAN listener and browser PeerJS/STUN transport are replaced by an independent shared TLS WebSocket protocol through a Cloudflare Worker and SQLite Durable Object per room. Neither app opens an inbound listening port. Participants see no peer IP addresses; Cloudflare processes them. Only exact resolved YouTube recording IDs or public JuiceVault UUIDs, bounded song metadata, upcoming supported tracks and play/pause/timing are exchanged. No audio, music tokens, cookies or account names cross the relay. Public album-art URLs are restricted to known source hosts and paths; query credentials and arbitrary hosts are rejected. JuiceVault covers can be derived from the validated recording UUID.
+
+Since 0.4.64 the native relay reads the audio engine clock and queue through a weak state handle, independently of UI repaints. An engine replacement reattaches the host, and dropping it releases the handle. Participant additions, queue selection and current-recording seek requests dispatch through the existing backend player channel. Queue indexes and recording identities are revalidated by the host, with bounded and rate-limited relay messages. Old hosts do not advertise shared-control capability. The movable host status window is an egui overlay confined to Vibefy, not an OS topmost window.
 
 A random 12-character code grants listener access; a separate random 256-bit host credential grants control. Host credentials remain outside the invite link. Rooms allow 24 listeners and expire after six hours. Reconnection attempts are bounded. Host control, input lengths, connection/message rates, queue lengths and unauthenticated socket lifetimes are checked by the server. Normal clock ticks are checkpointed at most every 30 seconds; track, pause, seek and queue changes persist immediately. Ending/expiring the room deletes its state. This is transport encryption, not end-to-end encryption. Service quotas and browser autoplay/background/availability restrictions remain applicable.
 

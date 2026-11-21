@@ -273,3 +273,12 @@ fn substituted_music_rows_keep_the_explicit_original_video_identity() {
     let unrelated_menu = json!({"playlistItemData":{"videoId":"zyxwvutsrqp"},"menu":{"unrelated":{"videoId":"abcdefghijk"}}});
     assert_eq!(music_session::playlist_row_video(&unrelated_menu, &desired), Some("zyxwvutsrqp"));
 }
+
+#[test]
+fn deleted_playlist_context_is_distinct_from_existing_or_unsupported_pages() {
+    assert!(music_session::missing_playlist_response(&json!({"responseContext":{}})));
+    assert!(music_session::missing_playlist_response(&json!({"responseContext":{},"trackingParams":"redacted","microformat":{}})));
+    for value in [json!({}), json!({"responseContext":{},"contents":{}}), json!({"responseContext":{},"error":{"code":403}}), json!({"responseContext":{},"alerts":[]})] {
+        assert!(!music_session::missing_playlist_response(&value));
+    }
+}

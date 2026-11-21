@@ -416,7 +416,7 @@ impl Session {
         let playlist = value["items"]
             .as_array()
             .and_then(|a| a.first())
-            .ok_or_else(|| anyhow::anyhow!("The linked YouTube playlist is unavailable"))?;
+            .ok_or(crate::music_session::Failure::PlaylistMissing)?;
         Ok((
             playlist["snippet"]["channelId"].as_str() == Some(&self.channel)
                 && matches!(

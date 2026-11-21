@@ -124,6 +124,7 @@ impl App {
         }
     }
     pub(super) fn apply_personal(&mut self, action: Edit) {
+        let recreate_missing = matches!(&action, Edit::SaveBackup(_));
         match action {
             Edit::PhoneClose => {self.personal.phone_dialog=false;},
             Edit::PhoneShare {source,revoke} => {
@@ -491,7 +492,7 @@ impl App {
                     "Importing playlist…",
                 );
             }
-            Edit::Backup(source) => {
+            Edit::Backup(source) | Edit::SaveBackup(source) => {
                 let Some(scope) = self.personal.scope.clone() else {
                     self.personal.message = Some(
                         "Connect YouTube in Settings, then save this playlist to your account"
@@ -517,7 +518,7 @@ impl App {
                 self.personal.checked_revision = None;
                 self.settings_dirty = true;
                 self.personal_request(
-                    Task::Backup { collection, scope },
+                    Task::Backup { collection, scope, recreate_missing },
                     Some(source),
                     true,
                     fingerprint,
