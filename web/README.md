@@ -71,3 +71,7 @@ Phone controls (November 2026): native Play/Pause paths do not depend on the ext
 Lyrics use LRCLIB and YouTube Music with a metadata-verified More Lyrics fallback at https://lyrics.kamiloo13.me/api/get. Provider attribution is retained and a failed or blocked provider never replaces another usable result. More Lyrics availability is external; direct validation returned HTTP 403 on 20 November 2026.
 
 Resource update: visual mods skip snapshots/layout work while disabled or hidden; lyrics style rows only on active-line changes. Native-approved nearby invitations enter the existing validated Jam join path and fixed relay. Native apps advertise over LAN; ordinary browsers continue to join with a link or code.
+
+## Home Screen installation
+
+Open `/phone` (or `/web`) on a phone. The install guide appears once per seven days after dismissal, with a retry button in Settings. Android browsers exposing `beforeinstallprompt` show the real install prompt only after a user click; iOS shows Safari Share > Add to Home Screen steps. Native shells and already-standalone apps do not show the offer. Installation uses the existing manifest and mobile UI, with standalone safe-area styling. It does not provide the native audio resolver or native LAN discovery; browser playback and background limits still apply. Some browsers isolate installed-app storage, so users are told to sign in and save playlists from the Home Screen app. No account or local playlist data is cleared or migrated by the installer guide.
