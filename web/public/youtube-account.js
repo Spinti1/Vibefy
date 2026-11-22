@@ -5,7 +5,7 @@
  let client,token='',expires=0,writable=false,pending,expiryTimer,loading=false,initializing,displayName='',generation=0,grantedScopes='',restored=false,restoreAttempt;
  let refreshToken='',renewing,renewRetryAt=0;
  let sessionWrites=Promise.resolve(),sessionSaveFailed=false,sessionReadFailed=false;
- const storage=()=>window.vibefyMobileSession;
+ const storage=()=>window.vibefyMobileSession||window.vibefyBrowserSessions?.google;
  function persist(){if(!storage()||!connected())return Promise.resolve();const record={version:1,access_token:token,expires_at:expires,scope:grantedScopes,display_name:displayName,...(refreshToken?{refresh_token:refreshToken}:{})};sessionWrites=sessionWrites.catch(()=>{}).then(()=>storage().write(record)).then(()=>{sessionSaveFailed=false;},error=>{sessionSaveFailed=true;throw error;});return sessionWrites;}
  function clearStored(){if(storage())sessionWrites=sessionWrites.catch(()=>{}).then(()=>storage().clear()).catch(()=>{});}
  function validRefresh(value){return typeof value==='string'&&value.length>0&&value.length<=4096;}
@@ -54,6 +54,12 @@
   const job={resolve,reject,write};pending=job;job.timer=setTimeout(()=>finishJob(Error('Google did not finish connecting. Close the popup and try again.'),null,job),90000);
   if(window.vibefyMobileAuthorize){clearTimeout(job.timer);job.timer=setTimeout(()=>finishJob(Error('Connection expired. Try again.'),null,job),310000);window.vibefyMobileAuthorize(write).then(r=>finishJob(null,r,job),e=>finishJob(e,null,job));return;}
   if(window.vibefyMobileShell||window.VibefyMobile||window.webkit?.messageHandlers?.vibefyMobile){finishJob(Error('The app connection could not initialize. Restart Vibefy or install the latest mobile update.'),null,job);return;}
+  if(client.renewable&&window.vibefyBrowserSessions&&google.accounts.oauth2.initCodeClient){
+   try{const oauth=google.accounts.oauth2.initCodeClient({client_id:client.client_id,scope:write?identityScope+' '+readScope+' '+writeScope:identityScope+' '+readScope,include_granted_scopes:false,ux_mode:'popup',callback:async grant=>{
+    if(pending!==job)return;if(grant.error||!grant.code){finishJob(Error('Google access was not granted.'),null,job);return;}
+    try{const response=await fetch('/api/google-session/exchange',{method:'POST',headers:{'Content-Type':'application/json','X-Vibefy-Auth':'1'},body:JSON.stringify({code:grant.code}),signal:AbortSignal.timeout(20000)});const data=await response.json();if(!response.ok)throw Error(data.error==='offline_access_required'?'Google did not grant renewable access. Connect again and approve the requested access.':'Google could not finish connecting. Please retry.');finishJob(null,data,job);}catch(error){finishJob(error,null,job);}
+   },error_callback:()=>finishJob(Error('Google sign-in was closed or blocked. Allow the popup and try again.'),null,job)});oauth.requestCode();}catch{finishJob(Error('Google could not open. Allow popups for Vibefy and try again.'),null,job);}return;
+  }
   try{const oauth=google.accounts.oauth2.initTokenClient({client_id:client.client_id,scope:readScope,include_granted_scopes:false,callback:response=>finishJob(null,response,job),error_callback:()=>finishJob(Error('Google sign-in was closed or blocked. Allow the popup and try again.'),null,job)});oauth.requestAccessToken({scope:write?readScope+' '+writeScope:identityScope+' '+readScope,include_granted_scopes:false,prompt:''});}catch{finishJob(Error('Google could not open. Allow popups for Vibefy and try again.'),null,job);}
  });}
  async function api(path,query={},method='GET',body){
@@ -154,7 +160,7 @@
   const restoreTask=restore();
   initializing=(async()=>{ $('google-connect').disabled=true;status('Preparing Google connection…');const r=await fetch('/api/google-config',{signal:AbortSignal.timeout(10000)});if(!r.ok)throw Error();const data=await r.json();if(!data.clientId)throw Error('Google connection is unavailable.');
    if(!window.vibefyMobileAuthorize&&!window.google?.accounts?.oauth2)await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://accounts.google.com/gsi/client';const timer=setTimeout(()=>{script.remove();reject(Error('Google connection timed out.'));},10000);script.onload=()=>{clearTimeout(timer);resolve();};script.onerror=()=>{clearTimeout(timer);script.remove();reject(Error('Google connection could not load.'));};document.head.append(script);});
-   client={client_id:data.clientId};$('google-connect').onclick=connect;update();status('');await restoreTask;if(sessionReadFailed)status('Saved account could not be read. Your playlists are safe; try restarting Vibefy.');
+   client={client_id:data.clientId,renewable:data.renewable===true};$('google-connect').onclick=connect;update();status('');await restoreTask;if(sessionReadFailed)status('Saved account could not be read. Your playlists are safe; try restarting Vibefy.');
   })().catch(async()=>{await restoreTask;unavailable();}).finally(()=>{initializing=null;});return initializing;
  }
  window.addEventListener?.('pageshow',()=>{if(refreshToken&&expires<=Date.now()+60000)renewAccess().catch(e=>status(e.message));});
