@@ -2,7 +2,7 @@
 // Android Media3 owns audio, notification controls and queue advancement.
 (() => {
  if(!window.vibefyNativeInfo?.backgroundAudio||!window.VibefyMobile?.postMessage)return;
- const listeners=new EventTarget();let state={paused:true,position:0,duration:0,ready:false},source='',expectedTrack='',generation=0,signature='',volume=.8;
+ const listeners=new EventTarget();let state={paused:true,position:0,duration:0,ready:false},source='',expectedTrack='',generation=0,signature='',volume=.8,forceTrack=false;
  function send(command,fields={}){window.VibefyMobile.postMessage(JSON.stringify({action:'nativeMedia',command,...fields}));}
  const emit=type=>listeners.dispatchEvent(new Event(type));
  const supported=t=>t&&/^(?:[A-Za-z0-9_-]{11}|jv:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})$/.test(t.id||'');
@@ -24,7 +24,7 @@
   },
   syncQueue(tracks,index,shuffle,repeat){if(!source||signature===JSON.stringify(tracks.map(t=>t.id)))return;if(tracks.length&&tracks.every(supported))api.loadQueue(tracks,index,state.paused,state.position,shuffle,repeat);},
   modes:(shuffle,repeat)=>send('modes',{shuffle,repeat}),
-  next:()=>send('next'),previous:()=>send('previous'),resync:()=>send('state'),
+  next:()=>send('next'),previous:()=>send('previous'),resync:()=>{forceTrack=true;send('state');},
  };
  window.vibefyNativePlayback=api;
  window.vibefyNativePlaybackState=next=>{
@@ -32,7 +32,7 @@
   if(next.id&&expectedTrack&&next.id!==expectedTrack)return;if(next.id===expectedTrack)expectedTrack='';
   const old=state;state={...state,...next};if(next.id)source=next.id;
   if(next.error){if(old.error!==next.error)emit('error');return;}
-  document.dispatchEvent(new CustomEvent('vibefy-native-track',{detail:state}));
+  if(forceTrack||old.id!==state.id||old.index!==state.index){forceTrack=false;document.dispatchEvent(new CustomEvent('vibefy-native-track',{detail:state}));}
   if(state.ready&&(!old.ready||old.id!==state.id||old.duration!==state.duration))emit('loadedmetadata');
   if(old.paused!==state.paused||old.playing!==state.playing)emit(state.paused?'pause':state.playing?'playing':'waiting');
   // The service advances itself, including when JavaScript is suspended.
