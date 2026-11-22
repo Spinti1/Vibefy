@@ -8,11 +8,11 @@ function boot(navigator, native = false) {
     document: {getElementById: () => audio}});
   return listeners;
 }
-test('a direct audio play requests the music session without autoplay or visibility hooks', () => {
+test('the music session is configured before playback and reapplied on play without autoplay or visibility hooks', () => {
   const session = {type: 'auto'}, listeners = boot({audioSession: session});
-  assert.equal(session.type, 'auto');
+  assert.equal(session.type, 'playback');
   assert.deepEqual(Object.keys(listeners), ['play']);
-  listeners.play(); assert.equal(session.type, 'playback');
+  session.type = 'auto'; listeners.play(); assert.equal(session.type, 'playback');
 });
 test('unavailable or rejected session APIs cannot break direct audio', () => {
   assert.doesNotThrow(() => boot({}).play());
@@ -20,5 +20,7 @@ test('unavailable or rejected session APIs cannot break direct audio', () => {
   assert.doesNotThrow(() => boot({audioSession: session}).play());
 });
 test('native audio keeps its own session', () => {
-  assert.deepEqual(Object.keys(boot({audioSession: {type: 'auto'}}, true)), []);
+  const session = {type: 'auto'};
+  assert.deepEqual(Object.keys(boot({audioSession: session}, true)), []);
+  assert.equal(session.type, 'auto');
 });
