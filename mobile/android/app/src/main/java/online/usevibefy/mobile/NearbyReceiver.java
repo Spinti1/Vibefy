@@ -17,7 +17,7 @@ final class NearbyReceiver implements AutoCloseable {
  private final Activity activity;private final Consumer<String> join;
  private final String token=UUID.randomUUID().toString().replace("-","");
  private final NsdManager manager;private volatile boolean stopped;private volatile ServerSocket server;
- private boolean registered,prompt;private long lastPrompt=-10000;
+ private volatile boolean registered;private boolean prompt;private AlertDialog alert;private long lastPrompt=-10000;
  private final NsdManager.RegistrationListener registration=new NsdManager.RegistrationListener(){
   public void onServiceRegistered(NsdServiceInfo info){registered=true;if(stopped)unregister();}
   public void onRegistrationFailed(NsdServiceInfo info,int code){close();}
@@ -43,9 +43,9 @@ final class NearbyReceiver implements AutoCloseable {
  }
  private void confirm(String code){if(stopped||activity.isFinishing()||prompt||SystemClock.elapsedRealtime()-lastPrompt<10000)return;
   prompt=true;lastPrompt=SystemClock.elapsedRealtime();
-  new AlertDialog.Builder(activity).setTitle("Connect to Vibefy desktop?").setMessage("A device on your Wi-Fi invited this phone to shared playback. Connect only if you just selected this phone on your computer. Both devices can control the music.")
+  alert=new AlertDialog.Builder(activity).setTitle("Connect to Vibefy desktop?").setMessage("A device on your Wi-Fi invited this phone to shared playback. Connect only if you just selected this phone on your computer. Both devices can control the music.")
    .setNegativeButton("Cancel",null).setPositiveButton("Connect",(d,w)->{if(!stopped)join.accept(code);}).setOnDismissListener(d->prompt=false).show();
  }
  private void unregister(){if(registered){registered=false;try{manager.unregisterService(registration);}catch(Exception ignored){}}}
- public void close(){stopped=true;ServerSocket s=server;if(s!=null)try{s.close();}catch(Exception ignored){}activity.runOnUiThread(this::unregister);}
+ public void close(){stopped=true;activity.runOnUiThread(()->{if(alert!=null){alert.dismiss();alert=null;}});ServerSocket s=server;if(s!=null)try{s.close();}catch(Exception ignored){}activity.runOnUiThread(this::unregister);}
 }

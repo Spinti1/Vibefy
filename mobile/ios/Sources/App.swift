@@ -18,7 +18,16 @@ private final class WeakShellHandler:NSObject,WKScriptMessageHandler {
 }
 final class MobileController:UIViewController,WKNavigationDelegate,WKUIDelegate,WKScriptMessageHandler,UIDocumentPickerDelegate {
  private var nearby:NearbyReceiver?
- @objc private func nearbyActive(){if nearby==nil{nearby=NearbyReceiver(controller:self){[weak self] code in guard let self,self.trusted(self.web.url) else{return};self.web.evaluateJavaScript("window.vibefyJam?.join?.(\""+code+"\")"){[weak self] result,_ in guard let self else{return};if (result as? Bool) != true {self.web.load(URLRequest(url:URL(string:self.home.absoluteString+"?jam="+code)!))}}}}}
+ @objc private func nearbyActive(){
+  guard nearby==nil else{return}
+  nearby=NearbyReceiver(controller:self){[weak self] code in
+   guard let self,self.trusted(self.web.url),let data=try? JSONSerialization.data(withJSONObject:[code]),let arguments=String(data:data,encoding:.utf8) else{return}
+   self.web.evaluateJavaScript("window.vibefyJam?.join?.("+arguments+"[0])"){[weak self] result,_ in
+    guard let self else{return}
+    if (result as? Bool) != true {self.web.load(URLRequest(url:URL(string:self.home.absoluteString+"?jam="+code)!))}
+   }
+  }
+ }
  @objc private func nearbyInactive(){nearby?.close();nearby=nil}
  private let home=URL(string:"https://vibefy-neon.vercel.app/web")!
  private var web:WKWebView!;private let cover=UIView();private let stack=UIStackView();private let progress=UIProgressView(progressViewStyle:.bar);private var loading:NSKeyValueObservation?;private var temporaryExport:URL?;private var failed=false
