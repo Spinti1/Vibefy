@@ -15,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.concurrent.Executors;
 
+@androidx.media3.common.util.UnstableApi
 public final class MainActivity extends Activity {
  private static final String ORIGIN="https://vibefy-neon.vercel.app",HOME=ORIGIN+"/web";
  private NativeUpdates updates;
@@ -32,7 +33,7 @@ public final class MainActivity extends Activity {
   final float density=getResources().getDisplayMetrics().density;
   ImageView logo=new ImageView(this);logo.setImageResource(R.drawable.icon);logo.setContentDescription("Vibefy");cover.addView(logo,new LinearLayout.LayoutParams((int)(88*density),(int)(88*density)));
   TextView title=new TextView(this);title.setText("Vibefy");title.setTextSize(26);title.setTypeface(null,android.graphics.Typeface.BOLD);title.setTextColor(Color.WHITE);LinearLayout.LayoutParams titleLayout=new LinearLayout.LayoutParams(-2,-2);titleLayout.topMargin=(int)(18*density);cover.addView(title,titleLayout);
-  TextView loading=new TextView(this);loading.setText("Opening your music…");loading.setTextSize(13);loading.setTextColor(0xff9bafb2);LinearLayout.LayoutParams loadingLayout=new LinearLayout.LayoutParams(-2,-2);loadingLayout.topMargin=(int)(8*density);cover.addView(loading,loadingLayout);
+  TextView loading=new TextView(this);loading.setText("Opening your musicâ€¦");loading.setTextSize(13);loading.setTextColor(0xff9bafb2);LinearLayout.LayoutParams loadingLayout=new LinearLayout.LayoutParams(-2,-2);loadingLayout.topMargin=(int)(8*density);cover.addView(loading,loadingLayout);
   progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setIndeterminate(true);progress.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xff21dfc0));LinearLayout.LayoutParams progressLayout=new LinearLayout.LayoutParams((int)(112*density),(int)(3*density));progressLayout.topMargin=(int)(24*density);cover.addView(progress,progressLayout);frame.addView(cover,new FrameLayout.LayoutParams(-1,-1));setContentView(frame);
   try(InputStream in=getAssets().open("app-shell.js")){ByteArrayOutputStream bytes=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1)bytes.write(buffer,0,n);script=bytes.toString("UTF-8");}catch(IOException ignored){}
   WebSettings settings=web.getSettings();settings.setSupportZoom(false);settings.setBuiltInZoomControls(false);settings.setDisplayZoomControls(false);settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(false);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setMediaPlaybackRequiresUserGesture(false);settings.setSupportMultipleWindows(true);
