@@ -334,6 +334,7 @@ pub enum Command {
     ConfigureVisual(VisualConfig),
     CatJamScale(f32),
     Host,
+    PairNearby(crate::nearby::Device),
     Join(String),
     Leave,
     JamMonitor(bool),

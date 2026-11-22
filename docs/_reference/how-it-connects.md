@@ -4,6 +4,16 @@ description: Independent Spotify grants, what is stored, and how API traffic is 
 nav_order: 1
 ---
 
+## Nearby phones and account window resources (0.4.80)
+
+Opening Playback devices starts a bounded six-second mDNS lookup for `_vibefy._tcp.local.`. It refreshes at most once per twenty seconds while that menu is open. Only private/link-local IPv4 addresses are accepted. Mobile 0.2.9 advertises a temporary token and a random TCP port while in the foreground; listeners and advertisements close when inactive. No background LAN discovery or audio transfer runs.
+
+Selecting a phone starts/reuses a hosted Jam and sends only its guest invitation code and the temporary discovery token to that LAN endpoint. The phone requires explicit confirmation before joining. The token is an advertised routing token, not proof of device identity: confirm only an invitation you initiated. Account credentials and the host secret are never sent to a LAN peer. The existing HTTPS/WSS Jam relay carries metadata and timing; each device streams its own audio. Internet is required. Guest Wi-Fi isolation, local firewalls and denied iOS local-network permission can prevent discovery; private Jam links remain the fallback. IPv6-only discovery is not yet supported.
+
+The phone receiver accepts only a bounded, fixed-format invitation, with timeouts and prompt throttling. It does not expose files, account APIs or arbitrary navigation. Device pairing does not grant permanent trust and must be confirmed again after reopening the phone app.
+
+Hidden Windows account WebViews are made invisible and suspended after two seconds without work, resumed before each job and closed after fifteen seconds of inactivity. The account thread's timer is stopped when no browser remains. Profile cookies/storage are retained, not cleared. Renderer suspension is best effort, so short operation bursts can still use significant memory.
+
 ## Vibefy HTTPS and sign-in transport
 
 ## YouTube copy recovery (0.4.77)

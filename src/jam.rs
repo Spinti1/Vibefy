@@ -137,6 +137,7 @@ pub struct Shared {
     pub status: String,
     pub invite: String,
     pub listeners: usize,
+    pub participants: Vec<String>,
     pub queue: Vec<LocalTrack>,
     published: Option<(Snapshot, Instant)>,
     received: Option<(Snapshot, Instant)>,
@@ -567,6 +568,15 @@ fn connected(
                     }
                     Some("state") => {
                         s.update_listeners(p["listeners"].as_u64().unwrap_or(0) as usize);
+                        s.participants = p["participants"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|p| p["role"] == "guest")
+                            .filter_map(|p| p["name"].as_str())
+                            .take(24)
+                            .map(|name| name.chars().filter(|c| !c.is_control()).take(60).collect())
+                            .collect();
                         s.controls_available = p["shared_controls"].as_bool().unwrap_or(false);
                         s.queue = serde_json::from_value::<Vec<LocalTrack>>(p["queue"].clone())
                             .unwrap_or_default()

@@ -1446,6 +1446,14 @@ mod native {
                         browser = Some(open(hwnd, &state, &job)?);
                     }
                     let b = browser.as_ref().unwrap();
+                    // Hidden account pages must sleep between jobs, but DOM reads
+                    // require a fully resumed renderer (including pagination).
+                    unsafe {
+                        if let Ok(view) = b.view.cast::<ICoreWebView2_3>() {
+                            view.Resume().map_err(|_| error())?;
+                        }
+                        b.controller.SetIsVisible(true).map_err(|_| error())?;
+                    }
                     match &job.op {
                         Operation::SpotifyConnect => {
                             unsafe {
@@ -1544,6 +1552,9 @@ mod native {
                 })();
                 unsafe {
                     let _ = ShowWindow(hwnd, SW_HIDE);
+                    if let Some(b) = &browser {
+                        let _ = b.controller.SetIsVisible(false);
+                    }
                 }
                 let failed_login = matches!(job.op, Operation::Connect | Operation::SpotifyConnect)
                     && (result.is_err() || job.reply.is_closed());
@@ -1558,10 +1569,34 @@ mod native {
                 }
                 let _ = job.reply.send(result.map_err(|e| e.to_string()));
                 last = Instant::now();
+                unsafe {
+                    SetTimer(hwnd, 1, 1000, None);
+                }
             }
-            if last.elapsed() > Duration::from_secs(45) {
+            // Suspend after the burst of queued reads, rather than racing a
+            // pending TrySuspend callback against the next pagination job.
+            if last.elapsed() >= Duration::from_secs(2) {
+                if let Some(b) = &browser {
+                    if let Ok(view) = b.view.cast::<ICoreWebView2_3>() {
+                        unsafe {
+                            let mut suspended = BOOL(0);
+                            if view.IsSuspended(&mut suspended).is_ok() && !suspended.as_bool() {
+                                let callback =
+                                    TrySuspendCompletedHandler::create(Box::new(|_, _| Ok(())));
+                                let _ = view.TrySuspend(&callback);
+                            }
+                        }
+                    }
+                }
+            }
+            if last.elapsed() > Duration::from_secs(15) {
                 state.controller.borrow_mut().take();
                 browser = None;
+            }
+            if browser.is_none() {
+                unsafe {
+                    let _ = KillTimer(hwnd, 1);
+                }
             }
             unsafe {
                 let mut msg = MSG::default();

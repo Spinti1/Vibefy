@@ -567,6 +567,57 @@ pub fn popup(app: &mut App, ctx: &egui::Context) {
                 if app.local_ready {
                     output_picker(app, ui, !rows.is_empty());
                 }
+                ui.separator();
+                ui.strong("Nearby on Wi-Fi");
+                crate::nearby::discover();
+                let nearby = crate::nearby::snapshot();
+                if nearby.searching || nearby.pairing {
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+                }
+                if nearby.searching { ui.small("Looking for phones…"); }
+                if nearby.devices.is_empty() && !nearby.searching {
+                    ui.small("Open Vibefy 0.2.9 or newer on your phone, on the same Wi-Fi. Allow local network access if asked.");
+                }
+                for device in &nearby.devices {
+                    if ui.add_enabled(!nearby.pairing, egui::Button::new(format!("Connect · {}",device.name))).clicked() {
+                        app.actions.push(Action::Addon(crate::addons::Command::PairNearby(device.clone())));
+                    }
+                }
+                if !nearby.message.is_empty(){ui.small(&nearby.message);}
+                ui.separator();
+                ui.strong("Connected Vibefy devices");
+                if let Some(session) = &app.addons.jam {
+                    let state = session.shared.lock().unwrap();
+                    if state.connected {
+                        for name in &state.participants {
+                            ui.horizontal(|ui| {
+                                ui.colored_label(palette.accent, "●");
+                                ui.label(name);
+                            });
+                        }
+                        if state.participants.is_empty() {
+                            ui.small("Waiting for your phone to join.");
+                        } else {
+                            ui.small("Shared playback, queue and seeking through Jam.");
+                        }
+                    } else {
+                        ui.small(&state.status);
+                    }
+                } else {
+                    ui.small("Connect your phone using a private Jam invitation.");
+                }
+                if theme::soft_button(
+                    ui,
+                    &palette,
+                    None,
+                    "Connect a phone / manage devices",
+                    false,
+                )
+                .clicked()
+                {
+                    app.show_devices = false;
+                    app.show_listen_together = true;
+                }
             });
         });
     let popup_rect = area.response.rect;

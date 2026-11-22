@@ -22,6 +22,7 @@ pub mod emoji;
 pub mod eq;
 pub mod google_youtube;
 pub mod history;
+pub mod nearby;
 pub mod http;
 pub mod i18n;
 pub mod images;

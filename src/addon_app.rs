@@ -233,6 +233,16 @@ impl App {
                     self.addons.pending_sync = None;
                 }
             }
+            AddonCommand::PairNearby(device) => {
+                if self.addons.jam.as_ref().is_some_and(|s| !s.host) {
+                    self.toast("Leave the current Jam before connecting your phone.");
+                } else {
+                    self.apply_addon(AddonCommand::Host, ctx);
+                    if let Some(session) = &self.addons.jam {
+                        crate::nearby::pair(device, session.shared.clone());
+                    }
+                }
+            }
             AddonCommand::Join(invite) => {
                 if self.addons.jam.is_some() {
                     return;
