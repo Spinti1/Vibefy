@@ -2,11 +2,16 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const source=fs.readFileSync(require('node:path').join(__dirname,'../public/player.js'),'utf8');
 function progress(duration){
  const nodes=new Map(),node=id=>{if(!nodes.has(id))nodes.set(id,{value:0,max:100});return nodes.get(id);};let observed;
- const c={$:node,media:{duration,currentTime:45},current:()=>({duration:180}),seekingSlider:false,shownPosition:()=>45,time:n=>String(n),lyricLines:[],window:{},navigator:{},Event,document:{dispatchEvent(){observed=node('mini-seek').value;}}};
+ const c={$:node,media:{duration,currentTime:45},current:()=>({duration:180}),seekingSlider:false,pendingAudioSeek:null,shownPosition:()=>45,time:n=>String(n),lyricLines:[],window:{},navigator:{},Event,document:{dispatchEvent(){observed=node('mini-seek').value;}}};
  vm.createContext(c);vm.runInContext(source.match(/function updatePosition\([^\n]+/)[0],c);return {c,node,observed:()=>observed};
 }
 test('unknown stream duration uses track metadata and notifies Nyan after the slider is updated',()=>{
  const p=progress(NaN);p.c.updatePosition();assert.equal(p.node('seek').max,180);assert.equal(p.node('mini-seek').max,180);assert.equal(p.node('mini-progress').value,.25);assert.equal(p.observed(),45);
+});
+
+test('position is published through MediaSession itself for lock-screen progress',()=>{
+ const p=progress(200);let state;p.c.navigator.mediaSession={setPositionState(value){state=value;}};
+ p.c.updatePosition();assert.equal(state.position,45);assert.equal(state.duration,200);assert.equal(state.playbackRate,1);
 });
 
 test('lyric DOM updates only on line changes, including seeking backwards',()=>{

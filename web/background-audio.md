@@ -41,3 +41,19 @@ Use the existing HTML audio element with a real audio-only HTTPS stream, byte ra
 The missing component is a dependable, authorized source of playable audio URLs, with delivery that works from the user's phone. Vercel's current YouTube extraction route does not meet that requirement. A separate streaming service must demonstrate source access and successful byte-range delivery before it is enabled. It should stream in bounded chunks without persistent music storage, validate source hosts and IDs, rate-limit access, and renew expired source URLs. A native iOS player is another technical route, but would require native app distribution; it does not repair the user's Safari installation.
 
 Acceptance requires real-device checks in Safari tab, Home Screen standalone, and other target browsers: start from a user gesture, lock for several minutes, advance to the next song while locked, pause/resume and seek from lock-screen controls, handle a call/audio interruption and reconnect after a network change. Test direct audio separately from YouTube to distinguish browser failures from source delivery failures. Do not claim full background support until the source path and these cases pass.
+
+## Separate Cloudflare service test
+
+A temporary, separate Worker was deployed on 22 November with a fixed public recording and three requests per minute per client. It accepted no arbitrary URLs, user cookies or credentials and did not change the production Jam Worker or browser player.
+
+- The ordinary public watch response reported `OK`, with four audio format descriptions, but zero direct audio URLs. Metadata success was not playback success.
+- A bounded audio-only SABR test using `googlevideo` 5.0.1 reached the media host, which returned HTTP 403. No usable audio sample was obtained. No proof-of-origin token minting or challenge workaround was added.
+- A separate check of the protocol used by the existing NewPipe-based native resolver returned `LOGIN_REQUIRED` and zero audio formats from the hosting environment. No account credentials were supplied to continue past that response.
+
+These tests reject simply moving the existing audio extraction path from Vercel to Cloudflare as a demonstrated solution. No PWA switch was enabled. The temporary Worker was removed after the investigation; its failed routes are not advertised as a playback service. A working source-delivery path remains the prerequisite for Safari background playback.
+
+## Direct audio handoff correction
+
+The user confirmed that one JuiceVault track remains audible with the iPhone locked, but the next track appeared to progress silently. The direct audio transition previously paused the element, removed its source, called `load()` with no source, then set the next source and called `load()` again. JuiceVault now assigns its next URL and calls `play()` synchronously before UI work, retaining the same audio element without the empty-source reset. A normal zero-position start no longer seeks back to zero after metadata arrives. Pausing while metadata loads also updates the pending intent, so metadata cannot undo the user's pause.
+
+Late play failures from a superseded source are ignored. Browser Media Session reports direct audio as playing only after the media `playing` event, and reports paused while buffering. Position updates now call `navigator.mediaSession.setPositionState` on the correct object. No silent keep-alive audio, microphone access, extra download, automatic foreground restart, or background polling was introduced. The behavioral tests verify transition ordering, pending pause, old promise rejection isolation, and lock-screen state/position publication. A repeated physical iPhone queue test is still required; these changes do not solve the separate YouTube source-access limitation.
