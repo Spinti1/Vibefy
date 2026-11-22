@@ -140,3 +140,7 @@ button,a,input{-webkit-tap-highlight-color:transparent}
  .welcome-card .library-toolbar [data-dialog=create]{grid-column:1/-1}
  .home-backup-actions,#home-backup-summary,#export-library,label.file-label:has(#restore-library){display:none!important}
 }
+
+.spotify-sync-tools{margin:16px 0;display:flex;align-items:center;gap:14px;flex-wrap:wrap}.spotify-sync-tools[hidden]{display:none}.spotify-follow-option{display:flex;align-items:center;gap:8px;font-size:12px}.spotify-sync-tools p{flex-basis:100%;margin:0}.spotify-follow-option input{accent-color:var(--mint);width:18px;height:18px}
+
+.search-filters{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 22px}.search-filters button[aria-pressed=true]{background:#20dbb9;color:#061b17;border-color:#20dbb9}.search-artist-results{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-bottom:18px}.search-artist{display:flex;align-items:center;gap:12px;text-align:left;padding:12px;border:1px solid #2c3b3c;border-radius:14px;background:#182124;color:#f1f7f5}.search-artist img{width:54px;height:54px;object-fit:cover;border-radius:50%}.search-artist strong,.search-artist small{display:block}.search-artist small{color:#aabbba;font-size:11px;margin-top:4px}

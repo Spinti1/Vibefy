@@ -29,7 +29,7 @@
  function restore(){if(!storage()||restored)return Promise.resolve();if(restoreAttempt)return restoreAttempt;const ticket=generation;restoreAttempt=(async()=>{let record;try{record=await storage().read();}catch{sessionReadFailed=true;status('Saved account could not be read. Your playlists are safe; try restarting Vibefy.');return;}restored=true;if(ticket!==generation||pending||connected())return;if(!applyGrant(record)){if(record)clearStored();return;}update();try{await refresh();}catch(error){status(error.message);}})().finally(()=>{restoreAttempt=null;});return restoreAttempt;}
 
  const connected=()=>!!token&&(Date.now()<expires||!!refreshToken);
- const status=message=>{$('youtube-status').textContent=message;};
+ const status=message=>{$('youtube-status').textContent=message;if(connected())$('home-account-status').textContent=message;};
  function update(){
   const active=connected(),upgrade=active&&window.vibefyNativeInfo?.renewableSession&&!refreshToken,compact=window.vibefyPhone||window.matchMedia?.('(max-width:900px)').matches;
   for(const name of ['header']){const button=$(name+'-connect');button.disabled=loading||(!client&&!active);button.classList.toggle('connected',active);button.setAttribute('aria-label',active?'YouTube connected. Open account':loading?'Connecting YouTube':'Connect YouTube');$(name+'-connect-label').textContent=loading?'Connecting…':active?(compact?'Connected':'YouTube connected'):(compact?'Sign in':'Connect YouTube');}
@@ -39,7 +39,7 @@
   $('home-account-status').textContent=loading?'Finish connecting in the Google window…':active?'YouTube connected · Your local playlists and backups stay available.':'Saved on this device. Use the top bar to connect YouTube and load your playlists.';
   window.dispatchEvent(new Event('vibefy-account'));
  }
- function disconnect(){generation++;clearStored();clearTimeout(expiryTimer);token='';refreshToken='';renewRetryAt=0;expires=0;writable=false;displayName='';grantedScopes='';$('youtube-playlists').replaceChildren();status('Disconnected. Your imported and local playlists are preserved.');update();}
+ function disconnect(){generation++;clearStored();clearTimeout(expiryTimer);token='';refreshToken='';renewRetryAt=0;expires=0;writable=false;displayName='';grantedScopes='';$('youtube-playlists').replaceChildren();window.vibefyWebLibrary.refreshHomeSections?.();status('Disconnected. Your imported and local playlists are preserved.');update();}
  function finishJob(error,response,job=pending){
   if(!job||pending!==job)return;pending=null;clearTimeout(job.timer);
   if(error){window.vibefyMobileCancelAuth?.();job.reject(error);return;}
@@ -61,31 +61,90 @@
   let sentToken;const request=()=>{sentToken=token;return fetch(url,{method,headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(15000)});};
   let r=await request();
   if(r.status===401&&refreshToken){if(sentToken===token)await renewAccess(true);if(ticket!==generation)throw Error('Connection changed. Retry this action.');r=await request();}
-  if(r.status===401){expires=0;update();throw Error(refreshToken?'Google could not authorize this request. Your account is saved; retry shortly.':'Google access needs renewal. Connect again. Your playlists are preserved.');}if(!r.ok)throw Error(r.status===403?'YouTube could not authorize this action. Check Google account access or try again later.':'YouTube could not complete the request. Try again.');return r.status===204?{}:r.json();
+  if(r.status===401){expires=0;update();throw Error(refreshToken?'Google could not authorize this request. Your account is saved; retry shortly.':'Google access needs renewal. Connect again. Your playlists are preserved.');}if(!r.ok){const error=Error(r.status===403?'YouTube could not authorize this action. Check Google account access or try again later.':r.status===429?'YouTube is limiting requests. Try again later.':'YouTube could not complete the request. Try again.');error.status=r.status;throw error;}return r.status===204?{}:r.json();
+ }
+ async function playlistTracks(id){
+  const tracks=[],pages=new Set();let page='';
+  do{const data=await api('playlistItems',{part:'snippet,contentDetails',playlistId:id,maxResults:50,...(page?{pageToken:page}:{})});for(const i of data.items||[]){const s=i.snippet||{},video=i.contentDetails?.videoId;if(!/^[A-Za-z0-9_-]{11}$/.test(video)||['Private video','Deleted video'].includes(s.title))continue;tracks.push({id:video,title:s.title,artist:String(s.videoOwnerChannelTitle||'').replace(/\s+-\s+Topic$/i,''),channelId:s.videoOwnerChannelId||'',album:'YouTube',duration:0,image:s.thumbnails?.medium?.url||''});}page=data.nextPageToken||'';if(page&&(pages.has(page)||tracks.length>=10000))throw Error('The complete YouTube playlist could not load. Your saved copy is unchanged.');pages.add(page);}while(page);
+  return tracks;
  }
  async function importPlaylist(p,button){
   const ticket=generation;button.disabled=true;status('Importing '+(p.snippet?.title||'playlist')+'…');
-  try{const tracks=[];let page='';do{const data=await api('playlistItems',{part:'snippet,contentDetails',playlistId:p.id,maxResults:50,...(page?{pageToken:page}:{})});for(const i of data.items||[]){const s=i.snippet||{},id=i.contentDetails?.videoId;if(!/^[A-Za-z0-9_-]{11}$/.test(id)||['Private video','Deleted video'].includes(s.title))continue;tracks.push({id,title:s.title,artist:s.videoOwnerChannelTitle||'',album:'YouTube',duration:0,image:s.thumbnails?.medium?.url||''});}page=data.nextPageToken||'';}while(page&&tracks.length<10000);
+  try{const tracks=await playlistTracks(p.id);
    if(ticket!==generation||!connected())return;window.vibefyWebLibrary.save({id:'youtube:'+p.id,title:p.snippet?.title||'YouTube playlist',tracks,youtubeId:p.id});for(const box of [$('youtube-playlists')])for(const card of [...box.children])if(card.dataset.playlistId===p.id)card.remove();status('Saved on Home. '+tracks.length+' songs imported.');window.vibefyWebLibrary.open('youtube:'+p.id);window.vibefyWebLibrary.toast('Playlist ready · '+tracks.length+' songs');
   }catch(error){status(error.message);}finally{button.disabled=false;}
  }
- async function refresh(){
+ async function refresh(force=false){
   const ticket=generation;status('Loading your YouTube playlists…');const playlists=[];let page='';do{const data=await api('playlists',{part:'snippet,contentDetails',mine:'true',maxResults:50,...(page?{pageToken:page}:{})});if(ticket!==generation||!connected())return;playlists.push(...(data.items||[]));page=data.nextPageToken||'';}while(page&&playlists.length<1000);
+  let saved=0,failed=0;
+  for(const p of playlists){const existing=window.vibefyWebLibrary.collections().find(c=>c.id==='youtube:'+p.id);if(existing&&!force&&existing.tracks.length===p.contentDetails?.itemCount){saved++;continue;}status('Loading playlists on this device · '+(saved+failed+1)+' / '+playlists.length);try{const tracks=await playlistTracks(p.id);if(ticket!==generation||!connected())return;window.vibefyWebLibrary.save({...existing,id:'youtube:'+p.id,title:p.snippet?.title||existing?.title||'YouTube playlist',tracks,youtubeId:p.id});saved++;}catch(error){failed++;if(/limit|quota|429|403/i.test(error.message)){status(error.message);break;}}}
   for(const box of [$('youtube-playlists')]){box.replaceChildren();for(const p of playlists){if(window.vibefyWebLibrary.collections().some(c=>c.youtubeId===p.id||c.id==='youtube:'+p.id))continue;const b=document.createElement('button');b.className='collection-tile';b.type='button';b.dataset.playlistId=p.id;const img=new Image();img.src=window.vibefyWebLibrary.art(p.snippet?.thumbnails?.medium?.url);img.alt='';img.className='collection-art';img.loading='lazy';const title=document.createElement('strong');title.textContent=p.snippet?.title||'YouTube playlist';const note=document.createElement('small');note.textContent=(p.contentDetails?.itemCount||0)+' songs · Open playlist';b.append(img,title,note);b.onclick=()=>importPlaylist(p,b);box.append(b);}}
-  status(playlists.length?playlists.length+' playlists found. Choose the ones to add to Home.':'No playlists found in this YouTube account. Your local library is available on Home.');
+  window.vibefyWebLibrary.refreshHomeSections?.();
+  status(playlists.length?saved+' playlists available locally.'+(failed?' Some playlists could not load; refresh to retry.':''):'No playlists found in this YouTube account. Your local library is available on Home.');
  }
  async function connect(){
   if((connected()&&!(window.vibefyNativeInfo?.renewableSession&&!refreshToken))||!client){if(!$('account-dialog').open)$('account-dialog').showModal();return;}if(loading)return;if(!$('account-dialog').open)$('account-dialog').showModal();loading=true;status('Finish connecting in the Google window…');update();
-  try{const response=await authorize();if(String(response.scope||'').split(' ').includes('openid')){try{const r=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(10000)});if(r.ok){const profile=await r.json();displayName=String(profile.name||'YouTube connected');}}catch{ /* Playlist access remains usable without profile metadata. */ }}await persist().catch(()=>{});update();await refresh();$('account-dialog').close();window.dispatchEvent(new Event('vibefy-youtube-ready'));}catch(error){status(error.message);}finally{loading=false;update();if(sessionSaveFailed)status('Connected, but secure storage could not save the account. Reopening may require connecting again.');}
+  try{const response=await authorize();if(String(response.scope||'').split(' ').includes('openid')){try{const r=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(10000)});if(r.ok){const profile=await r.json();displayName=String(profile.name||'YouTube connected');}}catch{ /* Playlist access remains usable without profile metadata. */ }}await persist().catch(()=>{});update();$('account-dialog').close();await refresh();window.dispatchEvent(new Event('vibefy-youtube-ready'));}catch(error){status(error.message);}finally{loading=false;update();if(sessionSaveFailed)status('Connected, but secure storage could not save the account. Reopening may require connecting again.');}
  }
  $('google-connect').onclick=connect;
  // Show the testing and permission explanation before opening Google's consent window.
  $('header-connect').onclick=()=>{if(!$('account-dialog').open)$('account-dialog').showModal();};
  $('account-dialog').addEventListener('close',()=>{if(pending&&!connected())finishJob(Error('Connection cancelled. Connect again when you are ready.'));});
  $('google-disconnect').onclick=()=>{if(token&&window.google?.accounts?.oauth2)google.accounts.oauth2.revoke(token,()=>{});disconnect();};
- $('youtube-refresh').onclick=async()=>{if(!connected())return connect();if(loading)return;loading=true;update();try{await refresh();}catch(error){status(error.message);}finally{loading=false;update();}};
+ $('youtube-refresh').onclick=async()=>{if(!connected())return connect();if(loading)return;loading=true;update();try{await refresh(true);}catch(error){status(error.message);}finally{loading=false;update();}};
+ const saves=new Map();
+ async function recoverCreation(collection){
+  const marker='Vibefy copy: '+collection.youtubeCopyKey,found=[];const pages=new Set();let page='';
+  for(let n=0;n<200;n++){
+   const data=await api('playlists',{part:'snippet',mine:true,maxResults:50,...(page?{pageToken:page}:{})});
+   if(!Array.isArray(data.items))throw Error('YouTube did not confirm the previous creation. Retry shortly.');
+   for(const p of data.items)if(String(p.snippet?.description||'').split('\n').includes(marker))found.push(p.id);
+   page=data.nextPageToken||'';
+   if(!page){if(found.length!==1)throw Error(found.length?'Several YouTube copies were found. Check YouTube before retrying.':'YouTube has not confirmed the previous creation. Check your account and retry shortly.');return found[0];}
+   if(pages.has(page))throw Error('YouTube repeated a library page. Retry shortly.');pages.add(page);
+  }
+  throw Error('The complete YouTube library could not load. Retry shortly.');
+ }
+ async function saveCopy(collection){
+  if(!writable||!connected())await authorize(true);
+  const ticket=generation;let id=collection.youtubeId;
+  if(id){
+   let absent=false;
+   try{const data=await api('playlists',{part:'id',id});if(!Array.isArray(data.items))throw Error('YouTube did not confirm the existing copy. Retry sync.');absent=!data.items.some(p=>p.id===id);}
+   catch(error){if(error.status!==404)throw error;absent=true;}
+   if(ticket!==generation)throw Error('YouTube account changed. Retry sync.');
+   if(absent){delete collection.youtubeId;delete collection.youtubeSync;window.vibefyWebLibrary.save(collection);id='';status('The previous YouTube copy was removed. Creating your copy again…');}
+  }
+  if(!id){
+   if(collection.youtubeCreating){id=await recoverCreation(collection);}
+   else{
+    collection.youtubeCopyKey ||= crypto.randomUUID();collection.youtubeCreating=true;window.vibefyWebLibrary.save(collection);
+    let created;
+    try{created=await api('playlists',{part:'snippet,status'},'POST',{snippet:{title:collection.title,description:'Created with Vibefy.\nVibefy copy: '+collection.youtubeCopyKey},status:{privacyStatus:'unlisted'}});}
+    catch(error){if(error.status>=400&&error.status<500&&error.status!==408){delete collection.youtubeCreating;window.vibefyWebLibrary.save(collection);}throw error;}
+    if(!created.id)throw Error('YouTube did not confirm playlist creation. Retry to check the existing copy.');id=created.id;
+   }
+   if(ticket!==generation)throw Error('YouTube account changed. Retry sync.');
+   collection.youtubeId=id;delete collection.youtubeCreating;window.vibefyWebLibrary.save(collection);
+  }
+  const present=new Set();let page='';const pages=new Set();
+  do{const data=await api('playlistItems',{part:'contentDetails',playlistId:id,maxResults:50,...(page?{pageToken:page}:{})});for(const item of data.items||[])if(item.contentDetails?.videoId)present.add(item.contentDetails.videoId);page=data.nextPageToken||'';if(page&&pages.has(page))throw Error('YouTube repeated a playlist page. Retry sync.');pages.add(page);}while(page);
+  let missing=0;
+  for(const track of collection.tracks){
+   if(ticket!==generation)throw Error('YouTube account changed. Retry sync.');
+   let video=track.id;
+   if(video.startsWith('spotify:')){try{const response=await fetch('/api/match',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:track.title,artist:track.artist,duration:track.duration}),signal:AbortSignal.timeout(25000)});const data=await response.json();video=response.ok?data.track?.id:'';}catch{video='';}}
+   if(!/^[A-Za-z0-9_-]{11}$/.test(video||'')){missing++;continue;}
+   if(present.has(video))continue;
+   // On an uncertain write, stop. The next sync reads YouTube before retrying.
+   await api('playlistItems',{part:'snippet'},'POST',{snippet:{playlistId:id,resourceId:{kind:'youtube#video',videoId:video}}});present.add(video);
+  }
+  collection.youtubeSync={missing,completed:missing===0};window.vibefyWebLibrary.save(collection);
+  if(missing)throw Error(`${missing} songs could not be matched to YouTube. The other songs were saved; retry sync to check the remaining songs.`);
+  return id;
+ }
  window.vibefyYouTube={forget:disconnect,get connected(){return connected();},connect,
-  async save(collection){if(!writable||!connected())await authorize(true);const created=await api('playlists',{part:'snippet,status'},'POST',{snippet:{title:collection.title,description:'Created with Vibefy'},status:{privacyStatus:'unlisted'}});collection.youtubeId=created.id;window.vibefyWebLibrary.save(collection);for(const t of collection.tracks)await this.add(collection.youtubeId,t);return created.id;},
+  save(collection){const key=collection.id;if(saves.has(key))return saves.get(key);const task=saveCopy(collection).finally(()=>saves.delete(key));saves.set(key,task);return task;},
   async add(id,track){if(!/^[A-Za-z0-9_-]{11}$/.test(track.id))return;if(!writable||!connected())await authorize(true);await api('playlistItems',{part:'snippet'},'POST',{snippet:{playlistId:id,resourceId:{kind:'youtube#video',videoId:track.id}}});},
   async rename(id,title){if(!writable||!connected())await authorize(true);const data=await api('playlists',{part:'snippet',id});const p=data.items?.[0];if(!p)throw Error('This playlist is unavailable.');await api('playlists',{part:'snippet'},'PUT',{id,snippet:{title,description:p.snippet.description||'',...(p.snippet.defaultLanguage?{defaultLanguage:p.snippet.defaultLanguage}:{})}});}
  };
