@@ -15,7 +15,7 @@
  const icon=el('img');icon.src='/assets/icon.png';icon.alt='';icon.className='install-app-icon';
  const description=el('p','Add Vibefy to your Home Screen. Open the same music player in its own window, without installing an IPA or APK.');
  const steps=el('ol');steps.className='install-app-steps';
- for(const text of ios?['Open this link in Safari if you are using another app’s built-in browser.','Tap Share, then Add to Home Screen (Adăugați pe ecranul principal).','Keep “Open as Web App” enabled if shown, then tap Add.']:
+ for(const text of ios?['Tap Safari’s Share button: the square with an upward arrow. It is in Safari’s toolbar, not inside Vibefy.','Scroll through the actions and tap Add to Home Screen (Adăugați pe ecranul principal).','Tap Add. Keep “Open as Web App” enabled if shown.']:
  ['Open your browser’s menu (⋮).','Choose Install app or Add to Home screen, then confirm.'])steps.append(el('li',text));
  const note=el('p','Sign in and save playlists from the Home Screen app. Your browser may keep its storage separate. Music needs an internet connection; background playback depends on the browser.');note.className='fine-print';
  const status=el('p');status.className='fine-print';status.setAttribute('role','status');
@@ -25,7 +25,7 @@
  const entry=el('button','Add Vibefy to Home Screen');entry.className='button small';entry.type='button';
  document.querySelector('#settings-dialog .setting-actions')?.prepend(entry);
  const dismiss=()=>{try{localStorage.setItem(key,String(Date.now()));}catch{}dialog.close();};
- function refresh(){const done=installed();entry.hidden=done;if(done&&dialog.open)dialog.close();primary.textContent=deferred?'Install Vibefy':ios?'Got it':'Show installation steps';steps.hidden=!!deferred;}
+ function refresh(){const done=installed();document.documentElement.dataset.homeScreen=String(done);entry.hidden=done;if(done&&dialog.open)dialog.close();primary.textContent=deferred?'Install Vibefy':ios?'Done':'Show installation steps';steps.hidden=!!deferred;}
  function show(){if(native()||installed())return;refresh();if(!dialog.open)dialog.showModal();}
  close.onclick=later.onclick=dismiss;
  dialog.addEventListener('cancel',event=>{event.preventDefault();dismiss();});

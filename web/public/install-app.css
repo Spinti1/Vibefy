@@ -8,3 +8,16 @@
 .install-app-steps{padding-left:22px;line-height:1.6;font-size:14px}.install-app-steps li{margin:10px 0}
 .install-app-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}.install-app-actions button{min-height:44px;flex:1}
 @media(display-mode:standalone){html{background:#0e1215;overscroll-behavior:none}body{overscroll-behavior-y:none}.app-header{padding-top:max(10px,env(safe-area-inset-top))}.mini-player{padding-bottom:max(10px,env(safe-area-inset-bottom))}.web-label,.rail-bottom,.app-header .github-link,.app-header .download-link{display:none!important}}
+/* Higher specificity than the later responsive header padding shorthands.
+   Keep the usual spacing in addition to the system status-bar inset. */
+html[data-home-screen=true] .app-header{
+ height:auto;min-height:calc(64px + env(safe-area-inset-top,0px));
+ padding-top:calc(10px + env(safe-area-inset-top,0px));
+ padding-left:max(14px,env(safe-area-inset-left,0px));
+ padding-right:max(14px,env(safe-area-inset-right,0px));
+}
+html[data-home-screen=true] #now-dialog{
+ padding-top:calc(20px + env(safe-area-inset-top,0px));
+ padding-left:max(22px,env(safe-area-inset-left,0px));
+ padding-right:max(22px,env(safe-area-inset-right,0px));
+}

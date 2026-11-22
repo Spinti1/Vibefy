@@ -207,28 +207,41 @@ async def juice_playlist(request: Request, id: str = Query(max_length=36)):
     return await juice_request("playlist?id=" + id, token=juice_token(request))
 
 @app.get("/api/search")
-async def search(q: str = Query(min_length=1, max_length=160)):
+async def search(q: str = Query(min_length=1, max_length=160), kind: str = Query(default="all", pattern="^(all|songs|videos|artists)$")):
     q = " ".join(q.split())
     if not q:
         raise HTTPException(400, "Enter an artist or song.")
-    def load():
+    def load(filter_name):
         def fetch():
-            api = YTMusic(requests_session=False)
-            rows = api.search(q, limit=40)
-            # Preserve catalogue relevance across songs and clips in one request.
-            # Artist, album, podcast and playlist cards are not playable recordings.
-            seen = set()
-            results = []
+            rows = YTMusic(requests_session=False).search(q, filter=filter_name, limit=40)
+            tracks, artists, seen, artist_seen = [], [], set(), set()
             for row in rows:
-                if row.get("resultType") not in {"song", "video"}:
-                    continue
-                item = track(row)
-                if item and item["id"] not in seen:
-                    seen.add(item["id"])
-                    results.append(item)
-            return results
-        return cached(("search", q.casefold()), 120, fetch)
-    return {"tracks": await worker(load)}
+                if row.get("resultType") in {"song", "video"}:
+                    item = track(row)
+                    if item and item["id"] not in seen:
+                        seen.add(item["id"])
+                        tracks.append(item)
+                elif row.get("resultType") == "artist":
+                    identity = row.get("browseId") or ""
+                    if re.fullmatch(r"UC[A-Za-z0-9_-]{22}", identity) and identity not in artist_seen:
+                        artist_seen.add(identity)
+                        artists.append({"id": identity, "name": str(row.get("artist") or row.get("title") or "Artist")[:200], "image": safe_art((row.get("thumbnails") or [{}])[-1].get("url", ""))})
+            return {"tracks": tracks, "artists": artists}
+        return cached(("search-v2", q.casefold(), filter_name), 120, fetch)
+    if kind != "all":
+        return await worker(lambda: load(kind))
+    primary, clips = await asyncio.gather(worker(lambda: load(None)), worker(lambda: load("videos")), return_exceptions=True)
+    if isinstance(primary, Exception):
+        if isinstance(clips, Exception):
+            raise primary
+        primary = {"tracks": [], "artists": []}
+    if not isinstance(clips, Exception):
+        seen = {t["id"] for t in primary["tracks"]}
+        primary = {"artists": primary["artists"], "tracks": primary["tracks"] + [t for t in clips["tracks"] if t["id"] not in seen]}
+    # Prefer exact title/artist matches without rejecting other recordings.
+    query = q.casefold()
+    primary["tracks"] = sorted(primary["tracks"], key=lambda t: (t["title"].casefold() != query, query not in (t["title"]+" "+t["artist"]).casefold()))[:60]
+    return primary
 
 @app.get("/api/artist")
 async def artist(id: str = Query(max_length=24)):
