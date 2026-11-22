@@ -13,6 +13,14 @@ test('a browser guest follows native timing and forwards additions without host 
 
 test('a pasted external URL cannot choose the relay or open a peer address',()=>{const p=page();p.node('jam-code').value='https://usevibefy.online.evil/app?jam=ABCDEFGHJKLM';p.node('jam-join').onclick();assert.equal(p.connections.length,0);assert.match(p.node('jam-status').textContent,/Paste a Vibefy/);});
 
+test('native-approved nearby invitations reuse the validated relay join and are idempotent',()=>{
+ const p=page();assert.equal(p.window.vibefyJam.join('http://192.168.1.1/'),false);assert.equal(p.connections.length,0);
+ assert.equal(p.window.vibefyJam.join('ABCDEFGHJKLM'),true);assert.equal(p.connections.length,1);
+ p.connections[0].onopen();p.connections[0].receive({type:'welcome',role:'guest'});
+ assert.equal(p.window.vibefyJam.join('ABCDEFGHJKLM'),true);assert.equal(p.connections.length,1);
+ assert.match(p.connections[0].url,/vibefy-neon\.vercel\.app\/api\/jam\/rooms\//);
+});
+
 test('a phone invitation joins even if a decorative connection indicator is missing',()=>{
  const p=page({noIndicator:true,search:'?jam=ABCDEFGHJKLM'});
  assert.equal(p.node('jam-code').value,'ABCDEFGHJKLM');

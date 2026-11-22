@@ -69,3 +69,5 @@ This native capability requires the new mobile binary. Older mobile wrappers and
 Phone controls (November 2026): native Play/Pause paths do not depend on the external icon sprite. The mini player exposes a seek control; drag previews stay local until release, and Nyan anchors to the visible slider in the correct dialog coordinate space. Hidden queue contents are rendered only when needed. Cat Jam is desktop-browser-only; WaveLink is no longer offered. Saved playlist metadata and account sessions are preserved.
 
 Lyrics use LRCLIB and YouTube Music with a metadata-verified More Lyrics fallback at https://lyrics.kamiloo13.me/api/get. Provider attribution is retained and a failed or blocked provider never replaces another usable result. More Lyrics availability is external; direct validation returned HTTP 403 on 20 November 2026.
+
+Resource update: visual mods skip snapshots/layout work while disabled or hidden; lyrics style rows only on active-line changes. Native-approved nearby invitations enter the existing validated Jam join path and fixed relay. Native apps advertise over LAN; ordinary browsers continue to join with a link or code.

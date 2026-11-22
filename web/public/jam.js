@@ -41,6 +41,7 @@
  $('jam-leave').onclick=()=>leave();
  $('jam-copy').onclick=async()=>{try{await navigator.clipboard.writeText($('jam-invite').value);status(`Invitation copied · code ${code.match(/.{4}/g).join('-')}`);}catch{status('Select the invitation and copy it.');}};
  state.leave=leave;state.changed=broadcast;
+ state.join=invite=>{let next;try{next=parse(invite);}catch{return false;}if(state.active&&code===next)return true;$('jam-code').value=next;$('jam-join').onclick();return true;};
  state.add=t=>{if(!state.following||socket?.readyState!==WebSocket.OPEN)return false;const track=local(t);if(!track)return false;send({type:'add',track});return true;};
  state.seek=(id,seconds)=>{const t=local({id});if(!state.following||!state.sharedControls||!t||!Number.isFinite(seconds)||seconds<0||seconds>86400||socket?.readyState!==WebSocket.OPEN)return false;pendingSeek={uri:t.uri,position:seconds,at:Date.now()};send({type:'control',action:'seek',uri:t.uri,position_ms:Math.round(seconds*1000)});return true;};
  state.setPlaying=(id,playing)=>{const t=local({id});if(!state.following||!state.sharedControls||!t||typeof playing!=='boolean'||socket?.readyState!==WebSocket.OPEN)return false;pendingPlaying={uri:t.uri,playing,at:Date.now()};send({type:'control',action:'set_playing',uri:t.uri,playing});return true;};
