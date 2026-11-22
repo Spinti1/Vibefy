@@ -52,3 +52,5 @@
  .lyrics-sheet .lyric-line,.lyrics-sheet .lyric-plain{font-size:clamp(22px,6vw,30px);font-weight:700;line-height:1.5;margin-bottom:18px}
  .lyrics-sheet .lyric-line.current{color:var(--mint)}
 }
+
+@media(max-width:900px){.collection-tile,.collection-tile img{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}#youtube-frame.persistent-phone-player{position:fixed;left:0;bottom:0;width:240px;height:135px;opacity:0;pointer-events:none;z-index:-1;overflow:hidden}#youtube-frame.persistent-phone-player iframe{width:240px;height:135px}}

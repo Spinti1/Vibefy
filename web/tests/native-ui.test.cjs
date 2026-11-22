@@ -20,6 +20,7 @@ test('YouTube volume follows the visible official player, including volume chose
  const YT={Player:function(id,options){queueMicrotask(()=>options.events.onReady({target:player}));return player;}};
  vm.runInNewContext(read('embedded-player.js'),{window,document,YT,location:{origin:'https://example.test'},console,Promise,Number,Math,Error,queueMicrotask,setTimeout:()=>0,clearTimeout(){}});
  const api=window.vibefyEmbedded;api.setVolume(37);await api.load('abcdefghijk');assert.deepEqual(volumes,[37]);assert.equal(cues.length,1);assert.equal(plays,0,'a closed player must only cue, not play');
+ window.vibefyPhone=true;await api.load('lmnopqrstuv');assert.equal(plays,1,'phone playback must not require the expanded player');
  api.setVolume(500);api.setVolume(-1);api.setVolume(NaN);assert.deepEqual(volumes,[37,100,0]);
 });
 test('SoundCloud widget receives volume on readiness and later changes',async()=>{

@@ -249,6 +249,21 @@ async def search(q: str = Query(min_length=1, max_length=160), kind: str = Query
     primary["tracks"] = sorted(primary["tracks"], key=relevance)[:60]
     return primary
 
+@app.get("/api/recording-artist")
+async def recording_artist(id: str = Query(max_length=11)):
+    if not VIDEO.fullmatch(id):
+        raise HTTPException(400, "Invalid recording.")
+    def load():
+        music = YTMusic(requests_session=False)
+        rows = music.get_watch_playlist(videoId=id, limit=1).get("tracks", [])
+        recording = next((row for row in rows if row.get("videoId") == id), None)
+        for item in (recording or {}).get("artists", []):
+            artist_id = item.get("id") or ""
+            if re.fullmatch(r"UC[A-Za-z0-9_-]{22}", artist_id):
+                return {"id": artist_id, "name": str(item.get("name", "Artist"))[:200]}
+        raise HTTPException(404, "No artist profile is available for this recording.")
+    return await worker(lambda: cached(("recording-artist", id), 3600, load))
+
 @app.get("/api/artist")
 async def artist(id: str = Query(max_length=24)):
     if not re.fullmatch(r"UC[A-Za-z0-9_-]{22}", id):
