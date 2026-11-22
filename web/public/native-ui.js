@@ -19,7 +19,7 @@
  document.querySelectorAll('.search-form').forEach(form=>{const symbol=form.querySelector('span[aria-hidden]');if(symbol)setIcon(symbol,'search');const submit=form.querySelector('button[type="submit"]');if(submit)setIcon(submit,'search');});
  document.querySelectorAll('.rail-filter>span,.playlist-filter>span').forEach(node=>setIcon(node,'search'));
  document.querySelectorAll('.playlist-preview>span').forEach(node=>setIcon(node,'music'));
- labelIcon(document.getElementById('library-back'),'arrow-left','Back to library');
+ labelIcon(document.getElementById('library-back'),'arrow-left','Back to Home');
  labelIcon(document.getElementById('remove-collection'),'trash-2','Remove local copy');
  labelIcon(document.getElementById('toggle-hidden'),'eye','Show hidden playlists');
  for(const [id,name,label]of [['youtube-refresh','refresh-cw','Refresh playlists'],['google-disconnect','log-out','Disconnect'],['export-library','copy','Export backup'],['edit-collection','ellipsis',null],['hide-playlist','eye-off','Hide playlist'],['copy-to-youtube','youtube','Save a YouTube copy'],['add-to-playlist','list-plus','Add song'],['remove-from-playlist','trash-2','Remove song']])if(label)labelIcon(document.getElementById(id),name,label);

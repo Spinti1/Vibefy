@@ -39,7 +39,7 @@
   $('home-account-status').textContent=loading?'Finish connecting in the Google window…':active?'YouTube connected · Your local playlists and backups stay available.':'Saved on this device. Use the top bar to connect YouTube and load your playlists.';
   window.dispatchEvent(new Event('vibefy-account'));
  }
- function disconnect(){generation++;clearStored();clearTimeout(expiryTimer);token='';refreshToken='';renewRetryAt=0;expires=0;writable=false;displayName='';grantedScopes='';$('youtube-playlists').replaceChildren();status('Disconnected. Your imported and local playlists are preserved.');update();}
+ function disconnect(){generation++;clearStored();clearTimeout(expiryTimer);token='';refreshToken='';renewRetryAt=0;expires=0;writable=false;displayName='';grantedScopes='';$('youtube-playlists').replaceChildren();window.vibefyWebLibrary.refreshHomeSections?.();status('Disconnected. Your imported and local playlists are preserved.');update();}
  function finishJob(error,response,job=pending){
   if(!job||pending!==job)return;pending=null;clearTimeout(job.timer);
   if(error){window.vibefyMobileCancelAuth?.();job.reject(error);return;}
@@ -78,6 +78,7 @@
   const ticket=generation;status('Loading your YouTube playlists…');const playlists=[];let page='';do{const data=await api('playlists',{part:'snippet,contentDetails',mine:'true',maxResults:50,...(page?{pageToken:page}:{})});if(ticket!==generation||!connected())return;playlists.push(...(data.items||[]));page=data.nextPageToken||'';}while(page&&playlists.length<1000);
   for(const p of playlists){const existing=window.vibefyWebLibrary.collections().find(c=>c.id==='youtube:'+p.id);if(!existing||(!force&&existing.tracks.length===p.contentDetails?.itemCount))continue;const tracks=await playlistTracks(p.id);if(ticket!==generation||!connected())return;window.vibefyWebLibrary.save({...existing,title:p.snippet?.title||existing.title,tracks});}
   for(const box of [$('youtube-playlists')]){box.replaceChildren();for(const p of playlists){if(window.vibefyWebLibrary.collections().some(c=>c.youtubeId===p.id||c.id==='youtube:'+p.id))continue;const b=document.createElement('button');b.className='collection-tile';b.type='button';b.dataset.playlistId=p.id;const img=new Image();img.src=window.vibefyWebLibrary.art(p.snippet?.thumbnails?.medium?.url);img.alt='';img.className='collection-art';img.loading='lazy';const title=document.createElement('strong');title.textContent=p.snippet?.title||'YouTube playlist';const note=document.createElement('small');note.textContent=(p.contentDetails?.itemCount||0)+' songs · Open playlist';b.append(img,title,note);b.onclick=()=>importPlaylist(p,b);box.append(b);}}
+  window.vibefyWebLibrary.refreshHomeSections?.();
   status(playlists.length?playlists.length+' playlists found. Choose the ones to add to Home.':'No playlists found in this YouTube account. Your local library is available on Home.');
  }
  async function connect(){
