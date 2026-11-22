@@ -1,0 +1,31 @@
+{
+  "source": {
+    "subtitle": "Music, playlists and listening together.",
+    "description": "Vibefy for iPhone and iPad. Create playlists, import public playlists, scan a playlist QR code and listen together with Jam. This source provides the iOS preview builds.",
+    "website": "https://github.com/Spinti1/Vibefy",
+    "iconURL": "https://raw.githubusercontent.com/Spinti1/Vibefy/main/web/public/assets/icon.png",
+    "tintColor": "#00CDBB"
+  },
+  "app": {
+    "subtitle": "Your playlists. Your music.",
+    "category": "entertainment",
+    "tintColor": "#00CDBB",
+    "localizedDescription": "Create playlists, import public Spotify or YouTube playlists, and scan playlist QR codes from your computer. Connect YouTube to load your account playlists and save selected copies.\n\nListen together with Jam. Nearby desktop pairing requires Vibefy 0.4.80, Wi-Fi and confirmation on your phone; shared playback needs internet.\n\nPlaylist metadata stays on your device unless you choose to share or save it. Local playlists can be lost if you uninstall the app or clear its data.\n\nScreenshots use demonstration playlists, with no personal account data.\n\nCredits and licenses: https://github.com/Spinti1/Vibefy/blob/main/CREDITS.md. iOS audio resolution uses YouTubeKit (MIT); QR decoding uses jsQR (Apache-2.0).",
+    "screenshots": [
+      {
+        "imageURL": "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.9/home.jpg",
+        "width": 375,
+        "height": 812
+      },
+      {
+        "imageURL": "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.9/playlist.jpg",
+        "width": 375,
+        "height": 812
+      }
+    ],
+    "screenshotURLs": [
+      "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.9/home.jpg",
+      "https://github.com/Spinti1/Vibefy/releases/download/mobile-v0.2.9/playlist.jpg"
+    ]
+  }
+}

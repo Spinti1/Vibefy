@@ -15,5 +15,9 @@ with zipfile.ZipFile(a.ipa) as z:
 version={"version":info["CFBundleShortVersionString"],"date":datetime.now(timezone.utc).date().isoformat(),"downloadURL":a.url,"size":a.ipa.stat().st_size,"minOSVersion":info.get("MinimumOSVersion","15.0"),"localizedDescription":"Mobile preview with on-device audio-only YouTube playback: M4A/AAC streaming with artwork, without loading a video player. Includes nearby desktop pairing over Wi-Fi with phone confirmation, QR playlist imports, protected Google renewal, persistent playlist metadata and Jam controls. Local-network discovery is foreground-only; internet is required for shared playback. Provider restrictions still apply. Existing account and playlist data is retained. Background behavior depends on the device; physical-device validation remains ongoing. Android uses NewPipeExtractor (GPL-3.0-or-later); iOS uses YouTubeKit (MIT)."}
 source={"name":"Vibefy","identifier":"online.usevibefy.source","apps":[{"name":"Vibefy Preview","bundleIdentifier":info["CFBundleIdentifier"],"developerName":"Spinti1 and contributors","localizedDescription":version["localizedDescription"],"iconURL":"https://raw.githubusercontent.com/Spinti1/Vibefy/main/web/public/assets/icon.png","versions":[version]}],"news":[]}
 source["apps"][0]["appPermissions"]={"entitlements":[],"privacy":{k:v for k,v in info.items() if k.startswith("NS") and k.endswith("UsageDescription")}}
+# Store presentation is kept separate from package-derived identity/permissions.
+listing=json.loads((Path(__file__).resolve().parent.parent/"store/listing.json").read_text(encoding="utf-8"))
+source.update(listing["source"])
+source["apps"][0].update(listing["app"])
 a.output.write_text(json.dumps(source,indent=2)+"\n",encoding="utf-8")
 a.output.with_suffix(".sha256").write_text(hashlib.sha256(a.ipa.read_bytes()).hexdigest()+"  "+a.ipa.name+"\n",encoding="utf-8")
