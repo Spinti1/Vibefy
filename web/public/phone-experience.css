@@ -1,0 +1,54 @@
+/* Phone-only hierarchy; desktop layout and stored library are unchanged. */
+.phone-playlist-shortcuts,#playlist-shuffle,.phone-now-extras,.phone-remove{display:none}
+@media(max-width:900px){
+ .playlist-open>.library-toolbar{position:relative;z-index:1;margin:0 0 14px}
+ .playlist-open #library-back{display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:8px 12px;border:1px solid #ffffff18;border-radius:24px;background:#17272c;color:var(--ink);font-size:12px}
+ .collection-banner{display:flex;flex-direction:column;align-items:flex-start;margin:-72px -18px 0;padding:78px 20px 20px;gap:20px;background:linear-gradient(160deg,#174b4d,#12292e 52%,#111719);min-height:0}
+ .collection-banner img{width:152px;height:152px;align-self:center;border-radius:14px;box-shadow:0 14px 30px #0005}
+ .collection-banner>div{width:100%;min-width:0}
+ .collection-banner h2{font-size:30px;line-height:1.15;letter-spacing:-.8px;margin:8px 0 10px;overflow-wrap:anywhere}
+ .collection-banner p{font-size:12px;line-height:1.7;margin:0;color:#b8cacc}
+ .collection-banner span{font-size:10px;color:#7adcd0;letter-spacing:1.5px}
+ .playlist-actions{padding:18px 0 16px;gap:12px}
+ .playlist-actions #edit-collection{margin-right:auto;order:0;letter-spacing:0;width:44px;min-height:44px;padding:10px}
+ .playlist-actions #play-collection{order:2;width:58px;height:58px;min-height:58px;display:grid;place-items:center;box-shadow:0 6px 22px #13d8bd22}
+ .playlist-actions #play-collection::after{content:none}
+ .playlist-actions #play-collection .ui-icon{width:27px;height:27px}
+ #playlist-shuffle{order:1;display:inline-flex;background:transparent;border:1px solid #64c8bd33;color:var(--mint);min-width:44px;padding:11px;border-radius:50%}
+ #playlist-shuffle span{display:none}
+ .phone-playlist-shortcuts{display:flex;gap:9px;margin:0 0 16px}
+ .phone-action{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:10px 15px;border-radius:22px;background:#202a2f;border:1px solid #ffffff13;color:var(--ink);font-size:12px;line-height:1.2}
+ .phone-action .ui-icon{width:18px;height:18px;flex-shrink:0}
+ .phone-action:disabled{opacity:.45}
+ .playlist-tools{display:flex;margin:0 0 14px;padding:0;gap:9px;justify-content:space-between}
+ .playlist-filter{flex:1;min-width:0;max-width:none;min-height:42px;padding:9px 12px;border:1px solid #ffffff12;border-radius:12px}
+ .playlist-filter input{font-size:13px}
+ .playlist-sort select{height:42px;max-width:130px;font-size:12px;border-radius:12px}
+ #collection-detail .track-table-head{display:none}
+ #collection-tracks .track-number,#collection-tracks .track-duration{display:none}
+ #collection-tracks .track-row{min-height:74px;padding:9px 0;gap:8px;border-radius:10px}
+ #collection-tracks .track-play{min-width:0;gap:13px}
+ #collection-tracks .track-play img{width:52px;height:52px;border-radius:8px}
+ #collection-tracks .track-copy strong{font-size:15px;font-weight:600;line-height:1.4}
+ #collection-tracks .track-copy small{font-size:12px;line-height:1.4;margin-top:3px;color:#9baeb2}
+ #collection-tracks .track-row>.icon-button{width:44px;min-width:44px;min-height:48px;color:#a3b5ba}
+ #remove-collection{display:none}
+ .mini-player{background:linear-gradient(110deg,#203b3e,#182a30);border:1px solid #75cbbd24;box-shadow:0 8px 25px #0005}
+ .mini-info strong{font-size:13px}.mini-info small{font-size:11px}
+ #now-dialog{background:linear-gradient(165deg,#153a3d,#101719 50%);border:0}
+ #now-dialog .now-artwork{margin-top:12px}
+ #now-dialog .now-heading{text-align:left;margin-top:24px}
+ #now-dialog .now-heading h2{font-size:25px;line-height:1.22}
+ #now-dialog .now-heading p{font-size:14px;color:#a8bbbe}
+ #now-dialog .now-tools{justify-content:space-between;margin-top:16px;padding:0 0 16px}
+ .phone-now-extras{display:flex;flex-direction:column;gap:16px;margin:16px 0 24px}
+ .phone-lyrics-preview{padding:22px;border:1px solid #80e0ce24;border-radius:20px;background:linear-gradient(145deg,#20594f,#1c3e40)}
+ .phone-lyrics-preview h3{font-size:13px;letter-spacing:.3px;margin:0 0 20px;color:#bde6dd}
+ .phone-preview-lines p{font-size:clamp(20px,5.8vw,28px);line-height:1.4;font-weight:700;letter-spacing:-.4px;color:#a0c2bb;margin:0 0 12px}
+ .phone-preview-lines p.current{color:#fff}
+ .phone-lyrics-preview .phone-action{margin-top:10px;background:#e4fff5;color:#133a34;border:0}
+ .phone-now-extras>button{align-self:flex-start}.phone-remove{display:inline-flex;margin-top:14px}#now-dialog:has(#now-panel:not([hidden])) .phone-now-extras{display:none}
+ .lyrics-sheet .lyrics-content{padding:22px 5px}
+ .lyrics-sheet .lyric-line,.lyrics-sheet .lyric-plain{font-size:clamp(22px,6vw,30px);font-weight:700;line-height:1.5;margin-bottom:18px}
+ .lyrics-sheet .lyric-line.current{color:var(--mint)}
+}
