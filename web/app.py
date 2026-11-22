@@ -240,7 +240,13 @@ async def search(q: str = Query(min_length=1, max_length=160), kind: str = Query
         primary = {"artists": primary["artists"], "tracks": primary["tracks"] + [t for t in clips["tracks"] if t["id"] not in seen]}
     # Prefer exact title/artist matches without rejecting other recordings.
     query = q.casefold()
-    primary["tracks"] = sorted(primary["tracks"], key=lambda t: (t["title"].casefold() != query, query not in (t["title"]+" "+t["artist"]).casefold()))[:60]
+    words = set(re.findall(r"\w+", query))
+    variants = {"cover", "karaoke", "instrumental", "lyrics", "legendado", "remix", "live", "slowed", "sped"} - words
+    def relevance(item):
+        title_words = set(re.findall(r"\w+", item["title"].casefold()))
+        combined = title_words | set(re.findall(r"\w+", item["artist"].casefold()))
+        return (-len(words & combined), len(variants & title_words), item["title"].casefold() != query)
+    primary["tracks"] = sorted(primary["tracks"], key=relevance)[:60]
     return primary
 
 @app.get("/api/artist")

@@ -13,6 +13,7 @@ class SearchTests(unittest.TestCase):
    def search(self,q,filter=None,limit=40):
     calls.append((q,filter))
     if fail and filter is None:raise HTTPException('primary down')
+    if q=='Three Days Grace Painkiller':return [{'resultType':'video','videoId':'a'*11,'title':'Three Days Grace Painkiller cover','artists':[]},{'resultType':'song','videoId':'b'*11,'title':'Painkiller','artists':[{'name':'Three Days Grace'}]}]
     if filter=='artists':return [{'resultType':'artist','browseId':'UC'+'a'*22,'artist':'Example Band'}]
     if filter=='videos':return [{'resultType':'video','videoId':'b'*11,'title':'Exact song','artists':[]},{'resultType':'video','videoId':'a'*11,'title':'Other song','artists':[]}]
     return [{'resultType':'song','videoId':'a'*11,'title':'Other song','artists':[]},{'resultType':'artist','browseId':'UC'+'a'*22,'artist':'Example Band'},{'resultType':'artist','browseId':'https://evil','artist':'Bad'}]
@@ -27,6 +28,8 @@ class SearchTests(unittest.TestCase):
   s,c=self.scope();r=asyncio.run(s['search']('band','artists'));self.assertEqual(r['tracks'],[]);self.assertEqual(r['artists'][0]['name'],'Example Band');self.assertEqual(c,[('band','artists')])
  def test_primary_failure_can_use_clip_results(self):
   s,_=self.scope(True);r=asyncio.run(s['search']('song','all'));self.assertEqual(len(r['tracks']),2)
+ def test_title_plus_artist_beats_cover_title_containing_whole_query(self):
+  s,_=self.scope();r=asyncio.run(s['search']('Three Days Grace Painkiller','all'));self.assertEqual(r['tracks'][0]['title'],'Painkiller')
  def test_single_category_uses_only_one_catalogue_request(self):
   s,c=self.scope();asyncio.run(s['search']('song','songs'));self.assertEqual(c,[('song','songs')])
 if __name__=='__main__':unittest.main()
