@@ -2,7 +2,7 @@
 // Android Media3 owns audio, notification controls and queue advancement.
 (() => {
  if(!window.vibefyNativeInfo?.backgroundAudio||!window.VibefyMobile?.postMessage)return;
- const listeners=new EventTarget();let state={paused:true,position:0,duration:0,ready:false},source='',expectedTrack='',generation=0,signature='',volume=.8,forceTrack=false;
+ const listeners=new EventTarget();let state={paused:true,position:0,duration:0,ready:false},source='',expectedTrack='',generation=0,signature='',queueIndices=[],volume=.8,forceTrack=false;
  function send(command,fields={}){window.VibefyMobile.postMessage(JSON.stringify({action:'nativeMedia',command,...fields}));}
  const emit=type=>listeners.dispatchEvent(new Event(type));
  const supported=t=>t&&/^(?:[A-Za-z0-9_-]{11}|jv:[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})$/.test(t.id||'');
@@ -18,11 +18,14 @@
   get volume(){return volume;},set volume(value){if(Number.isFinite(value)){volume=Math.max(0,Math.min(1,value));send('volume',{value:volume});}},
   expectTrack:id=>{expectedTrack=id;},
   loadQueue(tracks,index,paused,position,shuffle,repeat){
-   if(!tracks.length||tracks.length>10000||!tracks.every(supported))throw Error('This queue contains a source unavailable to native audio.');
+   if(tracks.length>10000||!supported(tracks[index]))throw Error('This recording is unavailable to native audio.');
+   const playable=[];
+   queueIndices=[];
+   tracks.forEach((track,i)=>{if(supported(track)){playable.push(track);queueIndices.push(i);}});
    source=tracks[index].id;expectedTrack='';signature=JSON.stringify(tracks.map(t=>t.id));state={id:source,index,position,duration:tracks[index].duration||0,paused,ready:false};generation++;
-   send('queue',{tracks,index,paused,position:Math.round(position*1000),shuffle,repeat,generation,autoNext:!window.vibefyJam?.following&&window.vibefyPreferences?.autoNext!==false});emit(paused?'pause':'waiting');
+   send('queue',{tracks:playable,index:queueIndices.indexOf(index),paused,position:Math.round(position*1000),shuffle,repeat,generation,autoNext:!window.vibefyJam?.following&&window.vibefyPreferences?.autoNext!==false});emit(paused?'pause':'waiting');
   },
-  syncQueue(tracks,index,shuffle,repeat){if(!source||signature===JSON.stringify(tracks.map(t=>t.id)))return;if(tracks.length&&tracks.every(supported))api.loadQueue(tracks,index,state.paused,state.position,shuffle,repeat);},
+  syncQueue(tracks,index,shuffle,repeat){if(!source||signature===JSON.stringify(tracks.map(t=>t.id)))return;if(supported(tracks[index]))api.loadQueue(tracks,index,state.paused,state.position,shuffle,repeat);},
   modes:(shuffle,repeat)=>send('modes',{shuffle,repeat}),
   next:()=>send('next'),previous:()=>send('previous'),resync:()=>{forceTrack=true;send('state');},
  };
@@ -30,7 +33,7 @@
  window.vibefyNativePlaybackState=next=>{
   if(!next||(next.generation<generation&&!(next.generation===0&&next.error&&!next.id)))return;
   if(next.id&&expectedTrack&&next.id!==expectedTrack)return;if(next.id===expectedTrack)expectedTrack='';
-  const old=state;state={...state,...next};if(next.id)source=next.id;
+  const old=state;state={...state,...next,index:queueIndices[next.index]??next.index??state.index};if(next.id)source=next.id;
   if(next.error){if(old.error!==next.error)emit('error');return;}
   if(forceTrack||old.id!==state.id||old.index!==state.index){forceTrack=false;document.dispatchEvent(new CustomEvent('vibefy-native-track',{detail:state}));}
   if(state.ready&&(!old.ready||old.id!==state.id||old.duration!==state.duration))emit('loadedmetadata');

@@ -26,7 +26,10 @@ public final class HybridPlaybackService extends MediaSessionService {
    if(NativeMediaPolicy.juiceUrl(uri.toString()))return spec;
    throw new java.io.IOException("Unsupported audio source");
   });
-  ExoPlayer player=new ExoPlayer.Builder(this).setMediaSourceFactory(new DefaultMediaSourceFactory(sources)).build();
+  ExoPlayer player=new ExoPlayer.Builder(this)
+   .setMediaSourceFactory(new DefaultMediaSourceFactory(sources))
+   .setMaxSeekToPreviousPositionMs(Long.MAX_VALUE)
+   .build();
   player.setAudioAttributes(new AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),true);
   player.addListener(new androidx.media3.common.Player.Listener(){@Override public void onEvents(androidx.media3.common.Player p,androidx.media3.common.Player.Events events){boolean pause=!getSharedPreferences("native-audio-preferences",0).getBoolean("auto-next",true);if(player.getPauseAtEndOfMediaItems()!=pause)player.setPauseAtEndOfMediaItems(pause);}});
   player.setHandleAudioBecomingNoisy(true);player.setWakeMode(C.WAKE_MODE_NETWORK);

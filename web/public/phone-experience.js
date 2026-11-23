@@ -4,6 +4,7 @@
  const $=id=>document.getElementById(id),bridge=window.vibefyWebLibrary;
  const phone=matchMedia('(max-width: 900px)');
  const playerFrame=$('youtube-frame');function mountPlayer(){if(phone.matches&&playerFrame.parentElement!==document.body){document.body.append(playerFrame);playerFrame.classList.add('persistent-phone-player');}}mountPlayer();phone.addEventListener('change',mountPlayer);
+ for(const event of ['gesturestart','gesturechange'])document.addEventListener(event,e=>{if(phone.matches)e.preventDefault();},{passive:false});
  document.addEventListener('contextmenu',event=>{if(phone.matches&&event.target.closest?.('.collection-tile,.rail-playlist')){event.preventDefault();event.stopImmediatePropagation();}},true);
  function node(tag,copy,cls){const el=document.createElement(tag);if(copy)el.textContent=copy;if(cls)el.className=cls;return el;}
  function action(label,icon,run){const b=node('button',null,'phone-action');b.type='button';b.setAttribute('aria-label',label);window.vibefyUI.labelIcon(b,icon,label);b.onclick=run;return b;}

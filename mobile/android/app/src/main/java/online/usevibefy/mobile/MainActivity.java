@@ -7,6 +7,9 @@ import android.graphics.Color;
 import android.view.*;
 import android.webkit.*;
 import android.widget.*;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 import org.json.JSONObject;
@@ -33,12 +36,19 @@ public final class MainActivity extends Activity {
   final float density=getResources().getDisplayMetrics().density;
   ImageView logo=new ImageView(this);logo.setImageResource(R.drawable.icon);logo.setContentDescription("Vibefy");cover.addView(logo,new LinearLayout.LayoutParams((int)(88*density),(int)(88*density)));
   TextView title=new TextView(this);title.setText("Vibefy");title.setTextSize(26);title.setTypeface(null,android.graphics.Typeface.BOLD);title.setTextColor(Color.WHITE);LinearLayout.LayoutParams titleLayout=new LinearLayout.LayoutParams(-2,-2);titleLayout.topMargin=(int)(18*density);cover.addView(title,titleLayout);
-  TextView loading=new TextView(this);loading.setText("Opening your musicâ€¦");loading.setTextSize(13);loading.setTextColor(0xff9bafb2);LinearLayout.LayoutParams loadingLayout=new LinearLayout.LayoutParams(-2,-2);loadingLayout.topMargin=(int)(8*density);cover.addView(loading,loadingLayout);
+  if(Build.VERSION.SDK_INT>=35){
+   int mask=WindowInsetsCompat.Type.systemBars()|WindowInsetsCompat.Type.displayCutout();
+   ViewCompat.setOnApplyWindowInsetsListener(frame,(view,insets)->{
+    Insets safe=insets.getInsets(mask);
+    view.setPadding(safe.left,safe.top,safe.right,safe.bottom);
+    return new WindowInsetsCompat.Builder(insets).setInsets(mask,Insets.NONE).build();
+   });
+  }
   progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setIndeterminate(true);progress.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xff21dfc0));LinearLayout.LayoutParams progressLayout=new LinearLayout.LayoutParams((int)(112*density),(int)(3*density));progressLayout.topMargin=(int)(24*density);cover.addView(progress,progressLayout);frame.addView(cover,new FrameLayout.LayoutParams(-1,-1));setContentView(frame);
   try(InputStream in=getAssets().open("app-shell.js")){ByteArrayOutputStream bytes=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int n;while((n=in.read(buffer))!=-1)bytes.write(buffer,0,n);script=bytes.toString("UTF-8");}catch(IOException ignored){}
   WebSettings settings=web.getSettings();settings.setSupportZoom(false);settings.setBuiltInZoomControls(false);settings.setDisplayZoomControls(false);settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(false);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setMediaPlaybackRequiresUserGesture(false);settings.setSupportMultipleWindows(true);
   nativePlayback=new HybridAudioBridge(this,packet->{if(!closed&&web!=null&&trusted(Uri.parse(web.getUrl()==null?"":web.getUrl())))web.evaluateJavascript("window.vibefyNativePlaybackState?.("+packet.toString()+")",null);});
-  updates=new NativeUpdates(this,writer);script="window.vibefyNativeInfo={platform:'android',version:'0.2.11',secureSession:true,renewableSession:true,audioOnly:true,backgroundAudio:true,qrCamera:true};\n"+script;
+  updates=new NativeUpdates(this,writer);script="window.vibefyNativeInfo={platform:'android',version:'0.2.12',secureSession:true,renewableSession:true,audioOnly:true,backgroundAudio:true,qrCamera:true};\n"+script;
   web.setOverScrollMode(View.OVER_SCROLL_NEVER);
   if(WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT))WebViewCompat.addDocumentStartJavaScript(web,script,Collections.singleton(ORIGIN));
   if(WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER))WebViewCompat.addWebMessageListener(web,"VibefyMobile",Collections.singleton(ORIGIN),(view,message,source,main,reply)->{if(!main||!trusted(source))return;try{String raw=message.getData();if(raw==null||raw.length()>6000000)return;JSONObject packet=new JSONObject(raw);if(nativePlayback.handle(packet))return;else if(handleAudio(packet))return;else if(handleSession(packet))return;else if("checkUpdates".equals(packet.optString("action")))updates.check(true);else if("connectGoogle".equals(packet.optString("action")))openGoogle(packet.optString("url"));else if("exportBackup".equals(packet.optString("action")))exportBackup(packet.optString("content"));}catch(Exception ignored){}});
@@ -58,7 +68,7 @@ public final class MainActivity extends Activity {
    @Override public void onReceivedError(WebView v,WebResourceRequest request,WebResourceError error){if(request.isForMainFrame()){mainFailed=true;offline();}}
    @Override public boolean onRenderProcessGone(WebView v,RenderProcessGoneDetail detail){rendererGone=true;v.destroy();offline();return true;}
   });
-  web.loadUrl(jamLink(getIntent().getData()));new Handler(Looper.getMainLooper()).postDelayed(()->{if(!closed)updates.check(false);},1500);
+  web.loadUrl(incomingLink(getIntent().getData()));new Handler(Looper.getMainLooper()).postDelayed(()->{if(!closed)updates.check(false);},1500);
  }
  private PermissionRequest cameraRequest;
  private boolean cameraAllowed(PermissionRequest request){return !closed&&trusted(request.getOrigin())&&trusted(Uri.parse(web.getUrl()==null?"":web.getUrl()))&&request.getResources().length==1&&PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(request.getResources()[0]);}
@@ -81,8 +91,37 @@ public final class MainActivity extends Activity {
   if(!id.matches("audio-[a-f0-9]{32}-[0-9]{1,12}")||!video.matches("[A-Za-z0-9_-]{11}"))return true;
   audioJobs.execute(()->{String url=null;try{url=audioResolver.resolve(video);}catch(Exception ignored){}final String result=url;runOnUiThread(()->{if(!closed&&trusted(Uri.parse(web.getUrl()==null?"":web.getUrl())))web.evaluateJavascript("window.vibefyMobileAudioResult?.("+JSONObject.quote(id)+","+(result==null?"null":JSONObject.quote(result))+","+(result==null?JSONObject.quote("This recording has no available audio-only stream. Try another recording."):"null")+")",null);});});return true;
  }
- private String jamLink(Uri uri){if(uri!=null&&"vibefy".equals(uri.getScheme())&&"playlist".equals(uri.getHost())){String id=uri.getQueryParameter("id");if(id!=null&&id.matches("[a-f0-9]{32}"))return HOME+"#share="+id;}if(uri==null||!"vibefy".equals(uri.getScheme())||!"jam".equals(uri.getHost()))return HOME;String code=uri.getQueryParameter("code");return code!=null&&code.matches("[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}")?HOME+"?jam="+code:HOME;}
- @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);if(!finishGoogle(intent.getData()))web.loadUrl(jamLink(intent.getData()));}
+ private String playlistShare(Uri uri){
+  if(uri==null||!uri.isHierarchical()||uri.getUserInfo()!=null||uri.getPort()!=-1)return null;
+  String id=null;
+  if("vibefy".equals(uri.getScheme())&&"playlist".equals(uri.getHost())&&
+      ("".equals(uri.getEncodedPath())||"/".equals(uri.getEncodedPath()))){
+   id=uri.getQueryParameter("id");
+  }else if(trusted(uri)||("http".equals(uri.getScheme())&&"vibefy-neon.vercel.app".equals(uri.getHost()))){
+   String path=uri.getEncodedPath();
+   if(path!=null&&path.startsWith("/share/"))id=path.substring(7);
+  }
+  return id!=null&&id.matches("[a-f0-9]{32}")?id:null;
+ }
+ private String incomingLink(Uri uri){
+  String share=playlistShare(uri);
+  if(share!=null)return HOME+"#share="+share;
+  if(uri==null||!"vibefy".equals(uri.getScheme())||!"jam".equals(uri.getHost()))return HOME;
+  String code=uri.getQueryParameter("code");
+  return code!=null&&code.matches("[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{12}")?HOME+"?jam="+code:HOME;
+ }
+ @Override protected void onNewIntent(Intent intent){
+  super.onNewIntent(intent);setIntent(intent);
+  Uri uri=intent.getData();
+  if(finishGoogle(uri)||uri==null)return;
+  String share=playlistShare(uri);
+  String url=web.getUrl();
+  if(share!=null&&url!=null&&trusted(Uri.parse(url))){
+   web.evaluateJavascript("window.vibefyPlaylistShares?(window.vibefyPlaylistShares.open("+JSONObject.quote(share)+"),true):false", handled->{
+    if(!closed&&!"true".equals(handled))web.loadUrl(HOME+"#share="+share);
+   });
+  }else web.loadUrl(incomingLink(uri));
+ }
  private String googleState;private long googleStarted;
  private void openGoogle(String raw){try{Uri u=Uri.parse(raw);if(!trusted(u)||!"/mobile-connect.html".equals(u.getPath())||raw.length()>1000)return;Uri fragment=Uri.parse("https://local/?"+u.getFragment());String nonce=fragment.getQueryParameter("state");if(nonce==null||!nonce.matches("[A-Za-z0-9_-]{32}"))return;googleState=nonce;googleStarted=android.os.SystemClock.elapsedRealtime();startActivity(new Intent(Intent.ACTION_VIEW,u).addCategory(Intent.CATEGORY_BROWSABLE));}catch(Exception e){Toast.makeText(this,"No browser is available. Install or enable a browser to connect.",Toast.LENGTH_LONG).show();}}
  private boolean finishGoogle(Uri uri){if(uri==null||!"vibefy".equals(uri.getScheme())||!"connect".equals(uri.getHost()))return false;

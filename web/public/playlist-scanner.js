@@ -5,10 +5,12 @@
  function playlistId(raw) {
   if(typeof raw!=='string'||raw.length>512)return null;
   try {
-   const u=new URL(raw),id=u.protocol==='vibefy:'?u.searchParams.get('id'):new URLSearchParams(u.hash.slice(1)).get('share');
+   const u=new URL(raw);
+   const pathId=u.pathname.match(/^\/share\/([a-f0-9]{32})\/?$/)?.[1];
+   const id=u.protocol==='vibefy:'?u.searchParams.get('id'):pathId||new URLSearchParams(u.hash.slice(1)).get('share');
    if(u.username||u.password||u.port||!(/^[a-f0-9]{32}$/).test(id||''))return null;
    if(u.protocol==='vibefy:')return u.hostname==='playlist'&&['','/'].includes(u.pathname)?id:null;
-   return u.protocol==='https:'&&['vibefy-neon.vercel.app','usevibefy.online','www.usevibefy.online'].includes(u.hostname)&&['/web','/phone','/app','/web/','/phone/','/app/'].includes(u.pathname)?id:null;
+   return u.protocol==='https:'&&['vibefy-neon.vercel.app','usevibefy.online','www.usevibefy.online'].includes(u.hostname)&&(pathId||['/web','/phone','/app','/web/','/phone/','/app/'].includes(u.pathname))?id:null;
   }catch{return null;}
  }
  if(typeof module!=='undefined'&&module.exports)module.exports={playlistId};

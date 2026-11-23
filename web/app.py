@@ -137,6 +137,13 @@ def google_config():
         identity = ""
     return {"clientId": identity, "renewable": google_renewal_configured()}
 
+@app.get("/api/audio-catalog-config")
+def audio_catalog_config():
+    origin = os.getenv("VIBEFY_AUDIO_CATALOG_ORIGIN", "").strip().rstrip("/")
+    if not re.fullmatch(r"https://[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev", origin):
+        origin = ""
+    return {"origin": origin}
+
 @app.get("/api/import/spotify")
 async def import_spotify(id: str = Query(max_length=22), offset: int = Query(default=0, ge=0, le=20000)):
     return await spotify_page(id, offset)
@@ -148,11 +155,28 @@ class MatchSong(BaseModel):
     primary_artist: str = Field(default="", max_length=300)
     explicit: bool | None = None
 
+class MatchCandidate(MatchSong):
+    id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
+    image: str = Field(default="", max_length=600)
+
+
+class RecordingMatch(MatchSong):
+    candidates: list[MatchCandidate] | None = Field(default=None, max_length=8)
+
+
 @app.post("/api/match")
-async def match_recording(song: MatchSong):
-    data = await search((song.title + " " + song.artist)[:160])
-    scored = sorted(((recording_score(song.model_dump(), t), t) for t in data["tracks"]), key=lambda item: item[0], reverse=True)
-    return {"track": scored[0][1] if scored and scored[0][0] >= .7 else None}
+async def match_recording(song: RecordingMatch):
+    if song.candidates is None:
+        data = await search((song.title + " " + song.artist)[:160])
+        tracks = data["tracks"]
+    else:
+        tracks = [candidate.model_dump() for candidate in song.candidates]
+        for recording in tracks:
+            recording["image"] = safe_art(recording["image"])
+    source = song.model_dump(exclude={"candidates"})
+    best = max(((recording_score(source, track), track) for track in tracks),
+               key=lambda item: item[0], default=(0, None))
+    return {"track": best[1] if best[0] >= .7 else None}
 
 @app.get("/api/soundcloud/search")
 async def search_soundcloud(q: str = Query(min_length=2, max_length=160)):
@@ -456,6 +480,16 @@ async def lyrics(title: str = Query(min_length=1, max_length=300), artist: str =
 @app.get("/app", include_in_schema=False)
 def player_page():
     return FileResponse(ROOT / "public" / "app.html")
+
+@app.get("/share/{share_id}", include_in_schema=False)
+def shared_playlist_page(share_id: str):
+    if not re.fullmatch(r"[a-f0-9]{32}", share_id):
+        raise HTTPException(404)
+    return player_page()
+
+@app.get("/.well-known/assetlinks.json", include_in_schema=False)
+def android_app_links():
+    return FileResponse(ROOT / "public" / "assetlinks.json", media_type="application/json")
 
 @app.get("/privacy", include_in_schema=False)
 def privacy_page():

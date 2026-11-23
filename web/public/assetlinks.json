@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "online.usevibefy.mobile",
+      "sha256_cert_fingerprints": [
+        "32:9C:02:BE:51:E7:22:A3:66:9F:A9:77:CD:75:1A:9A:AB:C8:E3:FC:E2:34:64:2C:60:3F:B7:CB:77:1A:DF:C8"
+      ]
+    }
+  }
+]

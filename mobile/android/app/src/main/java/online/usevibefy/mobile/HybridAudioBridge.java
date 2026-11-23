@@ -19,10 +19,14 @@ final class HybridAudioBridge {
  private final ListenableFuture<MediaController> future;
  private final ArrayDeque<JSONObject> pending=new ArrayDeque<>();
  private MediaController player;private boolean foreground,closed;private long generation;
- private final Runnable clock=new Runnable(){public void run(){if(closed||!foreground)return;emit();handler.postDelayed(this,500);}};
+ private final Runnable clock=()->{if(foreground&&!closed){emit();scheduleClock();}};
+ private void scheduleClock(){
+  handler.removeCallbacks(clock);
+  if(foreground&&!closed&&player!=null&&player.isPlaying())handler.postDelayed(clock,500);
+ }
  HybridAudioBridge(Activity app,Consumer<JSONObject> publish){this.app=app;this.publish=publish;
   future=new MediaController.Builder(app,new SessionToken(app,new ComponentName(app,HybridPlaybackService.class))).buildAsync();
-  future.addListener(()->{try{if(closed)return;player=future.get();player.addListener(new Player.Listener(){@Override public void onEvents(Player p,Player.Events events){emit();}});while(!pending.isEmpty())command(pending.removeFirst());emit();}catch(Exception error){failure();}},app::runOnUiThread);
+  future.addListener(()->{try{if(closed)return;player=future.get();player.addListener(new Player.Listener(){@Override public void onEvents(Player p,Player.Events events){if(foreground)emit();scheduleClock();}});while(!pending.isEmpty())command(pending.removeFirst());emit();scheduleClock();}catch(Exception error){failure();}},app::runOnUiThread);
  }
  boolean handle(JSONObject packet){if(!"nativeMedia".equals(packet.optString("action")))return false;app.runOnUiThread(()->command(packet));return true;}
  private void command(JSONObject packet){
@@ -55,6 +59,6 @@ final class HybridAudioBridge {
  }
  private void failure(){try{publish.accept(new JSONObject().put("generation",generation).put("error","The native audio player could not load this recording."));}catch(JSONException ignored){}}
  private void emit(){if(closed||player==null)return;try{MediaItem item=player.getCurrentMediaItem();JSONObject s=new JSONObject().put("generation",generation).put("id",item==null?"":item.mediaId).put("index",player.getCurrentMediaItemIndex()).put("position",Math.max(0,player.getCurrentPosition())/1000.0).put("duration",Math.max(0,player.getDuration())/1000.0).put("paused",!player.getPlayWhenReady()).put("playing",player.isPlaying()).put("ready",player.getPlaybackState()==Player.STATE_READY).put("ended",player.getPlaybackState()==Player.STATE_ENDED).put("error",player.getPlayerError()==null?JSONObject.NULL:"This recording could not be played.");if(item!=null)s.put("title",String.valueOf(item.mediaMetadata.title)).put("artist",String.valueOf(item.mediaMetadata.artist)).put("image",item.mediaMetadata.artworkUri==null?"":item.mediaMetadata.artworkUri.toString());publish.accept(s);}catch(JSONException ignored){}}
- void foreground(boolean value){foreground=value;handler.removeCallbacks(clock);if(value&&!closed)handler.post(clock);}
+ void foreground(boolean value){foreground=value;if(value)emit();scheduleClock();}
  void close(){closed=true;handler.removeCallbacks(clock);pending.clear();MediaController.releaseFuture(future);}
 }
